@@ -113,7 +113,7 @@ const SEED_PENJUALAN = [
 ];
 /* mutasi keluar untuk SO yang sudah dikirim */
 SEED_PENJUALAN.filter((s) => ["kirim", "tagihan", "lunas"].includes(s.status)).forEach((s) =>
-  s.items.forEach((it, i) =>
+  s.items.forEach((it) =>
     SEED_MUTASI.push({ id: uid("M"), tgl: s.tgl, gudang: s.gudang, produk: it.produk, tipe: "keluar", qty: -it.qty, ref: s.no, catatan: "Pengiriman penjualan" })
   )
 );
@@ -180,7 +180,7 @@ export default function App() {
   const [konfirmasi, setKonfirmasi] = useState(null); // { msg, onYes }
   const minta = (msg, onYes) => setKonfirmasi({ msg, onYes });
 
-  useEffect(() => { api.setRole(user?.peran || null); }, [user]);
+  useEffect(() => { api.setToken(user?.token || null); }, [user]);
 
   const say = (msg, bad) => {
     setToast({ msg, bad });
@@ -203,13 +203,13 @@ export default function App() {
   }
   const login = (u) => {
     setUser(u);
-    api.setRole(u.peran);
+    api.setToken(u.token);
     try { localStorage.setItem("vk_user", JSON.stringify(u)); } catch { /* noop */ }
     say(`Selamat datang, ${u.nama}.`);
   };
   const logout = () => {
     setUser(null);
-    api.setRole(null);
+    api.setToken(null);
     try { localStorage.removeItem("vk_user"); } catch { /* noop */ }
     setTab("dasbor");
   };
@@ -378,7 +378,7 @@ export default function App() {
   if (conn === "loading")
     return <div className="vk"><Style /><div className="login"><div className="splash">Menyambung…</div></div></div>;
   if (!user)
-    return <Login conn={conn} online={online} doLogin={doLogin} onOk={login} say={say} toast={toast} />;
+    return <Login doLogin={doLogin} onOk={login} say={say} toast={toast} />;
 
   return (
     <div className="vk">
@@ -400,7 +400,7 @@ export default function App() {
         </div>
         <div className="hazard" />
         <nav className="tabs">
-          {TABS.map(([k, a, b]) => (
+          {TABS.map(([k, a]) => (
             <button key={k} className={"tab" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>
               {a}
             </button>
@@ -430,7 +430,7 @@ export default function App() {
 }
 
 /* ============================ LOGIN ============================ */
-function Login({ conn, online, doLogin, onOk, say, toast }) {
+function Login({ doLogin, onOk, say, toast }) {
   const [f, setF] = useState({ username: "", sandi: "" });
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
@@ -576,7 +576,7 @@ function FormPengguna({ close, say, submit }) {
 }
 
 /* ============================ DASBOR ============================ */
-function Dasbor({ produk, penjualan, pembelian, mutasi, getStok, stokTotal, pById, cById, gById, totalSO, piutangTotal }) {
+function Dasbor({ produk, penjualan, pembelian, mutasi, getStok, stokTotal, pById, gById, totalSO, piutangTotal }) {
   const nilaiStok = produk.reduce((a, p) => a + stokTotal(p.id) * p.hpp, 0);
   const jual = penjualan.filter((s) => s.status !== "penawaran").reduce((a, s) => a + totalSO(s), 0);
   const beli = pembelian.reduce((a, p) => a + p.items.reduce((x, i) => x + i.qty * i.harga, 0), 0);
@@ -1644,22 +1644,10 @@ function Style() {
 .vk .empty{padding:22px 14px; text-align:center; color:var(--muted); font-size:12px}
 .vk .empty em{display:block; font-size:10.5px; margin-top:2px}
 
-/* customer cards */
-.vk .cards{display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px}
-.vk .pc{background:var(--paper); border:1px solid var(--line); padding:13px 14px}
-.vk .pc-top{display:flex; justify-content:space-between; gap:10px}
-.vk .pc h4{font-size:14px; font-weight:600; margin:5px 0 3px; font-family:var(--fb)}
-.vk .pc p{margin:0; font-size:11px}
+/* grade badge */
 .vk .grade{font-family:var(--fd); font-size:15px; font-weight:700; width:28px; height:28px; display:inline-grid; place-items:center;
   border:1px solid currentColor; border-radius:2px; flex:none; vertical-align:middle}
 .vk .gA{color:var(--ok)} .vk .gB{color:#4A6EA8} .vk .gC{color:var(--muted)}
-.vk .pc-bar{height:4px; background:var(--slab); margin:11px 0 9px; border-radius:2px; overflow:hidden}
-.vk .pc-bar .fill{height:100%; background:var(--marking)}
-.vk .pc-bar .fill.over{background:var(--alert)}
-.vk .pc-num{display:grid; grid-template-columns:repeat(3,1fr); gap:6px}
-.vk .pc-num span{font-family:var(--fd); font-size:9.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); display:block}
-.vk .pc-num span em{display:block; font-family:var(--fb); letter-spacing:0; text-transform:none; font-size:9.5px}
-.vk .pc-num b{font-size:12px; display:block; margin-top:2px}
 
 /* modal */
 .vk .ov{position:fixed; inset:0; background:rgba(32,34,31,.55); display:grid; place-items:center; padding:16px; z-index:50}
@@ -1718,7 +1706,6 @@ function Style() {
 .vk .btn.danger{color:var(--alert); border-color:#E3B4AC}
 .vk .btn.danger:hover{background:var(--alert); color:var(--paper); border-color:var(--alert)}
 .vk .btn.danger em{color:inherit}
-.vk .pc-rt{display:flex; flex-direction:column; align-items:flex-end; gap:6px; flex:none}
 
 /* dokumen (faktur / penawaran) */
 .vk .doc-modal{background:var(--slab); border:1px solid var(--ink); width:100%; max-width:900px; max-height:94vh; display:flex; flex-direction:column}

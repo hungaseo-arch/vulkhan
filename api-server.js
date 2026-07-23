@@ -1,7 +1,8 @@
 // ============================================================
 // VULKANISIR — API Server (Express + Neon serverless)
 // ------------------------------------------------------------
-// Jalankan:  DATABASE_URL="postgres://..." node api-server.js
+// Jalankan:  DATABASE_URL="postgres://..." AUTH_SECRET="rahasia-panjang" node api-server.js
+// Env: DATABASE_URL (wajib), AUTH_SECRET (produksi), CORS_ORIGIN (opsional), PORT (opsional).
 // Stok tidak pernah disimpan langsung — dihitung dari view v_stok.
 // ============================================================
 
@@ -17,7 +18,12 @@ types.setTypeParser(1082, (v) => v);
 
 const sql = neon(process.env.DATABASE_URL);
 const app = express();
-app.use(cors());
+
+// CORS dibatasi ke origin yang diizinkan (set CORS_ORIGIN, dipisah koma).
+// Default: port dev Vite lokal.
+const ORIGINS = (process.env.CORS_ORIGIN || "http://localhost:5173,http://localhost:5174")
+  .split(",").map((s) => s.trim()).filter(Boolean);
+app.use(cors({ origin: ORIGINS }));
 app.use(express.json());
 
 const wrap = (fn) => (req, res) =>
@@ -40,14 +46,38 @@ const verifyPw = (pw, stored) => {
   return a.length === calc.length && crypto.timingSafeEqual(a, calc);
 };
 
-// Tingkat peran — dikirim klien lewat header x-user-role.
-// Catatan: ini tool internal tepercaya; ini lapisan pemeriksaan sederhana,
-// bukan otorisasi berbasis token penuh.
+// Token sesi bertanda tangan (HMAC-SHA256, tanpa dependensi — mini-JWT).
+// Peran diambil dari payload yang TERVERIFIKASI, bukan dari header yang bisa
+// dipalsukan klien. Set AUTH_SECRET di produksi agar token bertahan lintas restart.
+const AUTH_SECRET = process.env.AUTH_SECRET || crypto.randomBytes(32).toString("hex");
+if (!process.env.AUTH_SECRET)
+  console.warn("⚠  AUTH_SECRET tak diset — token jadi tak valid tiap restart. Set AUTH_SECRET untuk produksi.");
+const TOKEN_TTL = 12 * 3600 * 1000; // 12 jam
+
+const signToken = (u) => {
+  const body = Buffer.from(JSON.stringify({ id: u.id, username: u.username, peran: u.peran, exp: Date.now() + TOKEN_TTL })).toString("base64url");
+  const sig = crypto.createHmac("sha256", AUTH_SECRET).update(body).digest("base64url");
+  return body + "." + sig;
+};
+const verifyToken = (token) => {
+  const [body, sig] = String(token || "").split(".");
+  if (!body || !sig) return null;
+  const expect = crypto.createHmac("sha256", AUTH_SECRET).update(body).digest("base64url");
+  const a = Buffer.from(sig), b = Buffer.from(expect);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const data = JSON.parse(Buffer.from(body, "base64url").toString());
+    return data.exp && data.exp > Date.now() ? data : null;
+  } catch { return null; }
+};
+
 const RANK = { staff: 1, manager: 2, admin: 3 };
 const requireRole = (min) => (req, res, next) => {
-  const role = req.headers["x-user-role"];
-  if (!role || (RANK[role] || 0) < RANK[min])
+  const auth = verifyToken((req.headers.authorization || "").replace(/^Bearer /, ""));
+  if (!auth) return res.status(401).json({ error: "Sesi tidak valid. Silakan login ulang." });
+  if ((RANK[auth.peran] || 0) < RANK[min])
     return res.status(403).json({ error: `Akses ditolak: butuh peran ${min} ke atas.` });
+  req.user = auth;
   next();
 };
 
@@ -79,7 +109,7 @@ app.post("/api/login", wrap(async (req, res) => {
   const [u] = await sql`SELECT * FROM pengguna WHERE username = ${username}`;
   if (!u || !verifyPw(sandi || "", u.sandi_hash))
     return res.status(401).json({ error: "Username atau kata sandi salah." });
-  res.json({ id: u.id, username: u.username, nama: u.nama, peran: u.peran });
+  res.json({ id: u.id, username: u.username, nama: u.nama, peran: u.peran, token: signToken(u) });
 }));
 
 app.get("/api/pengguna", requireRole("admin"), wrap(async (_req, res) => {

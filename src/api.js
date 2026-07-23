@@ -9,15 +9,15 @@ const BASE = import.meta.env?.VITE_API_URL || "http://localhost:3001/api";
 
 const num = (v) => Number(v) || 0;
 
-// Peran pengguna aktif — dikirim sebagai header agar server bisa
-// menolak aksi terlarang (mis. hapus untuk staff).
-let ROLE = null;
+// Token sesi bertanda tangan — dikirim sebagai Bearer agar server bisa
+// memverifikasi peran tanpa bisa dipalsukan klien.
+let TOKEN = null;
 
 async function j(path, opts = {}) {
   const res = await fetch(BASE + path, {
     headers: {
       "Content-Type": "application/json",
-      ...(ROLE ? { "x-user-role": ROLE } : {}),
+      ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
     },
     method: opts.method || "GET",
     body: opts.body ? JSON.stringify(opts.body) : undefined,
@@ -42,7 +42,7 @@ const normTrx = (t) => ({
 
 export const api = {
   base: BASE,
-  setRole: (r) => { ROLE = r || null; },
+  setToken: (t) => { TOKEN = t || null; },
 
   // auth & pengguna
   login: (username, sandi) => j("/login", { method: "POST", body: { username, sandi } }),
