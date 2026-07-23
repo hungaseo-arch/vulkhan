@@ -5,7 +5,9 @@
 // Default: http://localhost:3001/api (lihat PORT di api-server.js)
 // ============================================================
 
-const BASE = import.meta.env?.VITE_API_URL || "http://localhost:3001/api";
+// Prod (build Vercel): default ke '/api' same-origin. Dev: server lokal :3001.
+// Override dengan VITE_API_URL bila frontend & backend beda domain.
+const BASE = import.meta.env?.VITE_API_URL || (import.meta.env?.PROD ? "/api" : "http://localhost:3001/api");
 
 const num = (v) => Number(v) || 0;
 

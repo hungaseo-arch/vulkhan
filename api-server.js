@@ -9,6 +9,7 @@
 import express from "express";
 import cors from "cors";
 import crypto from "crypto";
+import { fileURLToPath } from "url";
 import { neon, types } from "@neondatabase/serverless";
 
 // Kembalikan kolom DATE (oid 1082) apa adanya sebagai 'YYYY-MM-DD'.
@@ -25,6 +26,12 @@ const ORIGINS = (process.env.CORS_ORIGIN || "http://localhost:5173,http://localh
   .split(",").map((s) => s.trim()).filter(Boolean);
 app.use(cors({ origin: ORIGINS }));
 app.use(express.json());
+
+// Seed pengguna bawaan sekali (memoized) — berjalan di lokal & serverless.
+// Reset ke null bila gagal agar dicoba lagi pada request berikutnya.
+let ready;
+const ensureReady = () => (ready ||= ensureUsers().catch((e) => { ready = null; throw e; }));
+app.use((req, res, next) => ensureReady().then(() => next()).catch(next));
 
 const wrap = (fn) => (req, res) =>
   Promise.resolve(fn(req, res)).catch((e) => {
@@ -286,7 +293,11 @@ app.delete("/api/pelanggan/:id", requireRole("manager"), wrap(async (req, res) =
   res.status(204).end();
 }));
 
-const PORT = process.env.PORT || 3001;
-ensureUsers()
-  .catch((e) => console.error("ensureUsers gagal:", e.message))
-  .finally(() => app.listen(PORT, () => console.log(`VULKANISIR API → http://localhost:${PORT}`)));
+// Entry lokal: listen hanya bila dijalankan langsung (bukan saat di-import Vercel).
+if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => console.log(`VULKANISIR API → http://localhost:${PORT}`));
+}
+
+// Handler serverless (Vercel) — app Express bisa langsung jadi (req,res) handler.
+export default app;
