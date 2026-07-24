@@ -532,7 +532,7 @@ function GantiSandi({ close, say, online }) {
 }
 
 /* ============================ PENGGUNA (admin) ============================ */
-function PenggunaAdmin({ online, say }) {
+function PenggunaAdmin({ online, say, user, minta }) {
   const [users, setUsers] = useState(null);
   const [buka, setBuka] = useState(false);
   const load = async () => {
@@ -544,6 +544,13 @@ function PenggunaAdmin({ online, say }) {
     if (!online) return say("Tambah pengguna hanya tersedia saat online.", true);
     await api.createPengguna(u); await load();
     say(`Pengguna ${u.username} ditambahkan.`);
+  };
+  const hapus = (u) => {
+    if (!online) return say("Hapus pengguna hanya tersedia saat online.", true);
+    minta(`Hapus pengguna "${u.username}"? Tindakan ini permanen.`, async () => {
+      await api.deletePengguna(u.id); await load();
+      say(`Pengguna ${u.username} dihapus.`);
+    });
   };
   return (
     <>
@@ -564,6 +571,7 @@ function PenggunaAdmin({ online, say }) {
                 <th>Username</th>
                 <th>Nama</th>
                 <th>Peran</th>
+                <th className="r">Aksi</th>
               </tr>
             </thead>
             <tbody>
@@ -572,9 +580,14 @@ function PenggunaAdmin({ online, say }) {
                   <td className="n strong">{u.username}</td>
                   <td>{u.nama}</td>
                   <td><span className={"role r-" + u.peran}>{ROLE_LABEL[u.peran].id}</span></td>
+                  <td className="r">
+                    {u.id === user?.id
+                      ? <span className="mut2">Akun Anda</span>
+                      : <button className="btn danger sm" onClick={() => hapus(u)}>Hapus</button>}
+                  </td>
                 </tr>
               ))}
-              {users && users.length === 0 && <tr><td colSpan={3}><Empty id="Belum ada pengguna." /></td></tr>}
+              {users && users.length === 0 && <tr><td colSpan={4}><Empty id="Belum ada pengguna." /></td></tr>}
             </tbody>
           </table>
         </Scroll>

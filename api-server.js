@@ -145,6 +145,17 @@ app.post("/api/ganti-sandi", requireRole("staff"), wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// Hapus pengguna (admin) — tak boleh menghapus akun sendiri, agar selalu
+// tersisa minimal satu admin yang bisa login.
+app.delete("/api/pengguna/:id", requireRole("admin"), wrap(async (req, res) => {
+  if (req.params.id === req.user.id)
+    return res.status(400).json({ error: "Tidak bisa menghapus akun sendiri." });
+  const [u] = await sql`SELECT 1 FROM pengguna WHERE id = ${req.params.id}`;
+  if (!u) return res.status(404).json({ error: "Pengguna tidak ditemukan." });
+  await sql`DELETE FROM pengguna WHERE id = ${req.params.id}`;
+  res.status(204).end();
+}));
+
 // ---------- master ----------
 app.get("/api/gudang", wrap(async (_req, res) => {
   res.json(await sql`SELECT * FROM gudang ORDER BY kode`);

@@ -51,6 +51,7 @@ export const api = {
   gantiSandi: (lama, baru) => j("/ganti-sandi", { method: "POST", body: { lama, baru } }),
   listPengguna: () => j("/pengguna"),
   createPengguna: (u) => j("/pengguna", { method: "POST", body: u }),
+  deletePengguna: (id) => j(`/pengguna/${id}`, { method: "DELETE" }),
 
   // muat semua koleksi sekaligus
   async loadAll() {
