@@ -132,6 +132,19 @@ app.post("/api/pengguna", requireRole("admin"), wrap(async (req, res) => {
   res.status(201).json(row);
 }));
 
+// Ganti kata sandi sendiri — semua peran yang login. Memakai id dari token
+// yang terverifikasi, jadi pengguna hanya bisa mengubah sandi miliknya.
+app.post("/api/ganti-sandi", requireRole("staff"), wrap(async (req, res) => {
+  const { lama, baru } = req.body || {};
+  if (!baru || String(baru).length < 6)
+    return res.status(400).json({ error: "Kata sandi baru minimal 6 karakter." });
+  const [u] = await sql`SELECT sandi_hash FROM pengguna WHERE id = ${req.user.id}`;
+  if (!u || !verifyPw(lama || "", u.sandi_hash))
+    return res.status(400).json({ error: "Kata sandi lama salah." });
+  await sql`UPDATE pengguna SET sandi_hash = ${hashPw(baru)} WHERE id = ${req.user.id}`;
+  res.json({ ok: true });
+}));
+
 // ---------- master ----------
 app.get("/api/gudang", wrap(async (_req, res) => {
   res.json(await sql`SELECT * FROM gudang ORDER BY kode`);

@@ -48,6 +48,7 @@ export const api = {
 
   // auth & pengguna
   login: (username, sandi) => j("/login", { method: "POST", body: { username, sandi } }),
+  gantiSandi: (lama, baru) => j("/ganti-sandi", { method: "POST", body: { lama, baru } }),
   listPengguna: () => j("/pengguna"),
   createPengguna: (u) => j("/pengguna", { method: "POST", body: u }),
 

@@ -179,6 +179,7 @@ export default function App() {
   });
   const [konfirmasi, setKonfirmasi] = useState(null); // { msg, onYes }
   const minta = (msg, onYes) => setKonfirmasi({ msg, onYes });
+  const [gantiSandi, setGantiSandi] = useState(false); // modal ganti kata sandi
 
   useEffect(() => { api.setToken(user?.token || null); }, [user]);
 
@@ -394,6 +395,7 @@ export default function App() {
           <div className="hd-meta">
             <div className="who">
               <span className="wu">{user.nama}<span className={"role r-" + user.peran}>{ROLE_LABEL[user.peran].id}</span></span>
+              <button className="lo" onClick={() => setGantiSandi(true)}>Ganti Sandi</button>
               <button className="lo" onClick={logout}>Keluar</button>
             </div>
           </div>
@@ -423,6 +425,7 @@ export default function App() {
           : <>Server tidak terjangkau — memakai data contoh di memori. Jalankan <code>api-server.js</code> untuk penyimpanan permanen.</>}
       </footer>
 
+      {gantiSandi && <GantiSandi online={online} say={say} close={() => setGantiSandi(false)} />}
       {konfirmasi && <Konfirmasi {...konfirmasi} say={say} close={() => setKonfirmasi(null)} />}
       {toast && <div className={"toast" + (toast.bad ? " bad" : "")}>{toast.msg}</div>}
     </div>
@@ -498,6 +501,33 @@ function Konfirmasi({ msg, onYes, close, say }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/* ganti kata sandi sendiri */
+function GantiSandi({ close, say, online }) {
+  const [f, setF] = useState({ lama: "", baru: "", ulang: "" });
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
+  const kirim = async () => {
+    if (!online) return say("Ganti sandi hanya tersedia saat online.", true);
+    if (!f.lama || !f.baru) return say("Isi kata sandi lama dan baru.", true);
+    if (f.baru.length < 6) return say("Kata sandi baru minimal 6 karakter.", true);
+    if (f.baru !== f.ulang) return say("Konfirmasi kata sandi tidak cocok.", true);
+    setBusy(true);
+    try {
+      await api.gantiSandi(f.lama, f.baru);
+      say("Kata sandi berhasil diganti.");
+      close();
+    } catch (e) { say(e.message, true); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal title="Ganti Kata Sandi" close={close} onSave={kirim} saveLabel={busy ? "…" : "Simpan"}>
+      <Inp label="Kata Sandi Lama" type="password" value={f.lama} onChange={set("lama")} />
+      <Inp label="Kata Sandi Baru" type="password" value={f.baru} onChange={set("baru")} hint="Minimal 6 karakter" />
+      <Inp label="Ulangi Kata Sandi Baru" type="password" value={f.ulang} onChange={set("ulang")} />
+    </Modal>
   );
 }
 
