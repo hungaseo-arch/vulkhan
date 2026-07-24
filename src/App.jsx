@@ -145,19 +145,13 @@ const PO_LABEL = {
   lunas: { id: "Lunas" },
 };
 
-/* ---------- pengguna & hak akses (login + RBAC 3 tingkat) ---------- */
+/* ---------- hak akses (RBAC 3 tingkat) ---------- */
 const RANK = { staff: 1, manager: 2, admin: 3 };
 const ROLE_LABEL = {
   admin:   { id: "Admin", desc: "Akses penuh" },
   manager: { id: "Manajer", desc: "+ Hapus" },
   staff:   { id: "Staf", desc: "Input & ubah" },
 };
-/* akun demo untuk mode offline (server tak terjangkau) */
-const DEMO_USERS = [
-  { id: "U1", username: "admin",   sandi: "admin123",   nama: "Administrator",  peran: "admin" },
-  { id: "U2", username: "manager", sandi: "manager123", nama: "Manajer Operasi", peran: "manager" },
-  { id: "U3", username: "staff",   sandi: "staff123",   nama: "Staf Penjualan",  peran: "staff" },
-];
 
 /* ============================================================ */
 
@@ -197,10 +191,8 @@ export default function App() {
   };
 
   async function doLogin(username, sandi) {
-    if (online) return api.login(username, sandi); // lempar error bila salah
-    const u = DEMO_USERS.find((x) => x.username === username && x.sandi === sandi);
-    if (!u) throw new Error("Username atau kata sandi salah. (mode offline)");
-    return { id: u.id, username: u.username, nama: u.nama, peran: u.peran };
+    if (!online) throw new Error("Server tidak terjangkau. Login membutuhkan koneksi.");
+    return api.login(username, sandi); // lempar error bila salah
   }
   const login = (u) => {
     setUser(u);
@@ -467,12 +459,6 @@ function Login({ doLogin, onOk, say, toast }) {
               <input type="password" value={f.sandi} onChange={set("sandi")} onKeyDown={onKey} />
             </label>
             <button className="btn pri lg" onClick={masuk} disabled={busy}>{busy ? "Memproses…" : "Masuk"}</button>
-            <div className="login-demo">
-              <b>Akun demo</b>
-              <span><code>admin</code> / admin123 — Akses penuh</span>
-              <span><code>manager</code> / manager123 — + Hapus</span>
-              <span><code>staff</code> / staff123 — Input &amp; ubah</span>
-            </div>
           </div>
         </div>
       </div>
@@ -537,7 +523,7 @@ function PenggunaAdmin({ online, say, user, minta }) {
   const [buka, setBuka] = useState(false);
   const load = async () => {
     if (online) { try { setUsers(await api.listPengguna()); } catch (e) { setUsers([]); say(e.message, true); } }
-    else setUsers(DEMO_USERS.map((u) => ({ id: u.id, username: u.username, nama: u.nama, peran: u.peran })));
+    else setUsers([]);
   };
   useEffect(() => { load(); }, [online]); // eslint-disable-line react-hooks/exhaustive-deps
   const tambah = async (u) => {
@@ -1726,10 +1712,6 @@ function Style() {
 .vk .login-bd{padding:18px 20px 20px}
 .vk .btn.lg{width:100%; padding:10px; font-size:13px; margin-top:4px}
 .vk .login .conn{width:100%; text-align:center}
-.vk .login-demo{margin-top:16px; padding-top:12px; border-top:1px dashed var(--line); display:grid; gap:3px; font-size:10.5px; color:var(--muted)}
-.vk .login-demo b{font-family:var(--fd); font-size:10px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--ink)}
-.vk .login-demo b em{font-family:var(--fb); letter-spacing:0; text-transform:none; margin-left:6px; color:var(--muted)}
-.vk .login-demo code{font-family:var(--fm); background:var(--slab); padding:0 4px; border:1px solid var(--line)}
 
 /* header: who am I + logout */
 .vk .who{display:flex; align-items:center; gap:8px; margin-top:6px; justify-content:flex-end}
