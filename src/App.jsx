@@ -980,11 +980,13 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, doTransfer, do
 }
 
 function FormTransfer({ produk, getStok, submit, say, close }) {
-  const [f, setF] = useState({ dari: GUDANG[0]?.id || "", ke: GUDANG[1]?.id || GUDANG[0]?.id || "", produk: produk[0].id, qty: "" });
+  const [f, setF] = useState({ dari: "", ke: "", produk: "", qty: "" });
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
   const tersedia = getStok(f.dari, f.produk);
   const simpan = async () => {
     const q = Number(f.qty);
+    if (!f.dari || !f.ke) return say("Pilih gudang asal dan tujuan terlebih dahulu.", true);
+    if (!f.produk) return say("Pilih barang terlebih dahulu.", true);
     if (f.dari === f.ke) return say("Gudang asal dan tujuan tidak boleh sama.", true);
     if (!q || q <= 0) return say("Masukkan jumlah yang valid.", true);
     if (q > tersedia) return say(`Stok tidak cukup. Tersedia ${fmt(tersedia)}.`, true);
@@ -993,20 +995,22 @@ function FormTransfer({ produk, getStok, submit, say, close }) {
   };
   return (
     <Modal title="Transfer Antar Gudang" close={close} onSave={simpan}>
-      <Sel label="Dari Gudang" value={f.dari} onChange={set("dari")} opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
-      <Sel label="Ke Gudang" value={f.ke} onChange={set("ke")} opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
-      <Sel label="Barang" value={f.produk} onChange={set("produk")} opts={produk.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
+      <Sel label="Dari Gudang" value={f.dari} onChange={set("dari")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+      <Sel label="Ke Gudang" value={f.ke} onChange={set("ke")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+      <Sel label="Barang" value={f.produk} onChange={set("produk")} placeholder="-- Pilih Barang --" opts={produk.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
       <Inp label="Jumlah" type="number" value={f.qty} onChange={set("qty")} hint={`Tersedia di gudang asal: ${fmt(tersedia)}`} />
     </Modal>
   );
 }
 
 function FormAdjust({ produk, getStok, submit, say, close }) {
-  const [f, setF] = useState({ gudang: GUDANG[0]?.id || "", produk: produk[0].id, fisik: "", catatan: "" });
+  const [f, setF] = useState({ gudang: "", produk: "", fisik: "", catatan: "" });
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
   const sistem = getStok(f.gudang, f.produk);
   const selisih = f.fisik === "" ? 0 : Number(f.fisik) - sistem;
   const simpan = async () => {
+    if (!f.gudang) return say("Pilih gudang terlebih dahulu.", true);
+    if (!f.produk) return say("Pilih barang terlebih dahulu.", true);
     if (f.fisik === "") return say("Masukkan hasil hitung fisik.", true);
     if (selisih === 0) return say("Tidak ada selisih — tidak ada yang dicatat.", true);
     try {
@@ -1016,8 +1020,8 @@ function FormAdjust({ produk, getStok, submit, say, close }) {
   };
   return (
     <Modal title="Penyesuaian Stok" close={close} onSave={simpan}>
-      <Sel label="Gudang" value={f.gudang} onChange={set("gudang")} opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
-      <Sel label="Barang" value={f.produk} onChange={set("produk")} opts={produk.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
+      <Sel label="Gudang" value={f.gudang} onChange={set("gudang")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+      <Sel label="Barang" value={f.produk} onChange={set("produk")} placeholder="-- Pilih Barang --" opts={produk.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
       <Inp label="Hitung Fisik" type="number" value={f.fisik} onChange={set("fisik")} hint={`Stok sistem: ${fmt(sistem)}`} />
       <div className="delta">
         Selisih <b className={selisih < 0 ? "bad" : selisih > 0 ? "ok" : ""}>{selisih > 0 ? "+" : ""}{fmt(selisih)}</b>
@@ -1393,14 +1397,14 @@ function DokumenPenjualan({ so, pById, cById, gById, totalSO, close }) {
 function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit, nomor }) {
   /* yang bisa dijual: ban jadi + Ban Jasa */
   const jadi = produk.filter((p) => ["jadi", "jasa"].includes(p.kategori));
-  const [f, setF] = useState({ pelanggan: pelanggan[0].id, gudang: GUDANG[0]?.id || "", tgl: TODAY });
-  const [items, setItems] = useState([{ produk: jadi[0].id, qty: "", harga: jadi[0].harga }]);
+  const [f, setF] = useState({ pelanggan: "", gudang: "", tgl: TODAY });
+  const [items, setItems] = useState([{ produk: "", qty: "", harga: "" }]);
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
 
   const ubah = (i, k, v) => setItems((l) => l.map((x, n) => {
     if (n !== i) return x;
     const y = { ...x, [k]: v };
-    if (k === "produk") y.harga = (jadi.find((p) => p.id === v) || {}).harga || 0;
+    if (k === "produk") y.harga = (jadi.find((p) => p.id === v) || {}).harga ?? "";
     return y;
   }));
   const total = items.reduce((a, i) => a + (Number(i.qty) || 0) * (Number(i.harga) || 0), 0);
@@ -1411,10 +1415,13 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
   const lebihStok = items.filter((i) => Number(i.qty) > 0 && Number(i.qty) > getStok(f.gudang, i.produk));
 
   const kirim = async () => {
+    if (!f.pelanggan) return say("Pilih pelanggan terlebih dahulu.", true);
+    if (!f.gudang) return say("Pilih gudang pengirim terlebih dahulu.", true);
     const salah = items.find((i) => String(i.qty).trim() !== "" && !(Number(i.qty) > 0));
     if (salah) return say("Qty harus berupa angka lebih besar dari 0.", true);
     const valid = items.filter((i) => Number(i.qty) > 0);
     if (!valid.length) return say("Tambahkan minimal satu baris barang.", true);
+    if (valid.some((i) => !i.produk)) return say("Pilih barang untuk setiap baris.", true);
     if (valid.some((i) => !(Number(i.harga) >= 0))) return say("Harga harus berupa angka.", true);
     if (sisaLimit < 0) return say(`Melebihi limit kredit ${c.nama} sebesar ${rp(-sisaLimit)}.`, true);
     try {
@@ -1430,29 +1437,30 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
   return (
     <Modal title="Penjualan Baru" close={close} onSave={kirim} wide saveLabel="Simpan Penawaran">
       <div className="row2">
-        <Sel label="Pelanggan" value={f.pelanggan} onChange={set("pelanggan")} opts={pelanggan.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
-        <Sel label="Gudang Pengirim" value={f.gudang} onChange={set("gudang")} opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+        <Sel label="Pelanggan" value={f.pelanggan} onChange={set("pelanggan")} placeholder="-- Pilih Pelanggan --" opts={pelanggan.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
+        <Sel label="Gudang Pengirim" value={f.gudang} onChange={set("gudang")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
       </div>
 
       <div className="lbl mt">Rincian Barang</div>
       {items.map((it, i) => {
         const ada = getStok(f.gudang, it.produk);
-        const kurang = Number(it.qty) > ada;
+        const kurang = it.produk && Number(it.qty) > ada;
         return (
           <div className="line" key={i}>
             <select value={it.produk} aria-label={`Barang baris ${i + 1}`} onChange={(e) => ubah(i, "produk", e.target.value)}>
+              <option value="" disabled>-- Pilih Barang --</option>
               {jadi.map((p) => <option key={p.id} value={p.id}>{p.kode} — {p.nama}</option>)}
             </select>
             <input type="number" min="0" inputMode="numeric" placeholder="Qty" aria-label={`Jumlah baris ${i + 1}`}
               aria-invalid={kurang || undefined} value={it.qty} onChange={(e) => ubah(i, "qty", e.target.value)} className={kurang ? "err" : ""} />
             <input type="number" min="0" inputMode="numeric" placeholder="Harga" aria-label={`Harga baris ${i + 1}`}
               value={it.harga} onChange={(e) => ubah(i, "harga", e.target.value)} title={rp(it.harga)} />
-            <span className={"stokinfo" + (kurang ? " bad" : "")}>stok {fmt(ada)}</span>
+            <span className={"stokinfo" + (kurang ? " bad" : "")}>{it.produk ? `stok ${fmt(ada)}` : ""}</span>
             <button className="x" aria-label={`Hapus baris ${i + 1}`} onClick={() => setItems((l) => l.filter((_, n) => n !== i))} disabled={items.length === 1}>×</button>
           </div>
         );
       })}
-      <button className="btn sm" onClick={() => setItems((l) => [...l, { produk: jadi[0].id, qty: "", harga: jadi[0].harga }])}>+ Tambah Baris</button>
+      <button className="btn sm" onClick={() => setItems((l) => [...l, { produk: "", qty: "", harga: "" }])}>+ Tambah Baris</button>
 
       {lebihStok.length > 0 && (
         <p className="peringatan" role="status">
@@ -1629,22 +1637,25 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
 function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
   /* yang bisa dibeli: casing & bahan baku */
   const beliable = produk.filter((p) => ["casing", "bahan"].includes(p.kategori));
-  const [f, setF] = useState({ pemasok: pemasok[0].id, gudang: GUDANG[0]?.id || "", tgl: TODAY });
-  const [items, setItems] = useState([{ produk: beliable[0].id, qty: "", harga: beliable[0].hpp }]);
+  const [f, setF] = useState({ pemasok: "", gudang: "", tgl: TODAY });
+  const [items, setItems] = useState([{ produk: "", qty: "", harga: "" }]);
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
   const ubah = (i, k, v) => setItems((l) => l.map((x, n) => {
     if (n !== i) return x;
     const y = { ...x, [k]: v };
-    if (k === "produk") y.harga = (beliable.find((p) => p.id === v) || {}).hpp || 0;
+    if (k === "produk") y.harga = (beliable.find((p) => p.id === v) || {}).hpp ?? "";
     return y;
   }));
   const total = items.reduce((a, i) => a + (Number(i.qty) || 0) * (Number(i.harga) || 0), 0);
 
   const kirim = async () => {
+    if (!f.pemasok) return say("Pilih pemasok terlebih dahulu.", true);
+    if (!f.gudang) return say("Pilih gudang tujuan terlebih dahulu.", true);
     const salah = items.find((i) => String(i.qty).trim() !== "" && !(Number(i.qty) > 0));
     if (salah) return say("Qty harus berupa angka lebih besar dari 0.", true);
     const valid = items.filter((i) => Number(i.qty) > 0);
     if (!valid.length) return say("Tambahkan minimal satu baris barang.", true);
+    if (valid.some((i) => !i.produk)) return say("Pilih barang untuk setiap baris.", true);
     if (valid.some((i) => !(Number(i.harga) >= 0))) return say("Harga harus berupa angka.", true);
     try {
       await submit({
@@ -1659,13 +1670,14 @@ function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
   return (
     <Modal title="Pembelian Baru" close={close} onSave={kirim} wide saveLabel="Simpan Pesanan">
       <div className="row2">
-        <Sel label="Pemasok" value={f.pemasok} onChange={set("pemasok")} opts={pemasok.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
-        <Sel label="Gudang Tujuan" value={f.gudang} onChange={set("gudang")} opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+        <Sel label="Pemasok" value={f.pemasok} onChange={set("pemasok")} placeholder="-- Pilih Pemasok --" opts={pemasok.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
+        <Sel label="Gudang Tujuan" value={f.gudang} onChange={set("gudang")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
       </div>
       <div className="lbl mt">Rincian Barang</div>
       {items.map((it, i) => (
         <div className="line" key={i}>
           <select value={it.produk} aria-label={`Barang baris ${i + 1}`} onChange={(e) => ubah(i, "produk", e.target.value)}>
+            <option value="" disabled>-- Pilih Barang --</option>
             {beliable.map((p) => <option key={p.id} value={p.id}>{p.kode} — {p.nama} ({p.satuan})</option>)}
           </select>
           <input type="number" min="0" inputMode="numeric" placeholder="Qty" aria-label={`Jumlah baris ${i + 1}`}
@@ -1676,7 +1688,7 @@ function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
           <button className="x" aria-label={`Hapus baris ${i + 1}`} onClick={() => setItems((l) => l.filter((_, n) => n !== i))} disabled={items.length === 1}>×</button>
         </div>
       ))}
-      <button className="btn sm" onClick={() => setItems((l) => [...l, { produk: beliable[0].id, qty: "", harga: beliable[0].hpp }])}>+ Tambah Baris</button>
+      <button className="btn sm" onClick={() => setItems((l) => [...l, { produk: "", qty: "", harga: "" }])}>+ Tambah Baris</button>
       <div className="sum"><div><span>Total</span><b className="n">{rp(total)}</b></div></div>
     </Modal>
   );
@@ -2083,10 +2095,11 @@ const Inp = ({ label, value, onChange, type = "text", hint }) => (
   </label>
 );
 
-const Sel = ({ label, value, onChange, opts }) => (
+const Sel = ({ label, value, onChange, opts, placeholder }) => (
   <label className="fld">
     <span className="lbl">{label}</span>
     <select value={value} onChange={(e) => onChange(e.target.value)}>
+      {placeholder && <option value="" disabled>{placeholder}</option>}
       {opts.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
     </select>
   </label>
