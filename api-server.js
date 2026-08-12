@@ -27,6 +27,17 @@ const ORIGINS = (process.env.CORS_ORIGIN || "http://localhost:5173,http://localh
 app.use(cors({ origin: ORIGINS }));
 app.use(express.json());
 
+// Seluruh /api butuh sesi login — baca maupun tulis. Data pelanggan, harga,
+// dan transaksi tidak boleh terbuka untuk anonim. Pemeriksaan can() di App.jsx
+// hanya menyembunyikan tombol, bukan pengaman.
+// Pengecualian: /login (belum punya token) dan /health (cek koneksi sebelum login).
+// Ditaruh sebelum penyiapan basis data agar permintaan anonim tidak menyentuh DB.
+const TERBUKA = new Set(["/api/login", "/api/health"]);
+app.use((req, res, next) => (TERBUKA.has(req.path) ? next() : requireRole("staff")(req, res, next)));
+
+// Cek koneksi, dipakai layar login sebelum ada sesi.
+app.get("/api/health", (_req, res) => res.json({ ok: true }));
+
 // Seed pengguna bawaan sekali (memoized) — berjalan di lokal & serverless.
 // Reset ke null bila gagal agar dicoba lagi pada request berikutnya.
 let ready;
@@ -79,6 +90,9 @@ const verifyToken = (token) => {
 };
 
 const RANK = { staff: 1, manager: 2, admin: 3 };
+// requireRole("staff") berarti "cukup harus login" karena staff peran terendah.
+// Dipakai sebagai penjaga global di atas; rute yang butuh peran lebih tinggi
+// memasangnya lagi secara eksplisit (manager untuk hapus, admin untuk pengguna).
 const requireRole = (min) => (req, res, next) => {
   const auth = verifyToken((req.headers.authorization || "").replace(/^Bearer /, ""));
   if (!auth) return res.status(401).json({ error: "Sesi tidak valid. Silakan login ulang." });
@@ -94,6 +108,34 @@ const DEFAULT_USERS = [
   { id: "U2", username: "manager", nama: "Manajer Operasi",  peran: "manager", sandi: "manager123" },
   { id: "U3", username: "staff",   nama: "Staf Penjualan",   peran: "staff",   sandi: "staff123" },
 ];
+// Pemulihan akses lewat env — aplikasi ini sengaja tidak punya layar
+// pendaftaran, jadi kalau tidak tersisa satu pun admin yang bisa login, tidak
+// ada jalan masuk sama sekali. Set ADMIN_USER + ADMIN_PASS (opsional
+// ADMIN_NAMA) di Vercel, deploy ulang, lalu HAPUS lagi env-nya.
+//
+// Hanya MEMBUAT bila username-nya belum ada — tidak pernah menimpa akun yang
+// sudah ada. Kalau menimpa, sandi yang sudah diganti lewat aplikasi akan
+// ter-reset ke nilai env pada setiap cold start. Untuk reset sandi akun yang
+// sudah ada, pakai scripts/buat-admin.mjs.
+async function bootstrapAdmin() {
+  const username = (process.env.ADMIN_USER || "").trim();
+  const sandi = process.env.ADMIN_PASS || "";
+  if (!username || !sandi) return;
+  if (sandi.length < 8) return console.warn("ADMIN_PASS kurang dari 8 karakter — bootstrap dilewati.");
+
+  const [ada] = await sql`SELECT 1 FROM pengguna WHERE username = ${username}`;
+  if (ada) return; // sudah ada — jangan sentuh sandinya
+  const [{ maks }] = await sql`
+    SELECT COALESCE(MAX(SUBSTRING(id FROM 2)::int), 0) AS maks
+    FROM pengguna WHERE id ~ '^U[0-9]+$'`;
+  await sql`
+    INSERT INTO pengguna (id, username, nama, peran, sandi_hash)
+    VALUES (${"U" + (Number(maks) + 1)}, ${username}, ${process.env.ADMIN_NAMA || username},
+            'admin', ${hashPw(sandi)})
+    ON CONFLICT (username) DO NOTHING`;
+  console.log(`Admin dibuat dari env: ${username} — hapus ADMIN_USER/ADMIN_PASS setelah bisa login.`);
+}
+
 async function ensureUsers() {
   await sql`
     CREATE TABLE IF NOT EXISTS pengguna (
@@ -102,13 +144,15 @@ async function ensureUsers() {
       sandi_hash TEXT NOT NULL, dibuat TIMESTAMPTZ NOT NULL DEFAULT now()
     )`;
   const [{ n }] = await sql`SELECT COUNT(*)::int AS n FROM pengguna`;
-  if (n > 0) return;
-  for (const u of DEFAULT_USERS) {
-    await sql`INSERT INTO pengguna (id, username, nama, peran, sandi_hash)
-              VALUES (${u.id}, ${u.username}, ${u.nama}, ${u.peran}, ${hashPw(u.sandi)})
-              ON CONFLICT (username) DO NOTHING`;
+  if (n === 0) {
+    for (const u of DEFAULT_USERS) {
+      await sql`INSERT INTO pengguna (id, username, nama, peran, sandi_hash)
+                VALUES (${u.id}, ${u.username}, ${u.nama}, ${u.peran}, ${hashPw(u.sandi)})
+                ON CONFLICT (username) DO NOTHING`;
+    }
+    console.log("Seeded pengguna bawaan: admin / manager / staff");
   }
-  console.log("Seeded pengguna bawaan: admin / manager / staff");
+  await bootstrapAdmin();
 }
 
 app.post("/api/login", wrap(async (req, res) => {
@@ -134,7 +178,7 @@ app.post("/api/pengguna", requireRole("admin"), wrap(async (req, res) => {
 
 // Ganti kata sandi sendiri — semua peran yang login. Memakai id dari token
 // yang terverifikasi, jadi pengguna hanya bisa mengubah sandi miliknya.
-app.post("/api/ganti-sandi", requireRole("staff"), wrap(async (req, res) => {
+app.post("/api/ganti-sandi", wrap(async (req, res) => {
   const { lama, baru } = req.body || {};
   if (!baru || String(baru).length < 6)
     return res.status(400).json({ error: "Kata sandi baru minimal 6 karakter." });
@@ -234,6 +278,18 @@ app.post("/api/mutasi/penyesuaian", wrap(async (req, res) => {
   res.status(201).json(row);
 }));
 
+// ---------- alur status (harus sama dengan SO_FLOW / PO_FLOW di App.jsx) ----------
+const SO_FLOW = ["penawaran", "pesanan", "kirim", "tagihan", "lunas"];
+const PO_FLOW = ["order", "diterima", "lunas"];
+// Mengembalikan pesan error bila perpindahan tidak sah, atau null bila sah.
+const langkahBerikut = (flow, sekarang, tujuan) => {
+  const i = flow.indexOf(sekarang);
+  if (!flow.includes(tujuan)) return `Status "${tujuan}" tidak dikenal.`;
+  if (i < 0) return `Status saat ini tidak dikenal.`;
+  if (flow[i + 1] !== tujuan) return `Status hanya boleh maju satu langkah: ${sekarang} → ${flow[i + 1] || "(selesai)"}.`;
+  return null;
+};
+
 // ---------- penjualan ----------
 app.get("/api/penjualan", wrap(async (_req, res) => {
   const head = await sql`SELECT * FROM v_penjualan ORDER BY tgl DESC, no DESC`;
@@ -254,8 +310,31 @@ app.post("/api/penjualan", wrap(async (req, res) => {
   res.status(201).json(row);
 }));
 
-// pindah status (trigger DB otomatis membuat mutasi keluar saat 'kirim')
+// pindah status (trigger DB otomatis membuat mutasi keluar saat 'kirim').
+// Hanya maju satu langkah menurut alur — mencegah lompat status lewat API
+// (mis. langsung 'lunas') dan mencegah pengiriman saat stok kurang.
 app.patch("/api/penjualan/:id/status", wrap(async (req, res) => {
+  const [so] = await sql`SELECT * FROM penjualan WHERE id = ${req.params.id}`;
+  if (!so) return res.status(404).json({ error: "Data penjualan tidak ditemukan." });
+
+  const salah = langkahBerikut(SO_FLOW, so.status, req.body.status);
+  if (salah) return res.status(400).json({ error: salah });
+
+  if (req.body.status === "kirim") {
+    const baris = await sql`
+      SELECT p.kode, SUM(i.qty) AS butuh, COALESCE(s.stok, 0) AS ada
+      FROM penjualan_item i
+      JOIN produk p ON p.id = i.produk
+      LEFT JOIN v_stok s ON s.produk = i.produk AND s.gudang = ${so.gudang}
+      WHERE i.penjualan = ${so.id}
+      GROUP BY p.kode, s.stok`;
+    const habis = baris.find((r) => Number(r.ada) < Number(r.butuh));
+    if (habis)
+      return res.status(400).json({
+        error: `Stok ${habis.kode} tidak cukup di gudang pengirim (tersedia ${Number(habis.ada)}, dibutuhkan ${Number(habis.butuh)}).`,
+      });
+  }
+
   const [row] = await sql`
     UPDATE penjualan SET status = ${req.body.status}
     WHERE id = ${req.params.id} RETURNING *`;
@@ -284,6 +363,12 @@ app.post("/api/pembelian", wrap(async (req, res) => {
 
 // pindah status (trigger DB otomatis membuat mutasi masuk saat 'diterima')
 app.patch("/api/pembelian/:id/status", wrap(async (req, res) => {
+  const [po] = await sql`SELECT status FROM pembelian WHERE id = ${req.params.id}`;
+  if (!po) return res.status(404).json({ error: "Data pembelian tidak ditemukan." });
+
+  const salah = langkahBerikut(PO_FLOW, po.status, req.body.status);
+  if (salah) return res.status(400).json({ error: salah });
+
   const [row] = await sql`
     UPDATE pembelian SET status = ${req.body.status}
     WHERE id = ${req.params.id} RETURNING *`;

@@ -26,7 +26,9 @@ async function j(path, opts = {}) {
   });
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));
-    throw new Error(e.error || `HTTP ${res.status}`);
+    const err = new Error(e.error || `HTTP ${res.status}`);
+    err.status = res.status; // 401 dipakai UI untuk memaksa login ulang
+    throw err;
   }
   return res.status === 204 ? null : res.json();
 }
@@ -45,6 +47,9 @@ const normTrx = (t) => ({
 export const api = {
   base: BASE,
   setToken: (t) => { TOKEN = t || null; },
+
+  // cek koneksi sebelum login — satu-satunya endpoint tanpa sesi selain /login
+  ping: () => j("/health"),
 
   // auth & pengguna
   login: (username, sandi) => j("/login", { method: "POST", body: { username, sandi } }),

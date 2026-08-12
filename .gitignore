@@ -32,3 +32,4 @@ dist-ssr
 *.sw?
 
 doc/*
+.env*
