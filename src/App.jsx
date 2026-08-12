@@ -980,7 +980,7 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, doTransfer, do
 }
 
 function FormTransfer({ produk, getStok, submit, say, close }) {
-  const [f, setF] = useState({ dari: "G1", ke: "G2", produk: produk[0].id, qty: "" });
+  const [f, setF] = useState({ dari: GUDANG[0]?.id || "", ke: GUDANG[1]?.id || GUDANG[0]?.id || "", produk: produk[0].id, qty: "" });
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
   const tersedia = getStok(f.dari, f.produk);
   const simpan = async () => {
@@ -1002,7 +1002,7 @@ function FormTransfer({ produk, getStok, submit, say, close }) {
 }
 
 function FormAdjust({ produk, getStok, submit, say, close }) {
-  const [f, setF] = useState({ gudang: "G1", produk: produk[0].id, fisik: "", catatan: "" });
+  const [f, setF] = useState({ gudang: GUDANG[0]?.id || "", produk: produk[0].id, fisik: "", catatan: "" });
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
   const sistem = getStok(f.gudang, f.produk);
   const selisih = f.fisik === "" ? 0 : Number(f.fisik) - sistem;
@@ -1393,7 +1393,7 @@ function DokumenPenjualan({ so, pById, cById, gById, totalSO, close }) {
 function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit, nomor }) {
   /* yang bisa dijual: ban jadi + Ban Jasa */
   const jadi = produk.filter((p) => ["jadi", "jasa"].includes(p.kategori));
-  const [f, setF] = useState({ pelanggan: pelanggan[0].id, gudang: "G1", tgl: TODAY });
+  const [f, setF] = useState({ pelanggan: pelanggan[0].id, gudang: GUDANG[0]?.id || "", tgl: TODAY });
   const [items, setItems] = useState([{ produk: jadi[0].id, qty: "", harga: jadi[0].harga }]);
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
 
@@ -1629,7 +1629,7 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
 function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
   /* yang bisa dibeli: casing & bahan baku */
   const beliable = produk.filter((p) => ["casing", "bahan"].includes(p.kategori));
-  const [f, setF] = useState({ pemasok: pemasok[0].id, gudang: "G1", tgl: TODAY });
+  const [f, setF] = useState({ pemasok: pemasok[0].id, gudang: GUDANG[0]?.id || "", tgl: TODAY });
   const [items, setItems] = useState([{ produk: beliable[0].id, qty: "", harga: beliable[0].hpp }]);
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
   const ubah = (i, k, v) => setItems((l) => l.map((x, n) => {
