@@ -995,9 +995,9 @@ function FormTransfer({ produk, getStok, submit, say, close }) {
   };
   return (
     <Modal title="Transfer Antar Gudang" close={close} onSave={simpan}>
-      <Sel label="Dari Gudang" value={f.dari} onChange={set("dari")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
-      <Sel label="Ke Gudang" value={f.ke} onChange={set("ke")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
-      <Sel label="Barang" value={f.produk} onChange={set("produk")} placeholder="-- Pilih Barang --" opts={produk.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
+      <Combo label="Dari Gudang" value={f.dari} onChange={set("dari")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+      <Combo label="Ke Gudang" value={f.ke} onChange={set("ke")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+      <Combo label="Barang" value={f.produk} onChange={set("produk")} placeholder="-- Pilih Barang --" opts={produk.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
       <Inp label="Jumlah" type="number" value={f.qty} onChange={set("qty")} hint={`Tersedia di gudang asal: ${fmt(tersedia)}`} />
     </Modal>
   );
@@ -1020,8 +1020,8 @@ function FormAdjust({ produk, getStok, submit, say, close }) {
   };
   return (
     <Modal title="Penyesuaian Stok" close={close} onSave={simpan}>
-      <Sel label="Gudang" value={f.gudang} onChange={set("gudang")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
-      <Sel label="Barang" value={f.produk} onChange={set("produk")} placeholder="-- Pilih Barang --" opts={produk.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
+      <Combo label="Gudang" value={f.gudang} onChange={set("gudang")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+      <Combo label="Barang" value={f.produk} onChange={set("produk")} placeholder="-- Pilih Barang --" opts={produk.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
       <Inp label="Hitung Fisik" type="number" value={f.fisik} onChange={set("fisik")} hint={`Stok sistem: ${fmt(sistem)}`} />
       <div className="delta">
         Selisih <b className={selisih < 0 ? "bad" : selisih > 0 ? "ok" : ""}>{selisih > 0 ? "+" : ""}{fmt(selisih)}</b>
@@ -1437,8 +1437,8 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
   return (
     <Modal title="Penjualan Baru" close={close} onSave={kirim} wide saveLabel="Simpan Penawaran">
       <div className="row2">
-        <Sel label="Pelanggan" value={f.pelanggan} onChange={set("pelanggan")} placeholder="-- Pilih Pelanggan --" opts={pelanggan.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
-        <Sel label="Gudang Pengirim" value={f.gudang} onChange={set("gudang")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+        <Combo label="Pelanggan" value={f.pelanggan} onChange={set("pelanggan")} placeholder="-- Pilih Pelanggan --" opts={pelanggan.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
+        <Combo label="Gudang Pengirim" value={f.gudang} onChange={set("gudang")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
       </div>
 
       <div className="lbl mt">Rincian Barang</div>
@@ -1447,10 +1447,8 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
         const kurang = it.produk && Number(it.qty) > ada;
         return (
           <div className="line" key={i}>
-            <select value={it.produk} aria-label={`Barang baris ${i + 1}`} onChange={(e) => ubah(i, "produk", e.target.value)}>
-              <option value="" disabled>-- Pilih Barang --</option>
-              {jadi.map((p) => <option key={p.id} value={p.id}>{p.kode} — {p.nama}</option>)}
-            </select>
+            <Combo bare ariaLabel={`Barang baris ${i + 1}`} value={it.produk} onChange={(v) => ubah(i, "produk", v)}
+              placeholder="-- Pilih Barang --" opts={jadi.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
             <input type="number" min="0" inputMode="numeric" placeholder="Qty" aria-label={`Jumlah baris ${i + 1}`}
               aria-invalid={kurang || undefined} value={it.qty} onChange={(e) => ubah(i, "qty", e.target.value)} className={kurang ? "err" : ""} />
             <input type="number" min="0" inputMode="numeric" placeholder="Harga" aria-label={`Harga baris ${i + 1}`}
@@ -1670,16 +1668,14 @@ function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
   return (
     <Modal title="Pembelian Baru" close={close} onSave={kirim} wide saveLabel="Simpan Pesanan">
       <div className="row2">
-        <Sel label="Pemasok" value={f.pemasok} onChange={set("pemasok")} placeholder="-- Pilih Pemasok --" opts={pemasok.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
-        <Sel label="Gudang Tujuan" value={f.gudang} onChange={set("gudang")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+        <Combo label="Pemasok" value={f.pemasok} onChange={set("pemasok")} placeholder="-- Pilih Pemasok --" opts={pemasok.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
+        <Combo label="Gudang Tujuan" value={f.gudang} onChange={set("gudang")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
       </div>
       <div className="lbl mt">Rincian Barang</div>
       {items.map((it, i) => (
         <div className="line" key={i}>
-          <select value={it.produk} aria-label={`Barang baris ${i + 1}`} onChange={(e) => ubah(i, "produk", e.target.value)}>
-            <option value="" disabled>-- Pilih Barang --</option>
-            {beliable.map((p) => <option key={p.id} value={p.id}>{p.kode} — {p.nama} ({p.satuan})</option>)}
-          </select>
+          <Combo bare ariaLabel={`Barang baris ${i + 1}`} value={it.produk} onChange={(v) => ubah(i, "produk", v)}
+            placeholder="-- Pilih Barang --" opts={beliable.map((p) => [p.id, `${p.kode} — ${p.nama} (${p.satuan})`])} />
           <input type="number" min="0" inputMode="numeric" placeholder="Qty" aria-label={`Jumlah baris ${i + 1}`}
             value={it.qty} onChange={(e) => ubah(i, "qty", e.target.value)} />
           <input type="number" min="0" inputMode="numeric" placeholder="Harga" aria-label={`Harga baris ${i + 1}`}
@@ -2105,6 +2101,53 @@ const Sel = ({ label, value, onChange, opts, placeholder }) => (
   </label>
 );
 
+/* dropdown pencarian: ketik kata kunci untuk menyaring opsi, klik untuk memilih */
+const Combo = ({ label, ariaLabel, value, onChange, opts, placeholder, bare }) => {
+  const domId = useId();
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const selected = opts.find(([v]) => v === value);
+  const selectedLabel = selected ? selected[1] : "";
+
+  useEffect(() => { if (!open) setQuery(selectedLabel); }, [selectedLabel, open]);
+
+  const q = query.trim().toLowerCase();
+  const filtered = q ? opts.filter(([, t]) => t.toLowerCase().includes(q)) : opts;
+
+  const pilih = (v, t) => { onChange(v); setQuery(t); setOpen(false); };
+
+  const body = (
+    <div className="combo-wrap">
+      <input
+        type="text" autoComplete="off" role="combobox" aria-expanded={open} aria-controls={`${domId}-list`}
+        aria-label={!label ? ariaLabel : undefined} aria-labelledby={label ? `${domId}-lbl` : undefined}
+        value={query} placeholder={placeholder}
+        onFocus={() => { setOpen(true); setQuery(""); }}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onBlur={() => setOpen(false)}
+      />
+      {open && (
+        <ul className="combo-list" id={`${domId}-list`} role="listbox">
+          {filtered.length === 0
+            ? <li className="combo-empty">Tidak ditemukan</li>
+            : filtered.map(([v, t]) => (
+              <li key={v} role="option" aria-selected={v === value}
+                onMouseDown={(e) => { e.preventDefault(); pilih(v, t); }}>{t}</li>
+            ))}
+        </ul>
+      )}
+    </div>
+  );
+
+  if (bare) return body;
+  return (
+    <div className="fld combo">
+      {label && <span className="lbl" id={`${domId}-lbl`}>{label}</span>}
+      {body}
+    </div>
+  );
+};
+
 const Modal = ({ title, close, onSave, children, wide, saveLabel }) => {
   const box = useDialog(close);
   const judul = useId();
@@ -2289,11 +2332,21 @@ function Style() {
 @media (max-width:560px){.vk .row2{grid-template-columns:1fr}}
 @media (max-width:520px){.vk .cust-info, .vk .spec-info{grid-template-columns:1fr 1fr}}
 
+/* dropdown pencarian */
+.vk .combo-wrap{position:relative}
+.vk .combo-list{position:absolute; top:calc(100% + 2px); left:0; right:0; z-index:30; margin:0; padding:2px;
+  list-style:none; background:#fff; border:1px solid var(--ink); max-height:220px; overflow:auto;
+  box-shadow:0 4px 10px rgba(0,0,0,.15)}
+.vk .combo-list li{padding:6px 8px; font-size:12.5px; cursor:pointer; border-radius:2px}
+.vk .combo-list li:hover,.vk .combo-list li[aria-selected="true"]{background:var(--slab)}
+.vk .combo-empty{color:var(--muted); cursor:default}
+.vk .combo-empty:hover{background:none}
+
 /* item lines */
 .vk .line{display:grid; grid-template-columns:1fr 80px 110px 70px 28px; gap:6px; align-items:center; margin-bottom:6px}
 @media (max-width:640px){
   .vk .line{grid-template-columns:1fr 1fr}
-  .vk .line>select{grid-column:1 / -1}
+  .vk .line>select,.vk .line>.combo-wrap{grid-column:1 / -1}
 }
 .vk .stokinfo{font-family:var(--fm); font-size:10.5px; color:var(--muted); text-align:right}
 .vk .stokinfo.bad{color:var(--alert); font-weight:600}
@@ -2483,7 +2536,7 @@ function Style() {
   .vk .sect-l .filters .lbl{margin-bottom:3px}
   .vk .line{grid-template-columns:1fr 1fr; gap:6px; padding:9px; margin-bottom:9px;
     background:var(--slab); border:1px solid var(--line)}
-  .vk .line>select{grid-column:1 / -1}
+  .vk .line>select,.vk .line>.combo-wrap{grid-column:1 / -1}
   .vk .line>.stokinfo{text-align:left; align-self:center}
   .vk .line>.x{justify-self:end}
 }
