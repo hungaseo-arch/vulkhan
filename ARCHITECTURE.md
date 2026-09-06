@@ -25,13 +25,15 @@ Vite 개발 서버(5173)가 그 주소를 호출합니다. 프로덕션 빌드�
 |---|---|
 | [src/main.jsx](src/main.jsx) | `createRoot` + StrictMode |
 | [src/App.jsx](src/App.jsx) | 앱 전체. 유틸 → 시드 데이터 → 상수 → `App()` → 탭 컴포넌트 → 폼/모달 → 공용 컴포넌트 → `Style()` 순 |
+| [src/i18n.jsx](src/i18n.jsx) | 번역 사전(`KO`), `LangProvider`, `useLang()`. App.jsx 밖으로 뺀 유일한 UI 모듈 |
 | [src/api.js](src/api.js) | `fetch` 래퍼 `j()`, 토큰 보관, 응답 정규화 |
 | [src/xlsx.js](src/xlsx.js) | ZIP(STORE) + inline string으로 XLSX 생성, 외부 의존성 없음 |
 | [src/index.css](src/index.css) | 전역 리셋만. 앱 스타일은 `Style()`의 CSS 문자열 |
 
 ### 상태
 
-`App()`이 모든 데이터를 `useState`로 들고 `ctx` 객체로 탭에 내려줍니다. 전역 상태 라이브러리는 없습니다.
+`App()`은 `<LangProvider>`로 `Aplikasi()`를 감싸기만 하고, 실제 앱 본체는 `Aplikasi()`입니다.
+`Aplikasi()`가 모든 데이터를 `useState`로 들고 `ctx` 객체로 탭에 내려줍니다. 전역 상태 라이브러리는 없습니다.
 
 | 상태 | 원천 |
 |---|---|
@@ -41,6 +43,7 @@ Vite 개발 서버(5173)가 그 주소를 호출합니다. 프로덕션 빌드�
 | `GUDANG` | 모듈 스코프 `let`. 서버 응답으로 교체됨 |
 | `user` | `localStorage("vk_user")`, 토큰 포함 |
 | `conn` | `"loading" → "online" | "offline"`. 마운트 시 `/api/health` 1회 |
+| `lang` | `localStorage("vk_lang")`. `Aplikasi()` 밖 `LangProvider`가 소유 |
 
 `stok`은 `useMemo`로 만든 `"gudang|produk" → qty` 맵입니다. `stokServer`가 있으면 그것을 쓰고,
 없을 때(오프라인 데모)만 `mutasi`를 합산합니다.
@@ -64,13 +67,52 @@ offline → 메모리 상태 직접 갱신    // 데모
 
 탭은 `TABS` 배열과 `<main>`의 조건부 렌더로 연결됩니다. 한 번에 한 탭만 마운트됩니다.
 모달은 `useDialog()`로 포커스 트랩, ESC 닫기, 배경 스크롤 잠금을 공유합니다.
+헤더 우측은 `MenuPengguna` 하나로, 이름·역할 표시와 비밀번호 변경·로그아웃을 드롭다운에 모았습니다.
 문서 출력(견적서·인보이스)은 `@media print` 규칙으로 같은 DOM을 인쇄합니다.
+
+### 다국어
+
+gettext 방식입니다. **사전 키가 인도네시아어 원문 그 자체**라 번역이 없으면 키가 그대로 표시됩니다.
+별도 키 이름을 만들지 않으므로 새 문자열을 놓쳐도 화면이 깨지지 않고 인도네시아어로 남습니다.
+
+```
+App() → <LangProvider> → Aplikasi()
+                │
+                └ t("Simpan")            → "저장" | "Simpan"
+                  t("{n} hari", {n: 30})  → 자리표시자 치환
+                  t("Keluar|mutasi")      → "출고"  ("|" 뒤 문맥은 표시되지 않음)
+```
+
+- `lang`은 `localStorage["vk_lang"]`에 저장되고 `<html lang>` 속성도 함께 갱신됩니다.
+- 동음이의어는 `"키|문맥"`으로 분리합니다: `Masuk`(입고)/`Masuk|login`(로그인),
+  `Keluar|mutasi`(출고)/`Keluar`(로그아웃), `Penawaran`(견적)/`Penawaran|dok`(견적서).
+- 날짜는 `tglPanjang(tgl, lang)`, `bulanLabel(ym, lang)`이 `lang`에 따라 형식을 바꿉니다.
+- **인쇄용 faktur·penawaran 서류 본문은 번역 대상이 아닙니다.** 인도네시아 거래처에 나가는 서류라
+  인도네시아어로 고정이고, `lang`을 넘기지 않아 날짜도 인도네시아어 형식으로 남습니다.
+- 전환 UI(`LangSwitch`)는 헤더 `.who`와 로그인 카드 `.login-brand` 두 곳에 있습니다.
+
+### 브랜딩
+
+아센도 BI를 따릅니다. 색 토큰은 `Style()` 상단 `--asm-*`(primary `#0062C6`, dark `#333333`)이며
+BI 색은 바꾸지 않습니다. 로고 자산은 `public/ascendo-symbol.png`(심볼, 헤더·파비콘)와
+`public/ascendo-signature.png`(시그니처, 로그인 화면·`og:image`) 두 개입니다.
+
+인쇄 서류 kop은 아센도 로고를 쓰지 않고 중립 마크(`TreadMark`)를 씁니다. 그 서류의 발행처는
+`PENERBIT`에 정의된 CV. Sinar Perkasa Ban / PT. Daimond Fajar Jaya이기 때문입니다.
 
 ### 폰트
 
 `index.html`에서 `preconnect` + `<link rel="preload" as="style" onload=…>`로 Google Fonts를 비차단 로드합니다.
 JS 안에서 `@import`하면 React 렌더 이후에야 폰트 요청이 시작되므로 다시 넣지 않습니다.
-패밀리는 Archivo Narrow(제목), IBM Plex Sans(본문), IBM Plex Mono(숫자) 세 가지입니다.
+
+패밀리는 Noto Sans KR + Noto Sans 하나뿐이고, `--fd`(제목)·`--fb`(본문)·`--fm`(숫자)이 모두 같은
+스택을 가리킵니다. 한국어 UI에 한글 글리프가 필요해서 Noto Sans KR을 다시 넣었습니다.
+
+대가가 있습니다. Noto Sans KR은 `unicode-range` 서브셋이 많아 폰트 CSS가 **393KB(gzip 92KB),
+`@font-face` 528개**입니다(이전 IBM Plex Sans 조합은 1.5KB). 실제 폰트 **파일**은 브라우저가 쓰는
+서브셋만 받으므로 렌더 비용은 이보다 훨씬 작지만, CSS 자체가 렌더 차단 경로에 있진 않아도
+무시할 크기는 아닙니다. 줄이려면 한글 서브셋을 self-host하거나 `lang === "ko"`일 때만
+Noto Sans KR을 붙이는 방법이 있습니다.
 
 ## 백엔드
 
@@ -159,14 +201,16 @@ PO: order → diterima → lunas
 - 환경 변수: `DATABASE_URL`(sensitive), `AUTH_SECRET`
 - `npm run deploy`는 lint → build → `vercel --prod`
 
-## 성능 특성 (2026-09-06 측정)
+## 성능 특성
 
-| 항목 | 값 |
-|---|---|
-| JS 번들 | 298KB, gzip 86KB, 단일 청크 (React 약 60KB gzip 포함) |
-| 폰트 CSS | 1.5KB (이전 40KB) |
-| Lighthouse 성능 / 접근성 / 모범사례 | 99 / 89 / 100 |
-| FCP / LCP (모바일 시뮬레이션, 로그인 화면) | 1.4초 / 1.6초 |
-| 초기 데이터 로드 | 함수 호출 1회 (`/api/bootstrap`) |
+| 항목 | 값 | 측정 |
+|---|---|---|
+| JS 번들 | 322KB, gzip 93KB, 단일 청크 (React 약 60KB gzip 포함) | 2026-09-06, 다국어 적용 후 |
+| 폰트 CSS | 393KB, gzip 92KB, `@font-face` 528개 | 2026-09-06, Noto Sans KR 도입 후 |
+| 초기 데이터 로드 | 함수 호출 1회 (`/api/bootstrap`) | — |
+| Lighthouse 성능 / 접근성 / 모범사례 | 99 / 89 / 100 | 2026-09-06, **다국어·BI 개편 이전** |
+| FCP / LCP (모바일 시뮬레이션, 로그인 화면) | 1.4초 / 1.6초 | 2026-09-06, **다국어·BI 개편 이전** |
+
+Lighthouse 수치는 폰트와 색 팔레트가 바뀌기 전 값이라 지금 상태를 대표하지 않습니다. 재측정이 필요합니다.
 
 다음 개선 후보는 [CHANGELOG.md](CHANGELOG.md)의 "남은 과제"에 있습니다.
