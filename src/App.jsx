@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useId } from "react";
 import { api } from "./api";
 import { downloadXlsx } from "./xlsx";
+import { LangProvider, useLang, LANGS } from "./i18n.jsx";
 
 /* ============================================================
    VULKANISIR — Sistem Manajemen Penjualan Ban Vulkanisir
@@ -11,7 +12,9 @@ import { downloadXlsx } from "./xlsx";
    ============================================================ */
 
 /* ---------- format ---------- */
-const nf = new Intl.NumberFormat("id-ID");
+/* Notasi angka mengikuti standar dokumen PT Ascendo (ASM Design Guide 9-3):
+   pemisah ribuan koma, desimal titik — 756,704,706 / 32,829.8 — bukan id-ID. */
+const nf = new Intl.NumberFormat("en-US");
 const fmt = (n) => nf.format(Math.round(Number(n) || 0));
 const rp = (n) => "Rp " + fmt(n);
 const uid = (p) => p + "-" + Math.random().toString(36).slice(2, 8).toUpperCase();
@@ -37,10 +40,10 @@ const nomorBaru = (prefix, list, tgl) => {
 
 /* ---------- format dokumen ---------- */
 const BULAN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
-const tglPanjang = (s) => {
+const tglPanjang = (s, lang) => {
   if (!s) return "-";
   const [y, m, d] = String(s).slice(0, 10).split("-");
-  return `${Number(d)} ${BULAN[Number(m) - 1]} ${y}`;
+  return lang === "ko" ? `${y}년 ${Number(m)}월 ${Number(d)}일` : `${Number(d)} ${BULAN[Number(m) - 1]} ${y}`;
 };
 const addDays = (s, days) => {
   const d = new Date(String(s).slice(0, 10) + "T00:00:00");
@@ -50,9 +53,9 @@ const addDays = (s, days) => {
 /* selisih hari dari tanggal `from` ke `to` (positif bila `to` lebih belakangan) */
 const diffDays = (from, to) =>
   Math.round((new Date(String(to).slice(0, 10) + "T00:00:00") - new Date(String(from).slice(0, 10) + "T00:00:00")) / 86400000);
-const bulanLabel = (ym) => {
+const bulanLabel = (ym, lang) => {
   const [y, m] = String(ym).split("-");
-  return `${BULAN[Number(m) - 1]} ${y}`;
+  return lang === "ko" ? `${y}년 ${Number(m)}월` : `${BULAN[Number(m) - 1]} ${y}`;
 };
 /* angka → kata (rupiah) */
 function terbilang(n) {
@@ -181,6 +184,74 @@ const ROLE_LABEL = {
 /* ============================================================ */
 
 export default function App() {
+  return (
+    <LangProvider>
+      <Aplikasi />
+    </LangProvider>
+  );
+}
+
+/* satu tombol untuk identitas + aksi akun; sebelumnya tiga kontrol terpisah di header */
+function MenuPengguna({ user, gantiSandi, logout }) {
+  const { t } = useLang();
+  const [buka, setBuka] = useState(false);
+  const kotak = useRef(null);
+
+  useEffect(() => {
+    if (!buka) return;
+    const klikLuar = (e) => { if (kotak.current && !kotak.current.contains(e.target)) setBuka(false); };
+    const tekan = (e) => { if (e.key === "Escape") setBuka(false); };
+    document.addEventListener("mousedown", klikLuar);
+    document.addEventListener("keydown", tekan);
+    return () => {
+      document.removeEventListener("mousedown", klikLuar);
+      document.removeEventListener("keydown", tekan);
+    };
+  }, [buka]);
+
+  return (
+    <div className="um" ref={kotak}>
+      <button type="button" className={"um-b" + (buka ? " on" : "")} aria-haspopup="menu" aria-expanded={buka}
+        onClick={() => setBuka((v) => !v)}>
+        <span className={"um-av r-" + user.peran} aria-hidden="true">{user.nama.slice(0, 1).toUpperCase()}</span>
+        <span className="um-nm">{user.nama}</span>
+        <svg className="um-ar" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+          <path d="M1.5 3.5 5 7l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5"
+            strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {buka && (
+        <div className="um-pop" role="menu">
+          <div className="um-hd">
+            <b>{user.nama}</b>
+            <span className={"role r-" + user.peran}>{t(ROLE_LABEL[user.peran].id)}</span>
+          </div>
+          <button type="button" role="menuitem" className="um-i"
+            onClick={() => { setBuka(false); gantiSandi(); }}>{t("Ganti kata sandi")}</button>
+          <button type="button" role="menuitem" className="um-i keluar" onClick={logout}>{t("Keluar")}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* pemilih bahasa — dipakai di header & layar login */
+function LangSwitch() {
+  const { lang, setLang, t } = useLang();
+  return (
+    <div className="lang" role="group" aria-label={t("Bahasa")}>
+      {LANGS.map(([k, kode, nama]) => (
+        <button key={k} type="button" className={"lang-b" + (lang === k ? " on" : "")}
+          title={nama} aria-pressed={lang === k} onClick={() => setLang(k)}>
+          {kode}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Aplikasi() {
+  const { t } = useLang();
   const [tab, setTab] = useState("dasbor");
   const [produk, setProduk] = useState(SEED_PRODUK);
   const [pelanggan, setPelanggan] = useState(SEED_PELANGGAN);
@@ -219,14 +290,14 @@ export default function App() {
   };
 
   async function doLogin(username, sandi) {
-    if (!online) throw new Error("Server tidak terjangkau. Login membutuhkan koneksi.");
+    if (!online) throw new Error(t("Server tidak terjangkau. Login membutuhkan koneksi."));
     return api.login(username, sandi); // lempar error bila salah
   }
   const login = (u) => {
     setUser(u);
     api.setToken(u.token);
     try { localStorage.setItem("vk_user", JSON.stringify(u)); } catch { /* noop */ }
-    say(`Selamat datang, ${u.nama}.`);
+    say(t("Selamat datang, {nama}.", { nama: u.nama }));
   };
   const logout = () => {
     setUser(null);
@@ -268,7 +339,7 @@ export default function App() {
       .then((d) => { if (alive) applyData(d); })
       .catch((e) => {
         if (!alive) return;
-        if (e.status === 401) { logout(); say("Sesi berakhir. Silakan masuk kembali.", true); }
+        if (e.status === 401) { logout(); say(t("Sesi berakhir. Silakan masuk kembali."), true); }
         else say(e.message, true);
       });
     return () => { alive = false; };
@@ -316,7 +387,8 @@ export default function App() {
     if (next === "kirim") {
       const kurang = so.items.find((it) => getStok(so.gudang, it.produk) < it.qty);
       if (kurang) {
-        say(`Stok ${pById(kurang.produk).kode} di ${gById(so.gudang).nama} tidak cukup (tersedia ${getStok(so.gudang, kurang.produk)}).`, true);
+        say(t("Stok {kode} di {gudang} tidak cukup (tersedia {n}).",
+          { kode: pById(kurang.produk).kode, gudang: gById(so.gudang).nama, n: getStok(so.gudang, kurang.produk) }), true);
         return;
       }
     }
@@ -329,7 +401,7 @@ export default function App() {
           addMutasi(so.items.map((it) => ({ tgl: today(), gudang: so.gudang, produk: it.produk, tipe: "keluar", qty: -it.qty, ref: so.no, catatan: "Pengiriman penjualan" })));
         setPenjualan((list) => list.map((x) => (x.id === so.id ? { ...x, status: next } : x)));
       }
-      say(`${so.no} → ${SO_LABEL[next].id}`);
+      say(`${so.no} → ${t(SO_LABEL[next].id)}`);
     } catch (e) { say(e.message, true); }
   }
 
@@ -346,7 +418,7 @@ export default function App() {
           addMutasi(po.items.map((it) => ({ tgl: today(), gudang: po.gudang, produk: it.produk, tipe: "masuk", qty: it.qty, ref: po.no, catatan: "Penerimaan pembelian" })));
         setPembelian((list) => list.map((x) => (x.id === po.id ? { ...x, status: next } : x)));
       }
-      say(`${po.no} → ${PO_LABEL[next].id}`);
+      say(`${po.no} → ${t(PO_LABEL[next].id)}`);
     } catch (e) { say(e.message, true); }
   }
 
@@ -357,51 +429,51 @@ export default function App() {
       { tgl: today(), gudang: p.ke, produk: p.produk, tipe: "transfer", qty: p.qty, ref: "TRF", catatan: "Masuk transfer" },
     ]);
     if (online) await reload();
-    say("Transfer tercatat.");
+    say(t("Transfer tercatat."));
   }
 
   async function doAdjust(p) {
     if (online) await api.penyesuaian({ gudang: p.gudang, produk: p.produk, fisik: p.fisik, catatan: p.catatan });
     else addMutasi([{ tgl: today(), gudang: p.gudang, produk: p.produk, tipe: "penyesuaian", qty: p.selisih, ref: "ADJ", catatan: p.catatan || "Hasil stok opname" }]);
     if (online) await reload();
-    say("Penyesuaian tercatat.");
+    say(t("Penyesuaian tercatat."));
   }
 
   async function doCreatePenjualan(so) {
     if (online) { await api.createPenjualan(so); await reload(); }
     else setPenjualan((l) => [...l, so]);
-    say(`${so.no} dibuat sebagai Penawaran.`);
+    say(t("{no} dibuat sebagai Penawaran.", { no: so.no }));
   }
 
   async function doCreatePembelian(po) {
     if (online) { await api.createPembelian(po); await reload(); }
     else setPembelian((l) => [...l, po]);
-    say(`${po.no} dibuat. Stok bertambah saat status Diterima.`);
+    say(t("{no} dibuat. Stok bertambah saat status Diterima.", { no: po.no }));
   }
 
   async function doCreatePelanggan(c) {
     if (online) { await api.createPelanggan(c); await reload(); }
     else setPelanggan((l) => [...l, c]);
-    say(`${c.nama} ditambahkan.`);
+    say(t("{nama} ditambahkan.", { nama: c.nama }));
   }
 
   /* ---------- hapus (manager ke atas) ---------- */
   async function doDeletePenjualan(so) {
     if (online) { await api.deletePenjualan(so.id); await reload(); }
     else { setPenjualan((l) => l.filter((x) => x.id !== so.id)); setMutasi((m) => m.filter((x) => x.ref !== so.no)); }
-    say(`${so.no} dihapus.`);
+    say(t("{no} dihapus.", { no: so.no }));
   }
   async function doDeletePembelian(po) {
     if (online) { await api.deletePembelian(po.id); await reload(); }
     else { setPembelian((l) => l.filter((x) => x.id !== po.id)); setMutasi((m) => m.filter((x) => x.ref !== po.no)); }
-    say(`${po.no} dihapus.`);
+    say(t("{no} dihapus.", { no: po.no }));
   }
   async function doDeletePelanggan(c) {
     if (penjualan.some((s) => s.pelanggan === c.id))
-      throw new Error("Tidak bisa dihapus: pelanggan masih punya transaksi penjualan.");
+      throw new Error(t("Tidak bisa dihapus: pelanggan masih punya transaksi penjualan."));
     if (online) { await api.deletePelanggan(c.id); await reload(); }
     else setPelanggan((l) => l.filter((x) => x.id !== c.id));
-    say(`${c.nama} dihapus.`);
+    say(t("{nama} dihapus.", { nama: c.nama }));
   }
 
   const ctx = {
@@ -424,7 +496,7 @@ export default function App() {
 
   /* ---------- gerbang: loading & login ---------- */
   if (conn === "loading")
-    return <div className="vk"><Style /><div className="login"><div className="splash">Menyambung…</div></div></div>;
+    return <div className="vk"><Style /><div className="login"><div className="splash">{t("Menyambung…")}</div></div></div>;
   if (!user)
     return <Login doLogin={doLogin} onOk={login} say={say} toast={toast} conn={conn} />;
 
@@ -433,27 +505,24 @@ export default function App() {
       <Style />
       <header className="hd">
         <div className="hd-in">
-          <button type="button" className="brand" title="Beranda" onClick={() => setTab("dasbor")}>
-            <TreadMark />
+          <button type="button" className="brand" title={t("Beranda")} onClick={() => setTab("dasbor")}>
+            <AscendoMark size={30} />
             <div>
               <h1>VULKHAN</h1>
             </div>
           </button>
           <div className="hd-meta">
             <div className="who">
-              <span className="wu">
-                <button className="wu-name" title="Ganti kata sandi" onClick={() => setGantiSandi(true)}>{user.nama}</button>
-                <span className={"role r-" + user.peran}>{ROLE_LABEL[user.peran].id}</span>
-              </span>
-              <button className="lo" onClick={logout}>Keluar</button>
+              <LangSwitch />
+              <MenuPengguna user={user} gantiSandi={() => setGantiSandi(true)} logout={logout} />
             </div>
           </div>
         </div>
-        <div className="hazard" />
+        <div className="accent" />
         <nav className="tabs">
           {TABS.map(([k, a]) => (
             <button key={k} className={"tab" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>
-              {a}
+              {t(a)}
             </button>
           ))}
         </nav>
@@ -484,11 +553,12 @@ export default function App() {
 
 /* ============================ LOGIN ============================ */
 function Login({ doLogin, onOk, say, toast, conn }) {
+  const { t } = useLang();
   const [f, setF] = useState({ username: "", sandi: "" });
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const masuk = async () => {
-    if (!f.username || !f.sandi) return say("Isi username dan kata sandi.", true);
+    if (!f.username || !f.sandi) return say(t("Isi username dan kata sandi."), true);
     setBusy(true);
     try { onOk(await doLogin(f.username.trim(), f.sandi)); }
     catch (e) { say(e.message, true); }
@@ -501,24 +571,25 @@ function Login({ doLogin, onOk, say, toast, conn }) {
       <div className="login">
         <div className="login-card">
           <div className="login-brand">
-            <TreadMark />
-            <div>
+            <div className="login-id">
+              <img className="sig" src="/ascendo-signature.png" alt="Ascendo Internasional" width={168} height={33} />
               <h1>VULKANISIR</h1>
             </div>
+            <LangSwitch />
           </div>
-          <div className="hazard" />
+          <div className="accent" />
           <div className="login-bd">
             <label className="fld">
-              <span className="lbl">Username</span>
+              <span className="lbl">{t("Username")}</span>
               <input value={f.username} onChange={set("username")} onKeyDown={onKey} autoFocus />
             </label>
             <label className="fld">
-              <span className="lbl">Kata Sandi</span>
+              <span className="lbl">{t("Kata Sandi")}</span>
               <input type="password" value={f.sandi} onChange={set("sandi")} onKeyDown={onKey} />
             </label>
-            <button className="btn pri lg" onClick={masuk} disabled={busy || conn !== "online"}>{busy ? "Memproses…" : "Masuk"}</button>
+            <button className="btn pri lg" onClick={masuk} disabled={busy || conn !== "online"}>{busy ? t("Memproses…") : t("Masuk|login")}</button>
             <span className={"conn " + conn}>
-              {conn === "online" ? "● Neon terhubung" : "○ Server tidak terhubung — jalankan api-server.js"}
+              {conn === "online" ? t("● Neon terhubung") : t("○ Server tidak terhubung — jalankan api-server.js")}
             </span>
           </div>
         </div>
@@ -571,6 +642,7 @@ function useDialog(close) {
 
 /* konfirmasi hapus */
 function Konfirmasi({ msg, onYes, close, say }) {
+  const { t } = useLang();
   const [busy, setBusy] = useState(false);
   const box = useDialog(close);
   const judul = useId();
@@ -585,13 +657,13 @@ function Konfirmasi({ msg, onYes, close, say }) {
       <div className="md" style={{ maxWidth: 380 }} ref={box} role="dialog" aria-modal="true" aria-labelledby={judul}
         onClick={(e) => e.stopPropagation()}>
         <div className="md-hd">
-          <h3 id={judul}>Konfirmasi Hapus</h3>
-          <button className="x" onClick={close} aria-label="Tutup dialog">×</button>
+          <h3 id={judul}>{t("Konfirmasi Hapus")}</h3>
+          <button className="x" onClick={close} aria-label={t("Tutup dialog")}>×</button>
         </div>
         <div className="md-bd">{msg}</div>
         <div className="md-ft">
-          <button className="btn" onClick={close}>Batal</button>
-          <button className="btn danger" onClick={ya} disabled={busy}>{busy ? "…" : "Hapus"}</button>
+          <button className="btn" onClick={close}>{t("Batal")}</button>
+          <button className="btn danger" onClick={ya} disabled={busy}>{busy ? "…" : t("Hapus")}</button>
         </div>
       </div>
     </div>
@@ -600,33 +672,35 @@ function Konfirmasi({ msg, onYes, close, say }) {
 
 /* ganti kata sandi sendiri */
 function GantiSandi({ close, say, online }) {
+  const { t } = useLang();
   const [f, setF] = useState({ lama: "", baru: "", ulang: "" });
   const [busy, setBusy] = useState(false);
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
   const kirim = async () => {
-    if (!online) return say("Ganti sandi hanya tersedia saat online.", true);
-    if (!f.lama || !f.baru) return say("Isi kata sandi lama dan baru.", true);
-    if (f.baru.length < 6) return say("Kata sandi baru minimal 6 karakter.", true);
-    if (f.baru !== f.ulang) return say("Konfirmasi kata sandi tidak cocok.", true);
+    if (!online) return say(t("Ganti sandi hanya tersedia saat online."), true);
+    if (!f.lama || !f.baru) return say(t("Isi kata sandi lama dan baru."), true);
+    if (f.baru.length < 6) return say(t("Kata sandi baru minimal 6 karakter."), true);
+    if (f.baru !== f.ulang) return say(t("Konfirmasi kata sandi tidak cocok."), true);
     setBusy(true);
     try {
       await api.gantiSandi(f.lama, f.baru);
-      say("Kata sandi berhasil diganti.");
+      say(t("Kata sandi berhasil diganti."));
       close();
     } catch (e) { say(e.message, true); }
     finally { setBusy(false); }
   };
   return (
-    <Modal title="Ganti Kata Sandi" close={close} onSave={kirim} saveLabel={busy ? "…" : "Simpan"}>
-      <Inp label="Kata Sandi Lama" type="password" value={f.lama} onChange={set("lama")} />
-      <Inp label="Kata Sandi Baru" type="password" value={f.baru} onChange={set("baru")} hint="Minimal 6 karakter" />
-      <Inp label="Ulangi Kata Sandi Baru" type="password" value={f.ulang} onChange={set("ulang")} />
+    <Modal title={t("Ganti Kata Sandi")} close={close} onSave={kirim} saveLabel={busy ? "…" : t("Simpan")}>
+      <Inp label={t("Kata Sandi Lama")} type="password" value={f.lama} onChange={set("lama")} />
+      <Inp label={t("Kata Sandi Baru")} type="password" value={f.baru} onChange={set("baru")} hint={t("Minimal 6 karakter")} />
+      <Inp label={t("Ulangi Kata Sandi Baru")} type="password" value={f.ulang} onChange={set("ulang")} />
     </Modal>
   );
 }
 
 /* ============================ PENGGUNA (admin) ============================ */
 function PenggunaAdmin({ online, say, user, minta }) {
+  const { t } = useLang();
   const [users, setUsers] = useState(null);
   const [buka, setBuka] = useState(false);
   const load = async () => {
@@ -635,37 +709,37 @@ function PenggunaAdmin({ online, say, user, minta }) {
   };
   useEffect(() => { load(); }, [online]); // eslint-disable-line react-hooks/exhaustive-deps
   const tambah = async (u) => {
-    if (!online) return say("Tambah pengguna hanya tersedia saat online.", true);
+    if (!online) return say(t("Tambah pengguna hanya tersedia saat online."), true);
     await api.createPengguna(u); await load();
-    say(`Pengguna ${u.username} ditambahkan.`);
+    say(t("Pengguna {u} ditambahkan.", { u: u.username }));
   };
   const hapus = (u) => {
-    if (!online) return say("Hapus pengguna hanya tersedia saat online.", true);
-    minta(`Hapus pengguna "${u.username}"? Tindakan ini permanen.`, async () => {
+    if (!online) return say(t("Hapus pengguna hanya tersedia saat online."), true);
+    minta(t('Hapus pengguna "{u}"? Tindakan ini permanen.', { u: u.username }), async () => {
       await api.deletePengguna(u.id); await load();
-      say(`Pengguna ${u.username} dihapus.`);
+      say(t("Pengguna {u} dihapus.", { u: u.username }));
     });
   };
   return (
     <>
-      <SectionTitle id="Pengguna & Hak Akses">
-        <button className="btn pri" onClick={() => setBuka(true)}>+ Pengguna Baru</button>
+      <SectionTitle id={t("Pengguna & Hak Akses")}>
+        <button className="btn pri" onClick={() => setBuka(true)}>{t("+ Pengguna Baru")}</button>
       </SectionTitle>
       <div className="grid3">
         {Object.entries(ROLE_LABEL).map(([k, v]) => (
-          <Kpi key={k} label={v.id} val={users === null ? "…" : users.filter((u) => u.peran === k).length + " akun"} sub={v.desc} />
+          <Kpi key={k} label={t(v.id)} val={users === null ? "…" : t("{n} akun", { n: users.filter((u) => u.peran === k).length })} sub={t(v.desc)} />
         ))}
       </div>
-      <Card title="Daftar Pengguna"
-        note="admin: akses penuh · manager: + hapus · staff: input & ubah">
+      <Card title={t("Daftar Pengguna")}
+        note={t("admin: akses penuh · manager: + hapus · staff: input & ubah")}>
         <Scroll>
           <table>
             <thead>
               <tr>
-                <th scope="col">Username</th>
-                <th scope="col">Nama</th>
-                <th scope="col">Peran</th>
-                <th scope="col" className="r">Aksi</th>
+                <th scope="col">{t("Username")}</th>
+                <th scope="col">{t("Nama")}</th>
+                <th scope="col">{t("Peran")}</th>
+                <th scope="col" className="r">{t("Aksi")}</th>
               </tr>
             </thead>
             <tbody>
@@ -673,16 +747,16 @@ function PenggunaAdmin({ online, say, user, minta }) {
                 <tr key={u.id}>
                   <td className="n strong">{u.username}</td>
                   <td>{u.nama}</td>
-                  <td><span className={"role r-" + u.peran}>{ROLE_LABEL[u.peran].id}</span></td>
+                  <td><span className={"role r-" + u.peran}>{t(ROLE_LABEL[u.peran].id)}</span></td>
                   <td className="r">
                     {u.id === user?.id
-                      ? <span className="mut2">Akun Anda</span>
-                      : <button className="btn danger sm" onClick={() => hapus(u)}>Hapus</button>}
+                      ? <span className="mut2">{t("Akun Anda")}</span>
+                      : <button className="btn danger sm" onClick={() => hapus(u)}>{t("Hapus")}</button>}
                   </td>
                 </tr>
               ))}
-              {users === null && <tr><td colSpan={4}><Empty id="Memuat…" /></td></tr>}
-              {users && users.length === 0 && <tr><td colSpan={4}><Empty id="Belum ada pengguna." /></td></tr>}
+              {users === null && <tr><td colSpan={4}><Empty id={t("Memuat…")} /></td></tr>}
+              {users && users.length === 0 && <tr><td colSpan={4}><Empty id={t("Belum ada pengguna.")} /></td></tr>}
             </tbody>
           </table>
         </Scroll>
@@ -693,22 +767,23 @@ function PenggunaAdmin({ online, say, user, minta }) {
 }
 
 function FormPengguna({ close, say, submit }) {
+  const { t } = useLang();
   const [f, setF] = useState({ username: "", nama: "", peran: "staff", sandi: "" });
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
   const kirim = async () => {
-    if (!f.username.trim() || !f.nama.trim() || !f.sandi) return say("Lengkapi semua kolom.", true);
+    if (!f.username.trim() || !f.nama.trim() || !f.sandi) return say(t("Lengkapi semua kolom."), true);
     try {
       await submit({ id: uid("U"), username: f.username.trim(), nama: f.nama.trim(), peran: f.peran, sandi: f.sandi });
       close();
     } catch (e) { say(e.message, true); }
   };
   return (
-    <Modal title="Pengguna Baru" close={close} onSave={kirim} saveLabel="Simpan">
-      <Inp label="Username" value={f.username} onChange={set("username")} />
-      <Inp label="Nama Lengkap" value={f.nama} onChange={set("nama")} />
-      <Sel label="Peran" value={f.peran} onChange={set("peran")}
-        opts={[["staff", "Staf — input & ubah"], ["manager", "Manajer — + hapus"], ["admin", "Admin — akses penuh"]]} />
-      <Inp label="Kata Sandi" type="password" value={f.sandi} onChange={set("sandi")} />
+    <Modal title={t("Pengguna Baru")} close={close} onSave={kirim} saveLabel={t("Simpan")}>
+      <Inp label={t("Username")} value={f.username} onChange={set("username")} />
+      <Inp label={t("Nama Lengkap")} value={f.nama} onChange={set("nama")} />
+      <Sel label={t("Peran")} value={f.peran} onChange={set("peran")}
+        opts={[["staff", t("Staf — input & ubah")], ["manager", t("Manajer — + hapus")], ["admin", t("Admin — akses penuh")]]} />
+      <Inp label={t("Kata Sandi")} type="password" value={f.sandi} onChange={set("sandi")} />
     </Modal>
   );
 }
@@ -767,6 +842,7 @@ const gradePiutang = (x) => {
 };
 
 function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, totalSO }) {
+  const { t, lang } = useLang();
   const qtySO = (s) => s.items.reduce((a, i) => a + i.qty, 0);
   const nilaiPO = (p) => p.items.reduce((a, i) => a + i.qty * i.harga, 0);
   const jualKonfirm = penjualan.filter((s) => s.status !== "penawaran");
@@ -798,34 +874,34 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
 
   return (
     <>
-      <SectionTitle id="Ringkasan Operasi" />
+      <SectionTitle id={t("Ringkasan Operasi")} />
       <div className="kpis">
-        <Kpi label="Nilai Stok" val={rp(nilaiStok)} sub={nilaiStok < 0 ? "⚠ stok negatif — periksa Buku Mutasi Stok" : "harga pokok"} tone={nilaiStok < 0 ? "alert" : ""} />
-        <Kpi label="Penjualan" val={rp(jual)} sub={`${jualKonfirm.length} transaksi`} />
-        <Kpi label="Pembelian" val={rp(beli)} sub={`${pembelian.length} transaksi`} />
-        <Kpi label="Piutang Berjalan" val={rp(piutangF)} sub="belum lunas" tone={piutangF > 0 ? "warn" : ""} />
-        <Kpi label="Piutang > 90 Hari" val={rp(piutang90)} sub={`${fmt(rasio90)}% dari piutang berjalan`} tone={piutang90 > 0 ? "alert" : ""} />
+        <Kpi label={t("Nilai Stok")} val={rp(nilaiStok)} sub={nilaiStok < 0 ? t("⚠ stok negatif — periksa Buku Mutasi Stok") : t("harga pokok")} tone={nilaiStok < 0 ? "alert" : ""} />
+        <Kpi label={t("Penjualan")} val={rp(jual)} sub={t("{n} transaksi", { n: jualKonfirm.length })} />
+        <Kpi label={t("Pembelian")} val={rp(beli)} sub={t("{n} transaksi", { n: pembelian.length })} />
+        <Kpi label={t("Piutang Berjalan")} val={rp(piutangF)} sub={t("belum lunas")} tone={piutangF > 0 ? "warn" : ""} />
+        <Kpi label={t("Piutang > 90 Hari")} val={rp(piutang90)} sub={t("{p}% dari piutang berjalan", { p: fmt(rasio90) })} tone={piutang90 > 0 ? "alert" : ""} />
       </div>
 
-      <SectionTitle id="Ringkasan Bulanan" />
-      <Card title="Penjualan per Bulan" note="tidak termasuk penawaran">
+      <SectionTitle id={t("Ringkasan Bulanan")} />
+      <Card title={t("Penjualan per Bulan")} note={t("tidak termasuk penawaran")}>
         <Scroll max={280}>
           <table>
             <thead>
               <tr>
-                <th scope="col">Bulan</th>
-                <th scope="col" className="r">Transaksi</th>
+                <th scope="col">{t("Bulan")}</th>
+                <th scope="col" className="r">{t("Transaksi")}</th>
                 {GUDANG.map((g) => (
                   <th scope="col" className="r" key={g.id}>{g.kode}</th>
                 ))}
-                <th scope="col" className="r">Qty</th>
-                <th scope="col" className="r">Nilai</th>
+                <th scope="col" className="r">{t("Qty")}</th>
+                <th scope="col" className="r">{t("Nilai")}</th>
               </tr>
             </thead>
             <tbody>
               {jualBulanan.map((b) => (
                 <tr key={b.bulan}>
-                  <td>{bulanLabel(b.bulan)}</td>
+                  <td>{bulanLabel(b.bulan, lang)}</td>
                   <td className="r n">{fmt(b.n)}</td>
                   {GUDANG.map((g) => (
                     <td className="r n" key={g.id}>{fmt(b.perGudang[g.id] || 0)}</td>
@@ -834,12 +910,12 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
                   <td className="r n">{rp(b.nilai)}</td>
                 </tr>
               ))}
-              {jualBulanan.length === 0 && <tr><td colSpan={4 + GUDANG.length}><Empty id="Tidak ada penjualan pada periode ini." /></td></tr>}
+              {jualBulanan.length === 0 && <tr><td colSpan={4 + GUDANG.length}><Empty id={t("Tidak ada penjualan pada periode ini.")} /></td></tr>}
             </tbody>
             {jumlahBulan > 0 && (
               <tfoot>
                 <tr className="tf-total">
-                  <td><b>Total</b></td>
+                  <td><b>{t("Total")}</b></td>
                   <td className="r n strong">{fmt(totalBulanan.n)}</td>
                   {GUDANG.map((g) => (
                     <td className="r n strong" key={g.id}>{fmt(totalBulanan.perGudang[g.id] || 0)}</td>
@@ -848,7 +924,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
                   <td className="r n strong">{rp(totalBulanan.nilai)}</td>
                 </tr>
                 <tr className="tf-avg">
-                  <td><em className="mut2">Rata-rata / bulan</em></td>
+                  <td><em className="mut2">{t("Rata-rata / bulan")}</em></td>
                   <td className="r n mut">{fmt(totalBulanan.n / jumlahBulan)}</td>
                   {GUDANG.map((g) => (
                     <td className="r n mut" key={g.id}>{fmt((totalBulanan.perGudang[g.id] || 0) / jumlahBulan)}</td>
@@ -862,16 +938,16 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
         </Scroll>
       </Card>
 
-      <SectionTitle id="Ringkasan Stok" />
-      <Card title="Stok per Gudang">
+      <SectionTitle id={t("Ringkasan Stok")} />
+      <Card title={t("Stok per Gudang")}>
         <Scroll>
           <table>
             <thead>
               <tr>
-                <th scope="col">Gudang</th>
-                <th scope="col" className="r">Ban Jadi</th>
-                <th scope="col" className="r">Casing</th>
-                <th scope="col" className="r">Nilai</th>
+                <th scope="col">{t("Gudang")}</th>
+                <th scope="col" className="r">{t("Ban Jadi")}</th>
+                <th scope="col" className="r">{t("Casing")}</th>
+                <th scope="col" className="r">{t("Nilai")}</th>
               </tr>
             </thead>
             <tbody>
@@ -900,6 +976,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
 const MUTASI_PAGE = 50;
 
 function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, doTransfer, doAdjust, say }) {
+  const { t } = useLang();
   const [g, setG] = useState("ALL");
   const [kat, setKat] = useState("ALL");
   const [cari, setCari] = useState("");
@@ -916,9 +993,9 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
 
   const unduhExcel = () => {
     const aoa = [
-      ["Kode", "Nama Barang", "Kategori", "Ukuran", "Pola", "Grade", "Harga Beli", "Harga Agen", "Harga User", ...GUDANG.map((x) => x.kode), "Total", "Min", "Satuan"],
+      [t("Kode"), t("Nama Barang"), t("Kategori"), t("Ukuran"), t("Pola"), t("Grade"), t("Harga Beli"), t("Harga Agen"), t("Harga User"), ...GUDANG.map((x) => x.kode), t("Total"), t("Min"), t("Satuan")],
       ...list.map((p) => [
-        p.kode, p.nama, KATEGORI[p.kategori].id, p.ukuran, p.pola, p.grade, p.hpp, p.harga, p.hargaUser ?? "",
+        p.kode, p.nama, t(KATEGORI[p.kategori].id), p.ukuran, p.pola, p.grade, p.hpp, p.harga, p.hargaUser ?? "",
         ...GUDANG.map((x) => getStok(x.id, p.id)),
         stokTotal(p.id), p.min, p.satuan,
       ]),
@@ -928,22 +1005,22 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
 
   return (
     <>
-      <SectionTitle id="Stok Gudang"
+      <SectionTitle id={t("Stok Gudang")}
         mid={
           <div className="filters">
-            <Sel label="Gudang" value={g} onChange={setG}
-              opts={[["ALL", "Semua Gudang"], ...GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])]} />
-            <Sel label="Kategori" value={kat} onChange={setKat}
-              opts={[["ALL", "Semua"], ...Object.entries(KATEGORI).map(([k, v]) => [k, v.id])]} />
+            <Sel label={t("Gudang")} value={g} onChange={setG}
+              opts={[["ALL", t("Semua Gudang")], ...GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])]} />
+            <Sel label={t("Kategori")} value={kat} onChange={setKat}
+              opts={[["ALL", t("Semua")], ...Object.entries(KATEGORI).map(([k, v]) => [k, t(v.id)])]} />
             <label className="fld cari">
-              <span className="lbl">Cari</span>
-              <input type="search" value={cari} onChange={(e) => setCari(e.target.value)} placeholder="Kode / nama / ukuran" />
+              <span className="lbl">{t("Cari")}</span>
+              <input type="search" value={cari} onChange={(e) => setCari(e.target.value)} placeholder={t("Kode / nama / ukuran")} />
             </label>
           </div>
         }>
         <button className="btn" onClick={unduhExcel}>↓ Excel</button>
-        <button className="btn" onClick={() => setModal("transfer")}>Transfer Antar Gudang</button>
-        <button className="btn" onClick={() => setModal("adjust")}>Penyesuaian Stok</button>
+        <button className="btn" onClick={() => setModal("transfer")}>{t("Transfer Antar Gudang")}</button>
+        <button className="btn" onClick={() => setModal("adjust")}>{t("Penyesuaian Stok")}</button>
       </SectionTitle>
 
       <Card>
@@ -951,16 +1028,16 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
           <table>
             <thead>
               <tr>
-                <th scope="col">Kode</th>
-                <th scope="col">Nama Barang</th>
-                <th scope="col" className="r">Harga Beli</th>
-                <th scope="col" className="r">Harga Agen</th>
-                <th scope="col" className="r">Harga User</th>
+                <th scope="col">{t("Kode")}</th>
+                <th scope="col">{t("Nama Barang")}</th>
+                <th scope="col" className="r">{t("Harga Beli")}</th>
+                <th scope="col" className="r">{t("Harga Agen")}</th>
+                <th scope="col" className="r">{t("Harga User")}</th>
                 {(g === "ALL" ? GUDANG : GUDANG.filter((x) => x.id === g)).map((x) => (
                   <th scope="col" key={x.id} className="r">{x.kode}</th>
                 ))}
-                <th scope="col" className="r">Total</th>
-                <th scope="col" className="r">Min</th>
+                <th scope="col" className="r">{t("Total")}</th>
+                <th scope="col" className="r">{t("Min")}</th>
               </tr>
             </thead>
             <tbody>
@@ -972,7 +1049,7 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
                     <td><span className="chip">{p.kode}</span></td>
                     <td>
                       <button type="button" className="namelink" onClick={() => setDetail(p)}>{p.nama}</button>
-                      <em className="mut2">{KATEGORI[p.kategori].id}{p.merek ? " · " + p.merek : ""}</em>
+                      <em className="mut2">{t(KATEGORI[p.kategori].id)}{p.merek ? " · " + p.merek : ""}</em>
                     </td>
                     <td className="r n">{rp(p.hpp)}</td>
                     <td className="r n">{rp(p.harga)}</td>
@@ -989,7 +1066,7 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
               {list.length === 0 && (
                 <tr>
                   <td colSpan={7 + (g === "ALL" ? GUDANG.length : 1)}>
-                    <Empty id={q ? `Tidak ada barang yang cocok dengan "${cari}".` : "Belum ada barang pada kategori ini."} />
+                    <Empty id={q ? t('Tidak ada barang yang cocok dengan "{q}".', { q: cari }) : t("Belum ada barang pada kategori ini.")} />
                   </td>
                 </tr>
               )}
@@ -998,17 +1075,17 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
         </Scroll>
       </Card>
 
-      <Card title="Buku Mutasi Stok" note="Stok dihitung dari buku ini, bukan diedit langsung.">
+      <Card title={t("Buku Mutasi Stok")} note={t("Stok dihitung dari buku ini, bukan diedit langsung.")}>
         <Scroll max={320}>
           <table>
             <thead>
               <tr>
-                <th scope="col">Tanggal</th>
-                <th scope="col">Gudang</th>
-                <th scope="col">Barang</th>
-                <th scope="col">Jenis</th>
-                <th scope="col" className="r">Qty</th>
-                <th scope="col">Referensi</th>
+                <th scope="col">{t("Tanggal")}</th>
+                <th scope="col">{t("Gudang")}</th>
+                <th scope="col">{t("Barang")}</th>
+                <th scope="col">{t("Jenis")}</th>
+                <th scope="col" className="r">{t("Qty")}</th>
+                <th scope="col">{t("Referensi")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1022,20 +1099,20 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
                   <td className="mut">{m.ref}{m.catatan ? " — " + m.catatan : ""}</td>
                 </tr>
               ))}
-              {mutasi.length === 0 && <tr><td colSpan={6}><Empty id="Belum ada mutasi stok." /></td></tr>}
+              {mutasi.length === 0 && <tr><td colSpan={6}><Empty id={t("Belum ada mutasi stok.")} /></td></tr>}
             </tbody>
           </table>
         </Scroll>
         {mutasiTampil < mutasiUrut.length && (
           <div className="mut-more">
             <button className="btn sm" onClick={() => setMutasiTampil((n) => n + MUTASI_PAGE)}>
-              Muat {Math.min(MUTASI_PAGE, mutasiUrut.length - mutasiTampil)} lagi
-              <em>{mutasiTampil} dari {mutasiUrut.length} baris</em>
+              {t("Muat {n} lagi", { n: Math.min(MUTASI_PAGE, mutasiUrut.length - mutasiTampil) })}
+              <em>{t("{a} dari {b} baris", { a: mutasiTampil, b: mutasiUrut.length })}</em>
             </button>
           </div>
         )}
         {mutasiLimit && mutasi.length >= mutasiLimit && (
-          <div className="mut-note">Menampilkan {fmt(mutasiLimit)} mutasi terakhir. Stok di atas tetap dihitung dari seluruh buku mutasi.</div>
+          <div className="mut-note">{t("Menampilkan {n} mutasi terakhir. Stok di atas tetap dihitung dari seluruh buku mutasi.", { n: fmt(mutasiLimit) })}</div>
         )}
       </Card>
 
@@ -1047,58 +1124,61 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
 }
 
 function FormTransfer({ produk, getStok, submit, say, close }) {
+  const { t } = useLang();
   const [f, setF] = useState({ dari: "", ke: "", produk: "", qty: "" });
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
   const tersedia = getStok(f.dari, f.produk);
   const simpan = async () => {
     const q = Number(f.qty);
-    if (!f.dari || !f.ke) return say("Pilih gudang asal dan tujuan terlebih dahulu.", true);
-    if (!f.produk) return say("Pilih barang terlebih dahulu.", true);
-    if (f.dari === f.ke) return say("Gudang asal dan tujuan tidak boleh sama.", true);
-    if (!q || q <= 0) return say("Masukkan jumlah yang valid.", true);
-    if (q > tersedia) return say(`Stok tidak cukup. Tersedia ${fmt(tersedia)}.`, true);
+    if (!f.dari || !f.ke) return say(t("Pilih gudang asal dan tujuan terlebih dahulu."), true);
+    if (!f.produk) return say(t("Pilih barang terlebih dahulu."), true);
+    if (f.dari === f.ke) return say(t("Gudang asal dan tujuan tidak boleh sama."), true);
+    if (!q || q <= 0) return say(t("Masukkan jumlah yang valid."), true);
+    if (q > tersedia) return say(t("Stok tidak cukup. Tersedia {n}.", { n: fmt(tersedia) }), true);
     try { await submit({ dari: f.dari, ke: f.ke, produk: f.produk, qty: q }); close(); }
     catch (e) { say(e.message, true); }
   };
   return (
-    <Modal title="Transfer Antar Gudang" close={close} onSave={simpan}>
-      <Combo label="Dari Gudang" value={f.dari} onChange={set("dari")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
-      <Combo label="Ke Gudang" value={f.ke} onChange={set("ke")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
-      <Combo label="Barang" value={f.produk} onChange={set("produk")} placeholder="-- Pilih Barang --" opts={produk.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
-      <Inp label="Jumlah" type="number" value={f.qty} onChange={set("qty")} hint={`Tersedia di gudang asal: ${fmt(tersedia)}`} />
+    <Modal title={t("Transfer Antar Gudang")} close={close} onSave={simpan}>
+      <Combo label={t("Dari Gudang")} value={f.dari} onChange={set("dari")} placeholder={t("-- Pilih Gudang --")} opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+      <Combo label={t("Ke Gudang")} value={f.ke} onChange={set("ke")} placeholder={t("-- Pilih Gudang --")} opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+      <Combo label={t("Barang")} value={f.produk} onChange={set("produk")} placeholder={t("-- Pilih Barang --")} opts={produk.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
+      <Inp label={t("Jumlah")} type="number" value={f.qty} onChange={set("qty")} hint={t("Tersedia di gudang asal: {n}", { n: fmt(tersedia) })} />
     </Modal>
   );
 }
 
 function FormAdjust({ produk, getStok, submit, say, close }) {
+  const { t } = useLang();
   const [f, setF] = useState({ gudang: "", produk: "", fisik: "", catatan: "" });
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
   const sistem = getStok(f.gudang, f.produk);
   const selisih = f.fisik === "" ? 0 : Number(f.fisik) - sistem;
   const simpan = async () => {
-    if (!f.gudang) return say("Pilih gudang terlebih dahulu.", true);
-    if (!f.produk) return say("Pilih barang terlebih dahulu.", true);
-    if (f.fisik === "") return say("Masukkan hasil hitung fisik.", true);
-    if (selisih === 0) return say("Tidak ada selisih — tidak ada yang dicatat.", true);
+    if (!f.gudang) return say(t("Pilih gudang terlebih dahulu."), true);
+    if (!f.produk) return say(t("Pilih barang terlebih dahulu."), true);
+    if (f.fisik === "") return say(t("Masukkan hasil hitung fisik."), true);
+    if (selisih === 0) return say(t("Tidak ada selisih — tidak ada yang dicatat."), true);
     try {
       await submit({ gudang: f.gudang, produk: f.produk, fisik: Number(f.fisik), selisih, catatan: f.catatan });
       close();
     } catch (e) { say(e.message, true); }
   };
   return (
-    <Modal title="Penyesuaian Stok" close={close} onSave={simpan}>
-      <Combo label="Gudang" value={f.gudang} onChange={set("gudang")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
-      <Combo label="Barang" value={f.produk} onChange={set("produk")} placeholder="-- Pilih Barang --" opts={produk.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
-      <Inp label="Hitung Fisik" type="number" value={f.fisik} onChange={set("fisik")} hint={`Stok sistem: ${fmt(sistem)}`} />
+    <Modal title={t("Penyesuaian Stok")} close={close} onSave={simpan}>
+      <Combo label={t("Gudang")} value={f.gudang} onChange={set("gudang")} placeholder={t("-- Pilih Gudang --")} opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+      <Combo label={t("Barang")} value={f.produk} onChange={set("produk")} placeholder={t("-- Pilih Barang --")} opts={produk.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
+      <Inp label={t("Hitung Fisik")} type="number" value={f.fisik} onChange={set("fisik")} hint={t("Stok sistem: {n}", { n: fmt(sistem) })} />
       <div className="delta">
-        Selisih <b className={selisih < 0 ? "bad" : selisih > 0 ? "ok" : ""}>{selisih > 0 ? "+" : ""}{fmt(selisih)}</b>
+        {t("Selisih")} <b className={selisih < 0 ? "bad" : selisih > 0 ? "ok" : ""}>{selisih > 0 ? "+" : ""}{fmt(selisih)}</b>
       </div>
-      <Inp label="Catatan" value={f.catatan} onChange={set("catatan")} />
+      <Inp label={t("Catatan")} value={f.catatan} onChange={set("catatan")} />
     </Modal>
   );
 }
 
 function DetailProduk({ p, getStok, stokTotal, close }) {
+  const { t } = useLang();
   const box = useDialog(close);
   const judul = useId();
   const tot = stokTotal(p.id);
@@ -1108,31 +1188,31 @@ function DetailProduk({ p, getStok, stokTotal, close }) {
       <div className="md" ref={box} role="dialog" aria-modal="true" aria-labelledby={judul} onClick={(e) => e.stopPropagation()}>
         <div className="md-hd">
           <h3 id={judul}>{p.nama} <em>{p.kode}</em></h3>
-          <button className="x" onClick={close} aria-label="Tutup dialog">×</button>
+          <button className="x" onClick={close} aria-label={t("Tutup dialog")}>×</button>
         </div>
         <div className="md-bd">
           <div className="spec-info">
-            <div><span className="lbl2">Kategori</span><b>{KATEGORI[p.kategori].id}</b></div>
-            <div><span className="lbl2">Ukuran</span><b>{p.ukuran || "-"}</b></div>
-            <div><span className="lbl2">Pola</span><b>{p.pola || "-"}</b></div>
-            <div><span className="lbl2">Grade</span><b>{p.grade || "-"}</b></div>
-            <div><span className="lbl2">Merek</span><b>{p.merek || "-"}</b></div>
-            <div><span className="lbl2">Satuan</span><b>{p.satuan}</b></div>
+            <div><span className="lbl2">{t("Kategori")}</span><b>{t(KATEGORI[p.kategori].id)}</b></div>
+            <div><span className="lbl2">{t("Ukuran")}</span><b>{p.ukuran || "-"}</b></div>
+            <div><span className="lbl2">{t("Pola")}</span><b>{p.pola || "-"}</b></div>
+            <div><span className="lbl2">{t("Grade")}</span><b>{p.grade || "-"}</b></div>
+            <div><span className="lbl2">{t("Merek")}</span><b>{p.merek || "-"}</b></div>
+            <div><span className="lbl2">{t("Satuan")}</span><b>{p.satuan}</b></div>
           </div>
 
           <div className="kpis">
-            <Kpi label="Harga Beli" val={rp(p.hpp)} sub="harga pokok" />
-            <Kpi label="Harga Agen" val={rp(p.harga)} sub="harga jual agen" />
-            <Kpi label="Harga User" val={p.hargaUser != null ? rp(p.hargaUser) : "—"} sub="harga jual pengguna akhir" />
+            <Kpi label={t("Harga Beli")} val={rp(p.hpp)} sub={t("harga pokok")} />
+            <Kpi label={t("Harga Agen")} val={rp(p.harga)} sub={t("harga jual agen")} />
+            <Kpi label={t("Harga User")} val={p.hargaUser != null ? rp(p.hargaUser) : "—"} sub={t("harga jual pengguna akhir")} />
           </div>
 
-          <h4 className="mut2">Stok per Gudang</h4>
+          <h4 className="mut2">{t("Stok per Gudang")}</h4>
           <Scroll max={220}>
             <table>
               <thead>
                 <tr>
-                  <th scope="col">Gudang</th>
-                  <th scope="col" className="r">Qty</th>
+                  <th scope="col">{t("Gudang")}</th>
+                  <th scope="col" className="r">{t("Qty")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1143,7 +1223,7 @@ function DetailProduk({ p, getStok, stokTotal, close }) {
                   </tr>
                 ))}
                 <tr>
-                  <td className="strong">Total</td>
+                  <td className="strong">{t("Total")}</td>
                   <td className={"r n strong " + (tot < p.min ? "bad" : "")}>{fmt(tot)} / {fmt(p.min)} {p.satuan}</td>
                 </tr>
               </tbody>
@@ -1151,7 +1231,7 @@ function DetailProduk({ p, getStok, stokTotal, close }) {
           </Scroll>
         </div>
         <div className="md-ft">
-          <button className="btn pri" onClick={close}>Tutup</button>
+          <button className="btn pri" onClick={close}>{t("Tutup")}</button>
         </div>
       </div>
     </div>
@@ -1160,6 +1240,7 @@ function DetailProduk({ p, getStok, stokTotal, close }) {
 
 /* ============================ PENJUALAN ============================ */
 function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cById, gById, totalSO, majuSO, getStok, piutang, say, can, minta, doDeletePenjualan }) {
+  const { t, lang } = useLang();
   const [buka, setBuka] = useState(false);
   const [dok, setDok] = useState(null);
   const [dari, setDari] = useState("");
@@ -1200,10 +1281,10 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
 
   const unduhExcel = () => {
     const aoa = [
-      ["No.", "Tanggal", "Pelanggan", "PIC", "Kota", "Gudang", "Status", "Rincian", "Total"],
+      [t("No."), t("Tanggal"), t("Pelanggan"), t("PIC"), t("Kota"), t("Gudang"), t("Status"), t("Rincian"), t("Total")],
       ...list.map((s) => [
         s.no, s.tgl, cById(s.pelanggan).nama, cById(s.pelanggan).pic, cById(s.pelanggan).kota, gById(s.gudang).kode,
-        SO_LABEL[s.status].id,
+        t(SO_LABEL[s.status].id),
         s.items.map((i) => `${pById(i.produk).kode} × ${fmt(i.qty)}`).join(", "),
         totalSO(s),
       ]),
@@ -1213,38 +1294,38 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
 
   return (
     <>
-      <SectionTitle id="Penjualan"
+      <SectionTitle id={t("Penjualan")}
         mid={
           <div className="filters">
             <label className="fld">
-              <span className="lbl">Dari</span>
-              <input type="date" lang="id-ID" value={dari} onChange={(e) => setDari(e.target.value)} max={sampai || undefined} />
+              <span className="lbl">{t("Dari")}</span>
+              <input type="date" lang={lang === "ko" ? "ko-KR" : "id-ID"} value={dari} onChange={(e) => setDari(e.target.value)} max={sampai || undefined} />
             </label>
             <label className="fld">
-              <span className="lbl">Sampai</span>
-              <input type="date" lang="id-ID" value={sampai} onChange={(e) => setSampai(e.target.value)} min={dari || undefined} />
+              <span className="lbl">{t("Sampai")}</span>
+              <input type="date" lang={lang === "ko" ? "ko-KR" : "id-ID"} value={sampai} onChange={(e) => setSampai(e.target.value)} min={dari || undefined} />
             </label>
             <label className="fld cari">
-              <span className="lbl">Pelanggan</span>
-              <input type="search" value={cust} onChange={(e) => setCust(e.target.value)} placeholder="Cari nama pelanggan" />
+              <span className="lbl">{t("Pelanggan")}</span>
+              <input type="search" value={cust} onChange={(e) => setCust(e.target.value)} placeholder={t("Cari nama pelanggan")} />
             </label>
-            {filterAktif && <button className="btn sm" onClick={() => { setDari(""); setSampai(""); setCust(""); }}>Reset Filter</button>}
+            {filterAktif && <button className="btn sm" onClick={() => { setDari(""); setSampai(""); setCust(""); }}>{t("Reset Filter")}</button>}
           </div>
         }>
         <button className="btn" onClick={unduhExcel}>↓ Excel</button>
-        <button className="btn pri" onClick={() => setBuka(true)}>+ Penjualan Baru</button>
+        <button className="btn pri" onClick={() => setBuka(true)}>{t("+ Penjualan Baru")}</button>
       </SectionTitle>
 
       {filterAktif && (
         <div className="kpis">
-          <Kpi label="Transaksi" val={fmt(ringkasan.jumlah)} sub="pada filter ini" />
-          <Kpi label="Jumlah Qty" val={`${fmt(ringkasan.qty)} pcs`} sub="total kuantitas terfilter" />
-          <Kpi label="Total Nilai" val={rp(ringkasan.total)} sub="total penjualan terfilter" />
+          <Kpi label={t("Transaksi")} val={fmt(ringkasan.jumlah)} sub={t("pada filter ini")} />
+          <Kpi label={t("Jumlah Qty")} val={`${fmt(ringkasan.qty)} pcs`} sub={t("total kuantitas terfilter")} />
+          <Kpi label={t("Total Nilai")} val={rp(ringkasan.total)} sub={t("total penjualan terfilter")} />
         </div>
       )}
 
       {grup.length === 0 && (
-        <Card><Empty id={filterAktif ? "Tidak ada transaksi pada filter ini." : "Belum ada transaksi penjualan."} /></Card>
+        <Card><Empty id={filterAktif ? t("Tidak ada transaksi pada filter ini.") : t("Belum ada transaksi penjualan.")} /></Card>
       )}
 
       {grup.map(({ tgl, rows, total, qty }) => {
@@ -1253,28 +1334,28 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
           <Card key={tgl}>
             <button type="button" className="card-hd acc-hd" aria-expanded={on} onClick={() => toggle(tgl)}>
               <span className="acc-chev">{on ? "▾" : "▸"}</span>
-              <span className="acc-tgl">{tglPanjang(tgl)}</span>
-              <span className="acc-sub">{rows.length} transaksi · {fmt(qty)} pcs · {rp(total)}</span>
+              <span className="acc-tgl">{tglPanjang(tgl, lang)}</span>
+              <span className="acc-sub">{t("{n} transaksi · {q} pcs · {v}", { n: rows.length, q: fmt(qty), v: rp(total) })}</span>
             </button>
             {on && (
               <Scroll>
                 <table>
                   <thead>
                     <tr>
-                      <th scope="col">No.</th>
-                      <th scope="col">Pelanggan</th>
-                      <th scope="col">Gudang</th>
-                      <th scope="col">Rincian</th>
-                      <th scope="col" className="r">Total</th>
-                      <th scope="col">Status</th>
-                      <th scope="col" className="r">Aksi</th>
+                      <th scope="col">{t("No.")}</th>
+                      <th scope="col">{t("Pelanggan")}</th>
+                      <th scope="col">{t("Gudang")}</th>
+                      <th scope="col">{t("Rincian")}</th>
+                      <th scope="col" className="r">{t("Total")}</th>
+                      <th scope="col">{t("Status")}</th>
+                      <th scope="col" className="r">{t("Aksi")}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((s) => (
                       <tr key={s.id}>
                         <td className="n strong">{s.no}</td>
-                        <td>{cById(s.pelanggan).nama}<em className="mut2">Grade {cById(s.pelanggan).grade}</em></td>
+                        <td>{cById(s.pelanggan).nama}<em className="mut2">{t("Grade {g}", { g: cById(s.pelanggan).grade })}</em></td>
                         <td><span className="chip">{gById(s.gudang).kode}</span></td>
                         <td className="mut">
                           {s.items.map((i, k) => (
@@ -1287,13 +1368,13 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
                           <div className="aksi">
                             {s.status !== "lunas" ? (
                               <button className="btn sm" onClick={() => majuSO(s)}>
-                                → {SO_LABEL[SO_FLOW[SO_FLOW.indexOf(s.status) + 1]].id}
+                                → {t(SO_LABEL[SO_FLOW[SO_FLOW.indexOf(s.status) + 1]].id)}
                               </button>
-                            ) : <span className="mut">selesai</span>}
-                            <button className="btn sm" title="Cetak dokumen" onClick={() => setDok(s)}>Cetak</button>
+                            ) : <span className="mut">{t("selesai")}</span>}
+                            <button className="btn sm" title={t("Cetak dokumen")} onClick={() => setDok(s)}>{t("Cetak")}</button>
                             {can("delete") && (
-                              <button className="btn sm danger" title="Hapus"
-                                onClick={() => minta(`Hapus penjualan ${s.no}? Data & mutasi stoknya ikut terhapus.`, () => doDeletePenjualan(s))}>Hapus</button>
+                              <button className="btn sm danger" title={t("Hapus")}
+                                onClick={() => minta(t("Hapus penjualan {no}? Data & mutasi stoknya ikut terhapus.", { no: s.no }), () => doDeletePenjualan(s))}>{t("Hapus")}</button>
                             )}
                           </div>
                         </td>
@@ -1328,6 +1409,7 @@ const PENERBIT = {
 };
 
 function DokumenPenjualan({ so, pById, cById, gById, totalSO, close }) {
+  const { t } = useLang();
   const [jenis, setJenis] = useState(so.status === "penawaran" || so.status === "pesanan" ? "penawaran" : "faktur");
   const [terbit, setTerbit] = useState("spb");
   const box = useDialog(close);
@@ -1347,11 +1429,11 @@ function DokumenPenjualan({ so, pById, cById, gById, totalSO, close }) {
         onClick={(e) => e.stopPropagation()}>
         <div className="doc-bar">
           <div className="doc-tabs">
-            <button className={"btn sm" + (!isFaktur ? " pri" : "")} onClick={() => setJenis("penawaran")}>Penawaran</button>
-            <button className={"btn sm" + (isFaktur ? " pri" : "")} onClick={() => setJenis("faktur")}>Faktur</button>
+            <button className={"btn sm" + (!isFaktur ? " pri" : "")} onClick={() => setJenis("penawaran")}>{t("Penawaran|dok")}</button>
+            <button className={"btn sm" + (isFaktur ? " pri" : "")} onClick={() => setJenis("faktur")}>{t("Faktur")}</button>
           </div>
           <div className="doc-firm">
-            <span className="doc-firm-lbl">Penerbit</span>
+            <span className="doc-firm-lbl">{t("Penerbit")}</span>
             {Object.entries(PENERBIT).map(([k, v]) => (
               <button key={k} className={"btn sm" + (terbit === k ? " pri" : "")} onClick={() => setTerbit(k)}>
                 {v.nama}
@@ -1359,8 +1441,8 @@ function DokumenPenjualan({ so, pById, cById, gById, totalSO, close }) {
             ))}
           </div>
           <div className="doc-bar-r">
-            <button className="btn pri" onClick={() => window.print()}>⎙ Cetak</button>
-            <button className="x" onClick={close} aria-label="Tutup dokumen">×</button>
+            <button className="btn pri" onClick={() => window.print()}>⎙ {t("Cetak")}</button>
+            <button className="x" onClick={close} aria-label={t("Tutup dokumen")}>×</button>
           </div>
         </div>
 
@@ -1463,6 +1545,7 @@ function DokumenPenjualan({ so, pById, cById, gById, totalSO, close }) {
 
 function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit, nomor }) {
   /* yang bisa dijual: ban jadi + Ban Jasa */
+  const { t } = useLang();
   const jadi = produk.filter((p) => ["jadi", "jasa"].includes(p.kategori));
   const [f, setF] = useState({ pelanggan: "", gudang: "", tgl: today() });
   const [items, setItems] = useState([{ produk: "", qty: "", harga: "" }]);
@@ -1482,15 +1565,15 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
   const lebihStok = items.filter((i) => Number(i.qty) > 0 && Number(i.qty) > getStok(f.gudang, i.produk));
 
   const kirim = async () => {
-    if (!f.pelanggan) return say("Pilih pelanggan terlebih dahulu.", true);
-    if (!f.gudang) return say("Pilih gudang pengirim terlebih dahulu.", true);
+    if (!f.pelanggan) return say(t("Pilih pelanggan terlebih dahulu."), true);
+    if (!f.gudang) return say(t("Pilih gudang pengirim terlebih dahulu."), true);
     const salah = items.find((i) => String(i.qty).trim() !== "" && !(Number(i.qty) > 0));
-    if (salah) return say("Qty harus berupa angka lebih besar dari 0.", true);
+    if (salah) return say(t("Qty harus berupa angka lebih besar dari 0."), true);
     const valid = items.filter((i) => Number(i.qty) > 0);
-    if (!valid.length) return say("Tambahkan minimal satu baris barang.", true);
-    if (valid.some((i) => !i.produk)) return say("Pilih barang untuk setiap baris.", true);
-    if (valid.some((i) => !(Number(i.harga) >= 0))) return say("Harga harus berupa angka.", true);
-    if (sisaLimit < 0) return say(`Melebihi limit kredit ${c.nama} sebesar ${rp(-sisaLimit)}.`, true);
+    if (!valid.length) return say(t("Tambahkan minimal satu baris barang."), true);
+    if (valid.some((i) => !i.produk)) return say(t("Pilih barang untuk setiap baris."), true);
+    if (valid.some((i) => !(Number(i.harga) >= 0))) return say(t("Harga harus berupa angka."), true);
+    if (sisaLimit < 0) return say(t("Melebihi limit kredit {nama} sebesar {v}.", { nama: c.nama, v: rp(-sisaLimit) }), true);
     try {
       await submit({
         id: uid("SO"), no: nomor(f.tgl),
@@ -1502,45 +1585,45 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
   };
 
   return (
-    <Modal title="Penjualan Baru" close={close} onSave={kirim} wide saveLabel="Simpan Penawaran">
+    <Modal title={t("Penjualan Baru")} close={close} onSave={kirim} wide saveLabel={t("Simpan Penawaran")}>
       <div className="row2">
-        <Combo label="Pelanggan" value={f.pelanggan} onChange={set("pelanggan")} placeholder="-- Pilih Pelanggan --" opts={pelanggan.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
-        <Combo label="Gudang Pengirim" value={f.gudang} onChange={set("gudang")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+        <Combo label={t("Pelanggan")} value={f.pelanggan} onChange={set("pelanggan")} placeholder={t("-- Pilih Pelanggan --")} opts={pelanggan.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
+        <Combo label={t("Gudang Pengirim")} value={f.gudang} onChange={set("gudang")} placeholder={t("-- Pilih Gudang --")} opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
       </div>
 
-      <div className="lbl mt">Rincian Barang</div>
+      <div className="lbl mt">{t("Rincian Barang")}</div>
       {items.map((it, i) => {
         const ada = getStok(f.gudang, it.produk);
         const kurang = it.produk && Number(it.qty) > ada;
         return (
           <div className="line" key={i}>
-            <Combo bare ariaLabel={`Barang baris ${i + 1}`} value={it.produk} onChange={(v) => ubah(i, "produk", v)}
-              placeholder="-- Pilih Barang --" opts={jadi.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
-            <input type="number" min="0" inputMode="numeric" placeholder="Qty" aria-label={`Jumlah baris ${i + 1}`}
+            <Combo bare ariaLabel={t("Barang baris {i}", { i: i + 1 })} value={it.produk} onChange={(v) => ubah(i, "produk", v)}
+              placeholder={t("-- Pilih Barang --")} opts={jadi.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
+            <input type="number" min="0" inputMode="numeric" placeholder={t("Qty")} aria-label={t("Jumlah baris {i}", { i: i + 1 })}
               aria-invalid={kurang || undefined} value={it.qty} onChange={(e) => ubah(i, "qty", e.target.value)} className={kurang ? "err" : ""} />
-            <input type="number" min="0" inputMode="numeric" placeholder="Harga" aria-label={`Harga baris ${i + 1}`}
+            <input type="number" min="0" inputMode="numeric" placeholder={t("Harga")} aria-label={t("Harga baris {i}", { i: i + 1 })}
               value={it.harga} onChange={(e) => ubah(i, "harga", e.target.value)} title={rp(it.harga)} />
-            <span className={"stokinfo" + (kurang ? " bad" : "")}>{it.produk ? `stok ${fmt(ada)}` : ""}</span>
-            <button className="x" aria-label={`Hapus baris ${i + 1}`} onClick={() => setItems((l) => l.filter((_, n) => n !== i))} disabled={items.length === 1}>×</button>
+            <span className={"stokinfo" + (kurang ? " bad" : "")}>{it.produk ? t("stok {n}", { n: fmt(ada) }) : ""}</span>
+            <button className="x" aria-label={t("Hapus baris {i}", { i: i + 1 })} onClick={() => setItems((l) => l.filter((_, n) => n !== i))} disabled={items.length === 1}>×</button>
           </div>
         );
       })}
-      <button className="btn sm" onClick={() => setItems((l) => [...l, { produk: "", qty: "", harga: "" }])}>+ Tambah Baris</button>
+      <button className="btn sm" onClick={() => setItems((l) => [...l, { produk: "", qty: "", harga: "" }])}>{t("+ Tambah Baris")}</button>
 
       {lebihStok.length > 0 && (
         <p className="peringatan" role="status">
-          {lebihStok.length} baris melebihi stok di {(GUDANG.find((x) => x.id === f.gudang) || {}).nama}.
-          Masih bisa disimpan sebagai penawaran, tetapi status <b>Dikirim</b> akan ditolak sampai stok mencukupi.
+          {t("{n} baris melebihi stok di {g}. Masih bisa disimpan sebagai penawaran, tetapi status {s} akan ditolak sampai stok mencukupi.",
+            { n: lebihStok.length, g: (GUDANG.find((x) => x.id === f.gudang) || {}).nama, s: t(SO_LABEL.kirim.id) })}
         </p>
       )}
 
       <div className="sum">
-        <div><span>Total</span><b className="n">{rp(total)}</b></div>
-        <div><span>Sisa Limit Kredit</span><b className={"n " + (sisaLimit < 0 ? "bad" : "ok")}>{rp(sisaLimit)}</b></div>
+        <div><span>{t("Total")}</span><b className="n">{rp(total)}</b></div>
+        <div><span>{t("Sisa Limit Kredit")}</span><b className={"n " + (sisaLimit < 0 ? "bad" : "ok")}>{rp(sisaLimit)}</b></div>
       </div>
       {sisaLimit < 0 && (
         <p className="peringatan bad-box" role="status">
-          Melebihi limit kredit {c.nama} sebesar {rp(-sisaLimit)} — penawaran tidak bisa disimpan.
+          {t("Melebihi limit kredit {nama} sebesar {v} — penawaran tidak bisa disimpan.", { nama: c.nama, v: rp(-sisaLimit) })}
         </p>
       )}
     </Modal>
@@ -1549,6 +1632,7 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
 
 /* ============================ PEMBELIAN ============================ */
 function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById, gById, majuPO, say, can, minta, doDeletePembelian }) {
+  const { t, lang } = useLang();
   const [buka, setBuka] = useState(false);
   const [dari, setDari] = useState("");
   const [sampai, setSampai] = useState("");
@@ -1572,9 +1656,9 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
 
   const unduhExcel = () => {
     const aoa = [
-      ["No.", "Tanggal", "Pemasok", "Gudang Tujuan", "Status", "Rincian", "Total"],
+      [t("No."), t("Tanggal"), t("Pemasok"), t("Gudang Tujuan"), t("Status"), t("Rincian"), t("Total")],
       ...list.map((p) => [
-        p.no, p.tgl, sById(p.pemasok).nama, gById(p.gudang).nama, PO_LABEL[p.status].id,
+        p.no, p.tgl, sById(p.pemasok).nama, gById(p.gudang).nama, t(PO_LABEL[p.status].id),
         p.items.map((i) => `${pById(i.produk).kode} × ${fmt(i.qty)}`).join(", "),
         tot(p),
       ]),
@@ -1584,64 +1668,64 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
 
   return (
     <>
-      <SectionTitle id="Pembelian"
+      <SectionTitle id={t("Pembelian")}
         mid={
           <div className="filters">
             <label className="fld">
-              <span className="lbl">Dari</span>
-              <input type="date" lang="id-ID" value={dari} onChange={(e) => setDari(e.target.value)} max={sampai || undefined} />
+              <span className="lbl">{t("Dari")}</span>
+              <input type="date" lang={lang === "ko" ? "ko-KR" : "id-ID"} value={dari} onChange={(e) => setDari(e.target.value)} max={sampai || undefined} />
             </label>
             <label className="fld">
-              <span className="lbl">Sampai</span>
-              <input type="date" lang="id-ID" value={sampai} onChange={(e) => setSampai(e.target.value)} min={dari || undefined} />
+              <span className="lbl">{t("Sampai")}</span>
+              <input type="date" lang={lang === "ko" ? "ko-KR" : "id-ID"} value={sampai} onChange={(e) => setSampai(e.target.value)} min={dari || undefined} />
             </label>
-            {filterAktif && <button className="btn sm" onClick={() => { setDari(""); setSampai(""); }}>Reset Filter</button>}
+            {filterAktif && <button className="btn sm" onClick={() => { setDari(""); setSampai(""); }}>{t("Reset Filter")}</button>}
           </div>
         }>
         <button className="btn" onClick={unduhExcel}>↓ Excel</button>
         <button className="btn pri"
           onClick={() => {
             if (!produk.some((p) => ["casing", "bahan"].includes(p.kategori)))
-              return say("Belum ada barang casing/bahan baku di katalog. Tambahkan dulu ke tabel produk.", true);
+              return say(t("Belum ada barang casing/bahan baku di katalog. Tambahkan dulu ke tabel produk."), true);
             setBuka(true);
-          }}>+ Pembelian Baru</button>
+          }}>{t("+ Pembelian Baru")}</button>
       </SectionTitle>
 
       <div className="grid3">
         {["casing", "bahan"].map((j) => {
           const n = list.filter((p) => p.items.some((i) => (pById(i.produk).kategori) === j));
           return (
-            <Kpi key={j} label={`Pembelian ${KATEGORI[j].id}`}
-              val={rp(n.reduce((a, p) => a + tot(p), 0))} sub={`${n.length} transaksi`} />
+            <Kpi key={j} label={t("Pembelian {kategori}", { kategori: t(KATEGORI[j].id) })}
+              val={rp(n.reduce((a, p) => a + tot(p), 0))} sub={t("{n} transaksi", { n: n.length })} />
           );
         })}
-        <Kpi label="Utang Berjalan"
+        <Kpi label={t("Utang Berjalan")}
           val={rp(list.filter((p) => p.status === "diterima").reduce((a, p) => a + tot(p), 0))}
-          sub="sudah diterima, belum dibayar"
+          sub={t("sudah diterima, belum dibayar")}
           tone="warn" />
       </div>
 
-      <Card title="Pembelian per Bulan">
+      <Card title={t("Pembelian per Bulan")}>
         <Scroll max={220}>
           <table>
             <thead>
               <tr>
-                <th scope="col">Bulan</th>
-                <th scope="col" className="r">Transaksi</th>
-                <th scope="col" className="r">Qty</th>
-                <th scope="col" className="r">Nilai</th>
+                <th scope="col">{t("Bulan")}</th>
+                <th scope="col" className="r">{t("Transaksi")}</th>
+                <th scope="col" className="r">{t("Qty")}</th>
+                <th scope="col" className="r">{t("Nilai")}</th>
               </tr>
             </thead>
             <tbody>
               {beliBulanan.map((b) => (
                 <tr key={b.bulan}>
-                  <td>{bulanLabel(b.bulan)}</td>
+                  <td>{bulanLabel(b.bulan, lang)}</td>
                   <td className="r n">{fmt(b.n)}</td>
                   <td className="r n">{fmt(b.qty)}</td>
                   <td className="r n">{rp(b.nilai)}</td>
                 </tr>
               ))}
-              {beliBulanan.length === 0 && <tr><td colSpan={4}><Empty id="Belum ada pembelian." /></td></tr>}
+              {beliBulanan.length === 0 && <tr><td colSpan={4}><Empty id={t("Belum ada pembelian.")} /></td></tr>}
             </tbody>
           </table>
         </Scroll>
@@ -1652,14 +1736,14 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
           <table>
             <thead>
               <tr>
-                <th scope="col">No.</th>
-                <th scope="col">Tanggal</th>
-                <th scope="col">Pemasok</th>
-                <th scope="col">Gudang Tujuan</th>
-                <th scope="col">Rincian</th>
-                <th scope="col" className="r">Total</th>
-                <th scope="col">Status</th>
-                <th scope="col" className="r">Aksi</th>
+                <th scope="col">{t("No.")}</th>
+                <th scope="col">{t("Tanggal")}</th>
+                <th scope="col">{t("Pemasok")}</th>
+                <th scope="col">{t("Gudang Tujuan")}</th>
+                <th scope="col">{t("Rincian")}</th>
+                <th scope="col" className="r">{t("Total")}</th>
+                <th scope="col">{t("Status")}</th>
+                <th scope="col" className="r">{t("Aksi")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1667,7 +1751,7 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
                 <tr key={p.id}>
                   <td className="n strong">{p.no}</td>
                   <td className="n">{p.tgl}</td>
-                  <td>{sById(p.pemasok).nama}<em className="mut2">{KATEGORI[sById(p.pemasok).jenis]?.id}</em></td>
+                  <td>{sById(p.pemasok).nama}<em className="mut2">{KATEGORI[sById(p.pemasok).jenis] ? t(KATEGORI[sById(p.pemasok).jenis].id) : ""}</em></td>
                   <td><span className="chip">{gById(p.gudang).kode}</span></td>
                   <td className="mut">{p.items.map((i, k) => <div key={k}>{pById(i.produk).kode} × {fmt(i.qty)} {pById(i.produk).satuan}</div>)}</td>
                   <td className="r n strong">{rp(tot(p))}</td>
@@ -1675,17 +1759,17 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
                   <td className="r">
                     <div className="aksi">
                       {p.status !== "lunas" ? (
-                        <button className="btn sm" onClick={() => majuPO(p)}>→ {PO_LABEL[PO_FLOW[PO_FLOW.indexOf(p.status) + 1]].id}</button>
-                      ) : <span className="mut">selesai</span>}
+                        <button className="btn sm" onClick={() => majuPO(p)}>→ {t(PO_LABEL[PO_FLOW[PO_FLOW.indexOf(p.status) + 1]].id)}</button>
+                      ) : <span className="mut">{t("selesai")}</span>}
                       {can("delete") && (
-                        <button className="btn sm danger" title="Hapus"
-                          onClick={() => minta(`Hapus pembelian ${p.no}? Data & mutasi stoknya ikut terhapus.`, () => doDeletePembelian(p))}>Hapus</button>
+                        <button className="btn sm danger" title={t("Hapus")}
+                          onClick={() => minta(t("Hapus pembelian {no}? Data & mutasi stoknya ikut terhapus.", { no: p.no }), () => doDeletePembelian(p))}>{t("Hapus")}</button>
                       )}
                     </div>
                   </td>
                 </tr>
               ))}
-              {list.length === 0 && <tr><td colSpan={8}><Empty id={filterAktif ? "Tidak ada transaksi pada filter ini." : "Belum ada transaksi pembelian."} /></td></tr>}
+              {list.length === 0 && <tr><td colSpan={8}><Empty id={filterAktif ? t("Tidak ada transaksi pada filter ini.") : t("Belum ada transaksi pembelian.")} /></td></tr>}
             </tbody>
           </table>
         </Scroll>
@@ -1701,6 +1785,7 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
 
 function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
   /* yang bisa dibeli: casing & bahan baku */
+  const { t } = useLang();
   const beliable = produk.filter((p) => ["casing", "bahan"].includes(p.kategori));
   const [f, setF] = useState({ pemasok: "", gudang: "", tgl: today() });
   const [items, setItems] = useState([{ produk: "", qty: "", harga: "" }]);
@@ -1714,14 +1799,14 @@ function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
   const total = items.reduce((a, i) => a + (Number(i.qty) || 0) * (Number(i.harga) || 0), 0);
 
   const kirim = async () => {
-    if (!f.pemasok) return say("Pilih pemasok terlebih dahulu.", true);
-    if (!f.gudang) return say("Pilih gudang tujuan terlebih dahulu.", true);
+    if (!f.pemasok) return say(t("Pilih pemasok terlebih dahulu."), true);
+    if (!f.gudang) return say(t("Pilih gudang tujuan terlebih dahulu."), true);
     const salah = items.find((i) => String(i.qty).trim() !== "" && !(Number(i.qty) > 0));
-    if (salah) return say("Qty harus berupa angka lebih besar dari 0.", true);
+    if (salah) return say(t("Qty harus berupa angka lebih besar dari 0."), true);
     const valid = items.filter((i) => Number(i.qty) > 0);
-    if (!valid.length) return say("Tambahkan minimal satu baris barang.", true);
-    if (valid.some((i) => !i.produk)) return say("Pilih barang untuk setiap baris.", true);
-    if (valid.some((i) => !(Number(i.harga) >= 0))) return say("Harga harus berupa angka.", true);
+    if (!valid.length) return say(t("Tambahkan minimal satu baris barang."), true);
+    if (valid.some((i) => !i.produk)) return say(t("Pilih barang untuk setiap baris."), true);
+    if (valid.some((i) => !(Number(i.harga) >= 0))) return say(t("Harga harus berupa angka."), true);
     try {
       await submit({
         id: uid("PO"), no: nomor(f.tgl),
@@ -1733,32 +1818,33 @@ function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
   };
 
   return (
-    <Modal title="Pembelian Baru" close={close} onSave={kirim} wide saveLabel="Simpan Pesanan">
+    <Modal title={t("Pembelian Baru")} close={close} onSave={kirim} wide saveLabel={t("Simpan Pesanan")}>
       <div className="row2">
-        <Combo label="Pemasok" value={f.pemasok} onChange={set("pemasok")} placeholder="-- Pilih Pemasok --" opts={pemasok.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
-        <Combo label="Gudang Tujuan" value={f.gudang} onChange={set("gudang")} placeholder="-- Pilih Gudang --" opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+        <Combo label={t("Pemasok")} value={f.pemasok} onChange={set("pemasok")} placeholder={t("-- Pilih Pemasok --")} opts={pemasok.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
+        <Combo label={t("Gudang Tujuan")} value={f.gudang} onChange={set("gudang")} placeholder={t("-- Pilih Gudang --")} opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
       </div>
-      <div className="lbl mt">Rincian Barang</div>
+      <div className="lbl mt">{t("Rincian Barang")}</div>
       {items.map((it, i) => (
         <div className="line" key={i}>
-          <Combo bare ariaLabel={`Barang baris ${i + 1}`} value={it.produk} onChange={(v) => ubah(i, "produk", v)}
-            placeholder="-- Pilih Barang --" opts={beliable.map((p) => [p.id, `${p.kode} — ${p.nama} (${p.satuan})`])} />
-          <input type="number" min="0" inputMode="numeric" placeholder="Qty" aria-label={`Jumlah baris ${i + 1}`}
+          <Combo bare ariaLabel={t("Barang baris {i}", { i: i + 1 })} value={it.produk} onChange={(v) => ubah(i, "produk", v)}
+            placeholder={t("-- Pilih Barang --")} opts={beliable.map((p) => [p.id, `${p.kode} — ${p.nama} (${p.satuan})`])} />
+          <input type="number" min="0" inputMode="numeric" placeholder={t("Qty")} aria-label={t("Jumlah baris {i}", { i: i + 1 })}
             value={it.qty} onChange={(e) => ubah(i, "qty", e.target.value)} />
-          <input type="number" min="0" inputMode="numeric" placeholder="Harga" aria-label={`Harga baris ${i + 1}`}
+          <input type="number" min="0" inputMode="numeric" placeholder={t("Harga")} aria-label={t("Harga baris {i}", { i: i + 1 })}
             value={it.harga} onChange={(e) => ubah(i, "harga", e.target.value)} title={rp(it.harga)} />
           <span className="stokinfo">{produk.find((p) => p.id === it.produk)?.satuan}</span>
-          <button className="x" aria-label={`Hapus baris ${i + 1}`} onClick={() => setItems((l) => l.filter((_, n) => n !== i))} disabled={items.length === 1}>×</button>
+          <button className="x" aria-label={t("Hapus baris {i}", { i: i + 1 })} onClick={() => setItems((l) => l.filter((_, n) => n !== i))} disabled={items.length === 1}>×</button>
         </div>
       ))}
-      <button className="btn sm" onClick={() => setItems((l) => [...l, { produk: "", qty: "", harga: "" }])}>+ Tambah Baris</button>
-      <div className="sum"><div><span>Total</span><b className="n">{rp(total)}</b></div></div>
+      <button className="btn sm" onClick={() => setItems((l) => [...l, { produk: "", qty: "", harga: "" }])}>{t("+ Tambah Baris")}</button>
+      <div className="sum"><div><span>{t("Total")}</span><b className="n">{rp(total)}</b></div></div>
     </Modal>
   );
 }
 
 /* ============================ PELANGGAN ============================ */
 function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, gById, pById, say, can, minta, doDeletePelanggan }) {
+  const { t } = useLang();
   const [buka, setBuka] = useState(false);
   const [detail, setDetail] = useState(null);
   const [cari, setCari] = useState("");
@@ -1771,7 +1857,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
 
   const unduhExcel = () => {
     const aoa = [
-      ["Kode", "Nama", "PIC", "Telepon", "Kota", "Grade", "Limit Kredit", "Termin (hari)", "Piutang", "Omzet"],
+      [t("Kode"), t("Nama"), t("PIC"), t("Telepon"), t("Kota"), t("Grade"), t("Limit Kredit"), t("Termin (hari)"), t("Piutang"), t("Omzet")],
       ...list.map((c) => [
         c.kode, c.nama, c.pic, c.telp, c.kota, c.grade, c.limit, c.termin, piutang(c.id), omzet(c.id),
       ]),
@@ -1781,17 +1867,17 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
 
   return (
     <>
-      <SectionTitle id="Pelanggan"
+      <SectionTitle id={t("Pelanggan")}
         mid={
           <div className="filters">
             <label className="fld cari">
-              <span className="lbl">Cari</span>
-              <input type="search" value={cari} onChange={(e) => setCari(e.target.value)} placeholder="Kode / nama / PIC / kota" />
+              <span className="lbl">{t("Cari")}</span>
+              <input type="search" value={cari} onChange={(e) => setCari(e.target.value)} placeholder={t("Kode / nama / PIC / kota")} />
             </label>
           </div>
         }>
         <button className="btn" onClick={unduhExcel}>↓ Excel</button>
-        <button className="btn pri" onClick={() => setBuka(true)}>+ Pelanggan Baru</button>
+        <button className="btn pri" onClick={() => setBuka(true)}>{t("+ Pelanggan Baru")}</button>
       </SectionTitle>
 
       <Card>
@@ -1799,15 +1885,15 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
           <table>
             <thead>
               <tr>
-                <th scope="col">Kode</th>
-                <th scope="col">Pelanggan</th>
-                <th scope="col">Kota</th>
-                <th scope="col" className="c">Grade</th>
-                <th scope="col" className="r">Termin</th>
-                <th scope="col" className="r">Piutang</th>
-                <th scope="col" className="r">Limit Kredit</th>
-                <th scope="col" className="r">Omzet</th>
-                {can("delete") && <th scope="col" className="r">Aksi</th>}
+                <th scope="col">{t("Kode")}</th>
+                <th scope="col">{t("Pelanggan")}</th>
+                <th scope="col">{t("Kota")}</th>
+                <th scope="col" className="c">{t("Grade")}</th>
+                <th scope="col" className="r">{t("Termin")}</th>
+                <th scope="col" className="r">{t("Piutang")}</th>
+                <th scope="col" className="r">{t("Limit Kredit")}</th>
+                <th scope="col" className="r">{t("Omzet")}</th>
+                {can("delete") && <th scope="col" className="r">{t("Aksi")}</th>}
               </tr>
             </thead>
             <tbody>
@@ -1823,20 +1909,20 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
                     </td>
                     <td className="mut">{c.kota}</td>
                     <td className="c"><span className={"grade g" + c.grade}>{c.grade}</span></td>
-                    <td className="r n mut">{c.termin} hari</td>
+                    <td className="r n mut">{t("{n} hari", { n: c.termin })}</td>
                     <td className={"r n strong " + (lewat ? "bad" : "")}>{rp(p)}</td>
                     <td className="r n">{rp(c.limit)}</td>
                     <td className="r n">{rp(omzet(c.id))}</td>
                     {can("delete") && (
                       <td className="r">
-                        <button className="btn sm danger" title="Hapus"
-                          onClick={() => minta(`Hapus pelanggan ${c.nama}?`, () => doDeletePelanggan(c))}>Hapus</button>
+                        <button className="btn sm danger" title={t("Hapus")}
+                          onClick={() => minta(t("Hapus pelanggan {nama}?", { nama: c.nama }), () => doDeletePelanggan(c))}>{t("Hapus")}</button>
                       </td>
                     )}
                   </tr>
                 );
               })}
-              {list.length === 0 && <tr><td colSpan={9}><Empty id={cari ? "Tidak ada pelanggan yang cocok." : "Belum ada pelanggan."} /></td></tr>}
+              {list.length === 0 && <tr><td colSpan={9}><Empty id={cari ? t("Tidak ada pelanggan yang cocok.") : t("Belum ada pelanggan.")} /></td></tr>}
             </tbody>
           </table>
         </Scroll>
@@ -1854,35 +1940,37 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
 }
 
 function FormPelanggan({ close, say, submit }) {
+  const { t } = useLang();
   const [f, setF] = useState({ nama: "", pic: "", telp: "", kota: "", grade: "B", limit: "100000000", termin: "30" });
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
   const kirim = async () => {
-    if (!f.nama.trim()) return say("Nama pelanggan wajib diisi.", true);
+    if (!f.nama.trim()) return say(t("Nama pelanggan wajib diisi."), true);
     try {
       await submit({ id: uid("C"), kode: "PLG-" + String(Math.floor(Math.random() * 900) + 100), ...f, limit: Number(f.limit), termin: Number(f.termin) });
       close();
     } catch (e) { say(e.message, true); }
   };
   return (
-    <Modal title="Pelanggan Baru" close={close} onSave={kirim}>
-      <Inp label="Nama Perusahaan" value={f.nama} onChange={set("nama")} />
+    <Modal title={t("Pelanggan Baru")} close={close} onSave={kirim}>
+      <Inp label={t("Nama Perusahaan")} value={f.nama} onChange={set("nama")} />
       <div className="row2">
-        <Inp label="PIC" value={f.pic} onChange={set("pic")} />
-        <Inp label="Telepon" value={f.telp} onChange={set("telp")} />
+        <Inp label={t("PIC")} value={f.pic} onChange={set("pic")} />
+        <Inp label={t("Telepon")} value={f.telp} onChange={set("telp")} />
       </div>
       <div className="row2">
-        <Inp label="Kota" value={f.kota} onChange={set("kota")} />
-        <Sel label="Grade" value={f.grade} onChange={set("grade")} opts={[["A", "A"], ["B", "B"], ["C", "C"]]} />
+        <Inp label={t("Kota")} value={f.kota} onChange={set("kota")} />
+        <Sel label={t("Grade")} value={f.grade} onChange={set("grade")} opts={[["A", "A"], ["B", "B"], ["C", "C"]]} />
       </div>
       <div className="row2">
-        <Inp label="Limit Kredit (Rp)" type="number" value={f.limit} onChange={set("limit")} />
-        <Inp label="Termin (hari)" type="number" value={f.termin} onChange={set("termin")} />
+        <Inp label={t("Limit Kredit (Rp)")} type="number" value={f.limit} onChange={set("limit")} />
+        <Inp label={t("Termin (hari)")} type="number" value={f.termin} onChange={set("termin")} />
       </div>
     </Modal>
   );
 }
 
 function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close }) {
+  const { t } = useLang();
   const box = useDialog(close);
   const judul = useId();
   const riwayat = useMemo(
@@ -1897,34 +1985,34 @@ function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close }
       <div className="md wide" ref={box} role="dialog" aria-modal="true" aria-labelledby={judul} onClick={(e) => e.stopPropagation()}>
         <div className="md-hd">
           <h3 id={judul}>{c.nama} <em>{c.kode}</em></h3>
-          <button className="x" onClick={close} aria-label="Tutup dialog">×</button>
+          <button className="x" onClick={close} aria-label={t("Tutup dialog")}>×</button>
         </div>
         <div className="md-bd">
           <div className="cust-info">
-            <div><span className="lbl2">PIC</span><b>{c.pic || "-"}</b></div>
-            <div><span className="lbl2">Telepon</span><b>{c.telp || "-"}</b></div>
-            <div><span className="lbl2">Kota</span><b>{c.kota || "-"}</b></div>
-            <div><span className="lbl2">Grade</span><span className={"grade g" + c.grade}>{c.grade}</span></div>
-            <div><span className="lbl2">Termin</span><b>{c.termin} hari</b></div>
-            <div><span className="lbl2">Limit Kredit</span><b>{rp(c.limit)}</b></div>
+            <div><span className="lbl2">{t("PIC")}</span><b>{c.pic || "-"}</b></div>
+            <div><span className="lbl2">{t("Telepon")}</span><b>{c.telp || "-"}</b></div>
+            <div><span className="lbl2">{t("Kota")}</span><b>{c.kota || "-"}</b></div>
+            <div><span className="lbl2">{t("Grade")}</span><span className={"grade g" + c.grade}>{c.grade}</span></div>
+            <div><span className="lbl2">{t("Termin")}</span><b>{t("{n} hari", { n: c.termin })}</b></div>
+            <div><span className="lbl2">{t("Limit Kredit")}</span><b>{rp(c.limit)}</b></div>
           </div>
 
           <div className="kpis">
-            <Kpi label="Piutang" val={rp(p)} sub={p > c.limit ? "melebihi limit kredit" : "belum lunas"} tone={p > c.limit ? "alert" : p > 0 ? "warn" : ""} />
-            <Kpi label="Omzet" val={rp(omzet)} sub={`${riwayat.length} transaksi`} />
+            <Kpi label={t("Piutang")} val={rp(p)} sub={p > c.limit ? t("melebihi limit kredit") : t("belum lunas")} tone={p > c.limit ? "alert" : p > 0 ? "warn" : ""} />
+            <Kpi label={t("Omzet")} val={rp(omzet)} sub={t("{n} transaksi", { n: riwayat.length })} />
           </div>
 
-          <h4 className="mut2">Riwayat Transaksi</h4>
+          <h4 className="mut2">{t("Riwayat Transaksi")}</h4>
           <Scroll max={280}>
             <table>
               <thead>
                 <tr>
-                  <th scope="col">No.</th>
-                  <th scope="col">Tanggal</th>
-                  <th scope="col">Gudang</th>
-                  <th scope="col">Rincian</th>
-                  <th scope="col" className="r">Total</th>
-                  <th scope="col">Status</th>
+                  <th scope="col">{t("No.")}</th>
+                  <th scope="col">{t("Tanggal")}</th>
+                  <th scope="col">{t("Gudang")}</th>
+                  <th scope="col">{t("Rincian")}</th>
+                  <th scope="col" className="r">{t("Total")}</th>
+                  <th scope="col">{t("Status")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1942,13 +2030,13 @@ function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close }
                     <td><Status s={s.status} map={SO_LABEL} /></td>
                   </tr>
                 ))}
-                {riwayat.length === 0 && <tr><td colSpan={6}><Empty id="Belum ada transaksi." /></td></tr>}
+                {riwayat.length === 0 && <tr><td colSpan={6}><Empty id={t("Belum ada transaksi.")} /></td></tr>}
               </tbody>
             </table>
           </Scroll>
         </div>
         <div className="md-ft">
-          <button className="btn pri" onClick={close}>Tutup</button>
+          <button className="btn pri" onClick={close}>{t("Tutup")}</button>
         </div>
       </div>
     </div>
@@ -1957,6 +2045,7 @@ function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close }
 
 /* ============================ PIUTANG ============================ */
 function Piutang({ penjualan, cById, totalSO }) {
+  const { t } = useLang();
   const [cari, setCari] = useState("");
   const { piutangRows, piutangF, agingRows, piutang90, rasio90, topPelanggan } = useMemo(
     () => hitungPiutang(penjualan, cById, totalSO),
@@ -1974,7 +2063,7 @@ function Piutang({ penjualan, cById, totalSO }) {
 
   const unduhExcel = () => {
     const aoa = [
-      ["No.", "Pelanggan", "Tanggal", "Jatuh Tempo", "Telat (hari)", "Nilai"],
+      [t("No."), t("Pelanggan"), t("Tanggal"), t("Jatuh Tempo"), t("Telat (hari)"), t("Nilai")],
       ...rincian.map((r) => [r.so.no, r.c.nama, r.so.tgl, r.tempo, r.telat, r.nilai]),
     ];
     downloadXlsx(`piutang_${today()}`, "Piutang", aoa);
@@ -1982,65 +2071,65 @@ function Piutang({ penjualan, cById, totalSO }) {
 
   return (
     <>
-      <SectionTitle id="Piutang" mid={<span className="mut2">acuan: panduan analisis umur piutang</span>}>
+      <SectionTitle id={t("Piutang")} mid={<span className="mut2">{t("acuan: panduan analisis umur piutang")}</span>}>
         <button className="btn" onClick={unduhExcel}>↓ Excel</button>
       </SectionTitle>
 
       <div className="kpis">
-        <Kpi label="Piutang Berjalan" val={rp(piutangF)} sub={`${fmt(piutangRows.length)} invoice belum lunas`} tone={piutangF > 0 ? "warn" : ""} />
-        <Kpi label="Piutang > 90 Hari" val={rp(piutang90)} sub={`${fmt(rasio90)}% dari piutang berjalan`} tone={piutang90 > 0 ? "alert" : ""} />
-        <Kpi label="Pelanggan Berpiutang" val={fmt(topPelanggan.length)} sub="pelanggan dengan tagihan berjalan" />
+        <Kpi label={t("Piutang Berjalan")} val={rp(piutangF)} sub={t("{n} invoice belum lunas", { n: fmt(piutangRows.length) })} tone={piutangF > 0 ? "warn" : ""} />
+        <Kpi label={t("Piutang > 90 Hari")} val={rp(piutang90)} sub={t("{p}% dari piutang berjalan", { p: fmt(rasio90) })} tone={piutang90 > 0 ? "alert" : ""} />
+        <Kpi label={t("Pelanggan Berpiutang")} val={fmt(topPelanggan.length)} sub={t("pelanggan dengan tagihan berjalan")} />
       </div>
 
-      <SectionTitle id="Umur Piutang (Aging)" />
+      <SectionTitle id={t("Umur Piutang (Aging)")} />
       <Card>
         <Scroll>
           <table>
             <thead>
               <tr>
-                <th scope="col">Umur</th>
-                <th scope="col" className="r">Invoice</th>
-                <th scope="col" className="r">Nilai</th>
-                <th scope="col" className="r">Porsi</th>
+                <th scope="col">{t("Umur")}</th>
+                <th scope="col" className="r">{t("Invoice")}</th>
+                <th scope="col" className="r">{t("Nilai")}</th>
+                <th scope="col" className="r">{t("Porsi")}</th>
               </tr>
             </thead>
             <tbody>
               {agingRows.map((r) => (
                 <tr key={r.k}>
-                  <td className={r.k === "90180" || r.k === "180" ? "bad strong" : r.k === "3060" || r.k === "6090" ? "warn" : ""}>{r.label}</td>
+                  <td className={r.k === "90180" || r.k === "180" ? "bad strong" : r.k === "3060" || r.k === "6090" ? "warn" : ""}>{t(r.label)}</td>
                   <td className="r n">{fmt(r.n)}</td>
                   <td className="r n">{rp(r.nilai)}</td>
                   <td className="r n">{piutangF ? fmt((r.nilai / piutangF) * 100) : 0}%</td>
                 </tr>
               ))}
-              {piutangRows.length === 0 && <tr><td colSpan={4}><Empty id="Tidak ada piutang berjalan." /></td></tr>}
+              {piutangRows.length === 0 && <tr><td colSpan={4}><Empty id={t("Tidak ada piutang berjalan.")} /></td></tr>}
             </tbody>
           </table>
         </Scroll>
       </Card>
 
-      <SectionTitle id="Pelanggan Berisiko"
+      <SectionTitle id={t("Pelanggan Berisiko")}
         mid={
           <div className="filters">
             <label className="fld cari">
-              <span className="lbl">Cari</span>
-              <input type="search" value={cari} onChange={(e) => setCari(e.target.value)} placeholder="Nama pelanggan" />
+              <span className="lbl">{t("Cari")}</span>
+              <input type="search" value={cari} onChange={(e) => setCari(e.target.value)} placeholder={t("Nama pelanggan")} />
             </label>
           </div>
         } />
       <Card>
         {berisiko.length === 0 ? (
-          <Empty id={cari ? "Tidak ada pelanggan yang cocok." : "Tidak ada piutang berjalan."} />
+          <Empty id={cari ? t("Tidak ada pelanggan yang cocok.") : t("Tidak ada piutang berjalan.")} />
         ) : (
           <Scroll>
             <table>
               <thead>
                 <tr>
-                  <th scope="col">Pelanggan</th>
-                  <th scope="col" className="r">Piutang</th>
-                  <th scope="col" className="r">Telat</th>
-                  <th scope="col" className="r">Pakai Limit</th>
-                  <th scope="col">Grade</th>
+                  <th scope="col">{t("Pelanggan")}</th>
+                  <th scope="col" className="r">{t("Piutang")}</th>
+                  <th scope="col" className="r">{t("Telat")}</th>
+                  <th scope="col" className="r">{t("Pakai Limit")}</th>
+                  <th scope="col">{t("Grade")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -2050,9 +2139,9 @@ function Piutang({ penjualan, cById, totalSO }) {
                     <tr key={x.c.id}>
                       <td>{x.c.nama}</td>
                       <td className="r n">{rp(x.nilai)}</td>
-                      <td className={"r n " + (x.telat > 90 ? "bad" : x.telat > 30 ? "warn" : "")}>{x.telat > 0 ? `${fmt(x.telat)} hr` : "—"}</td>
+                      <td className={"r n " + (x.telat > 90 ? "bad" : x.telat > 30 ? "warn" : "")}>{x.telat > 0 ? t("{n} hr", { n: fmt(x.telat) }) : "—"}</td>
                       <td className="r n">{x.c.limit ? `${fmt(x.pakai)}%` : "—"}</td>
-                      <td><span className={"st s-" + tone}>{label}</span></td>
+                      <td><span className={"st s-" + tone}>{t(label)}</span></td>
                     </tr>
                   );
                 })}
@@ -2062,32 +2151,32 @@ function Piutang({ penjualan, cById, totalSO }) {
         )}
       </Card>
 
-      <SectionTitle id="Rincian Invoice" />
+      <SectionTitle id={t("Rincian Invoice")} />
       <Card>
         <Scroll>
           <table>
             <thead>
               <tr>
-                <th scope="col">No.</th>
-                <th scope="col">Pelanggan</th>
-                <th scope="col">Tanggal</th>
-                <th scope="col">Jatuh Tempo</th>
-                <th scope="col" className="r">Telat</th>
-                <th scope="col" className="r">Nilai</th>
+                <th scope="col">{t("No.")}</th>
+                <th scope="col">{t("Pelanggan")}</th>
+                <th scope="col">{t("Tanggal")}</th>
+                <th scope="col">{t("Jatuh Tempo")}</th>
+                <th scope="col" className="r">{t("Telat")}</th>
+                <th scope="col" className="r">{t("Nilai")}</th>
               </tr>
             </thead>
             <tbody>
               {rincian.map((r) => (
                 <tr key={r.so.id}>
                   <td className="n strong">{r.so.no}</td>
-                  <td>{r.c.nama}<em className="mut2">Grade {r.c.grade}</em></td>
+                  <td>{r.c.nama}<em className="mut2">{t("Grade {g}", { g: r.c.grade })}</em></td>
                   <td className="n">{r.so.tgl}</td>
                   <td className="n">{r.tempo}</td>
-                  <td className={"r n " + (r.telat > 90 ? "bad" : r.telat > 30 ? "warn" : "")}>{r.telat > 0 ? `${fmt(r.telat)} hr` : "—"}</td>
+                  <td className={"r n " + (r.telat > 90 ? "bad" : r.telat > 30 ? "warn" : "")}>{r.telat > 0 ? t("{n} hr", { n: fmt(r.telat) }) : "—"}</td>
                   <td className="r n strong">{rp(r.nilai)}</td>
                 </tr>
               ))}
-              {rincian.length === 0 && <tr><td colSpan={6}><Empty id="Tidak ada piutang berjalan." /></td></tr>}
+              {rincian.length === 0 && <tr><td colSpan={6}><Empty id={t("Tidak ada piutang berjalan.")} /></td></tr>}
             </tbody>
           </table>
         </Scroll>
@@ -2097,14 +2186,25 @@ function Piutang({ penjualan, cById, totalSO }) {
 }
 
 /* ============================ UI ============================ */
+/* Logo Ascendo — aset resmi di public/. Dipakai untuk identitas aplikasi
+   (header & layar masuk) saja. JANGAN dipasang di kop dokumen cetak:
+   penerbit faktur adalah CV. Sinar Perkasa Ban / PT. Daimond Fajar Jaya. */
+function AscendoMark({ size = 34 }) {
+  return (
+    <img className="mark" src="/ascendo-symbol.png" alt="" aria-hidden="true"
+      width={size} height={Math.round((size * 196) / 200)} />
+  );
+}
+
+/* kop dokumen cetak memakai mark netral, bukan logo Ascendo */
 function TreadMark() {
   return (
     <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true" className="mark">
-      <rect width="34" height="34" rx="3" fill="var(--ink)" />
+      <rect width="34" height="34" rx="4" fill="var(--asm-primary)" />
       {[0, 1, 2].map((r) =>
         [0, 1, 2, 3].map((c) => (
           <rect key={r + "-" + c} x={5 + c * 6.5} y={5 + r * 8} width={4.5} height={5.5} rx="1"
-            fill={r === 1 ? "var(--marking)" : "var(--slab)"} opacity={r === 1 ? 1 : 0.75} />
+            fill={r === 1 ? "var(--asm-white)" : "var(--asm-primary-40)"} opacity={r === 1 ? 1 : 0.9} />
         ))
       )}
     </svg>
@@ -2145,10 +2245,17 @@ const Scroll = ({ children, max }) => <div className="scroll" style={max ? { max
 
 const Empty = ({ id }) => <div className="empty">{id}</div>;
 
-const TIPE_LABEL = { masuk: "Masuk", keluar: "Keluar", transfer: "Transfer", penyesuaian: "Penyesuaian" };
-const Tag = ({ t }) => <span className={"tag t-" + t}>{TIPE_LABEL[t] || t || "—"}</span>;
+/* "Keluar|mutasi" diberi konteks karena "Keluar" di header berarti logout */
+const TIPE_LABEL = { masuk: "Masuk", keluar: "Keluar|mutasi", transfer: "Transfer", penyesuaian: "Penyesuaian" };
+const Tag = ({ t: tipe }) => {
+  const { t } = useLang();
+  return <span className={"tag t-" + tipe}>{tipe ? t(TIPE_LABEL[tipe] || tipe) : "—"}</span>;
+};
 
-const Status = ({ s, map }) => <span className={"st s-" + s}>{map[s]?.id || s || "—"}</span>;
+const Status = ({ s, map }) => {
+  const { t } = useLang();
+  return <span className={"st s-" + s}>{map[s]?.id ? t(map[s].id) : s || "—"}</span>;
+};
 
 const Inp = ({ label, value, onChange, type = "text", hint }) => (
   <label className="fld">
@@ -2170,6 +2277,7 @@ const Sel = ({ label, value, onChange, opts, placeholder }) => (
 
 /* dropdown pencarian: ketik kata kunci untuk menyaring opsi, klik untuk memilih */
 const Combo = ({ label, ariaLabel, value, onChange, opts, placeholder, bare }) => {
+  const { t } = useLang();
   const domId = useId();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -2196,7 +2304,7 @@ const Combo = ({ label, ariaLabel, value, onChange, opts, placeholder, bare }) =
       {open && (
         <ul className="combo-list" id={`${domId}-list`} role="listbox">
           {filtered.length === 0
-            ? <li className="combo-empty">Tidak ditemukan</li>
+            ? <li className="combo-empty">{t("Tidak ditemukan")}</li>
             : filtered.map(([v, t]) => (
               <li key={v} role="option" aria-selected={v === value}
                 onMouseDown={(e) => { e.preventDefault(); pilih(v, t); }}>{t}</li>
@@ -2216,6 +2324,7 @@ const Combo = ({ label, ariaLabel, value, onChange, opts, placeholder, bare }) =
 };
 
 const Modal = ({ title, close, onSave, children, wide, saveLabel }) => {
+  const { t } = useLang();
   const box = useDialog(close);
   const judul = useId();
   return (
@@ -2224,12 +2333,12 @@ const Modal = ({ title, close, onSave, children, wide, saveLabel }) => {
         onClick={(e) => e.stopPropagation()}>
         <div className="md-hd">
           <h3 id={judul}>{title}</h3>
-          <button className="x" onClick={close} aria-label="Tutup dialog">×</button>
+          <button className="x" onClick={close} aria-label={t("Tutup dialog")}>×</button>
         </div>
         <div className="md-bd">{children}</div>
         <div className="md-ft">
-          <button className="btn" onClick={close}>Batal</button>
-          <button className="btn pri" onClick={onSave}>{saveLabel || "Simpan"}</button>
+          <button className="btn" onClick={close}>{t("Batal")}</button>
+          <button className="btn pri" onClick={onSave}>{saveLabel || t("Simpan")}</button>
         </div>
       </div>
     </div>
@@ -2241,100 +2350,146 @@ function Style() {
   return (
     <style>{`
 /* font dimuat dari index.html (preload non-blocking) — jangan @import di sini */
+
+/* ============================================================
+   ASCENDO BI — token dasar (ASM 디자인 가이드 v1.0, Bab 11)
+   Warna BI tidak boleh diubah: primary #0062C6, dark #333333.
+   Nama lama (--slab/--paper/--ink/...) dipertahankan sebagai alias
+   agar seluruh aturan di bawah ikut berubah otomatis.
+   ============================================================ */
 .vk{
-  --slab:#E4E6E1; --paper:#F7F8F5; --ink:#20221F; --rubber:#2C302D;
-  --muted:#71766F; --line:#CBCEC6; --marking:#DFA71C;
-  --ok:#3B7A57; --warn:#B45A1E; --alert:#A63A28;
-  --fd:'Archivo Narrow','IBM Plex Sans',system-ui,sans-serif;
-  --fb:'IBM Plex Sans',system-ui,-apple-system,sans-serif;
-  --fm:'IBM Plex Mono',ui-monospace,monospace;
-  background:var(--slab); color:var(--ink); font-family:var(--fb);
-  font-size:13px; line-height:1.45; min-height:100%;
+  /* BI 지정색 — 변경 금지 */
+  --asm-primary:#0062C6; --asm-dark:#333333; --asm-white:#FFFFFF;
+  /* perluasan merek */
+  --asm-primary-hover:#0053A8; --asm-primary-active:#00458B; --asm-primary-fg:#FFFFFF;
+  --asm-primary-6:#F0F6FC; --asm-primary-10:#E6EFF9; --asm-primary-15:#D9E7F6;
+  --asm-primary-20:#CCE0F4; --asm-primary-40:#99C0E8;
+  /* netral */
+  --asm-bg:#F5F5F5; --asm-card:#FFFFFF;
+  --asm-fg:#333333; --asm-fg-muted:#666666;
+  --asm-secondary:#F3F3F3; --asm-muted:#EBEBEB;
+  --asm-border:#D6D6D6; --asm-border-50:#EBEBEB;
+  /* status: teks / latar lembut / garis */
+  --asm-success:#1E7B34; --asm-success-soft:#E6F4EA; --asm-success-border:#A8D5B3;
+  --asm-warning:#8A5A00; --asm-warning-soft:#FFF6E0; --asm-warning-border:#F5D580;
+  --asm-danger:#C62828;  --asm-danger-soft:#FCE9E9;  --asm-danger-border:#F0A3A3;
+  --asm-info:#0062C6;    --asm-info-soft:#E6EFF9;    --asm-info-border:#99C0E8;
+  --asm-neutral:#5F5F5F; --asm-neutral-soft:#EDEDED; --asm-neutral-border:#D6D6D6;
+  /* sudut & bayangan */
+  --asm-radius-sm:4px; --asm-radius-md:6px; --asm-radius-lg:8px;
+  --asm-shadow-md:0 4px 12px rgb(51 51 51 / .12);
+  --asm-shadow-lg:0 12px 32px rgb(51 51 51 / .18);
+
+  /* alias lama → token BI */
+  --slab:var(--asm-bg); --paper:var(--asm-card); --ink:var(--asm-fg); --rubber:var(--asm-dark);
+  --muted:var(--asm-fg-muted); --line:var(--asm-border);
+  --ok:var(--asm-success); --warn:var(--asm-warning); --alert:var(--asm-danger);
+
+  --fd:'Noto Sans KR','Noto Sans','Apple SD Gothic Neo',system-ui,sans-serif;
+  --fb:'Noto Sans KR','Noto Sans','Apple SD Gothic Neo',system-ui,-apple-system,sans-serif;
+  --fm:var(--fb);
+
+  background:var(--asm-bg); color:var(--asm-fg); font-family:var(--fb);
+  font-size:14px; line-height:1.5; min-height:100%;
+  /* tanpa font mono khusus — perataan angka memakai tabular-nums (Bab 4) */
+  font-variant-numeric:tabular-nums;
 }
 .vk *{box-sizing:border-box}
 .vk em{font-style:normal}
-.vk h1,.vk h2,.vk h3,.vk h4{font-family:var(--fd); margin:0; letter-spacing:.02em}
-.vk .n{font-family:var(--fm); font-variant-numeric:tabular-nums}
-.vk .mut{color:var(--muted)}
-.vk .mut2{display:block; color:var(--muted); font-size:10.5px}
-.vk .strong{font-weight:600}
-.vk .ok{color:var(--ok)} .vk .bad{color:var(--alert)} .vk .warn{color:var(--warn)}
+.vk h1,.vk h2,.vk h3,.vk h4{font-family:var(--fd); margin:0; font-weight:700; letter-spacing:-.01em}
+.vk .n,.vk .num{font-variant-numeric:tabular-nums}
+.vk .mut{color:var(--asm-fg-muted)}
+.vk .mut2{display:block; color:var(--asm-fg-muted); font-size:11px}
+.vk .strong{font-weight:700}
+.vk .ok{color:var(--asm-success)} .vk .bad{color:var(--asm-danger)} .vk .warn{color:var(--asm-warning)}
 .vk .r{text-align:right}
 .vk .c{text-align:center}
+.vk ::selection{background:var(--asm-primary-20); color:var(--asm-primary)}
 
 /* header */
-.vk .hd{background:var(--paper); border-bottom:1px solid var(--line)}
-.vk .hd-in{max-width:1240px; margin:0 auto; padding:16px 20px 12px; display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap}
+.vk .hd{background:var(--asm-card); border-bottom:1px solid var(--asm-border)}
+.vk .hd-in{max-width:1240px; margin:0 auto; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap}
 .vk .brand{display:flex; gap:12px; align-items:center; background:none; border:0; padding:0; margin:0; cursor:pointer; text-align:left; font:inherit; color:inherit}
-.vk .mark{flex:none; border-radius:3px}
-.vk .hd h1{font-size:22px; font-weight:700; letter-spacing:.16em; text-transform:uppercase}
-.vk .hd p{margin:1px 0 0; font-size:11.5px; color:var(--muted)}
-.vk .hd p em{display:block; font-size:10.5px}
-.vk .hd-meta{text-align:right; font-family:var(--fd); text-transform:uppercase; letter-spacing:.1em; font-size:10.5px}
-.vk .hd-meta .k{display:block; color:var(--muted)}
-.vk .hd-meta .v{font-family:var(--fm); letter-spacing:0; font-size:12px}
-.vk .conn{display:inline-block; margin-top:4px; font-family:var(--fm); font-size:10px; letter-spacing:0; text-transform:none; padding:1px 7px; border:1px solid var(--line); border-radius:2px; color:var(--muted)}
-.vk .conn.online{color:var(--ok); border-color:var(--ok)}
-.vk .conn.offline{color:var(--warn); border-color:var(--warn)}
-.vk .hazard{height:5px; background:repeating-linear-gradient(45deg,var(--marking) 0 12px,var(--ink) 12px 24px)}
+.vk .mark{flex:none; display:block}
+.vk .sig{display:block; height:auto; max-width:100%}
+.vk .hd h1{font-size:20px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--asm-primary)}
+.vk .hd p{margin:1px 0 0; font-size:12px; color:var(--asm-fg-muted)}
+.vk .hd p em{display:block; font-size:11px}
+.vk .hd-meta{text-align:right; font-size:12px}
+.vk .hd-meta .k{display:block; font-size:11px; font-weight:500; letter-spacing:.06em; color:var(--asm-primary)}
+.vk .hd-meta .v{font-size:13px}
+.vk .conn{display:inline-block; margin-top:4px; font-size:11px; padding:1px 8px; border:1px solid var(--asm-border); border-radius:var(--asm-radius-sm); color:var(--asm-fg-muted)}
+.vk .conn.online{color:var(--asm-success); border-color:var(--asm-success-border); background:var(--asm-success-soft)}
+.vk .conn.offline{color:var(--asm-warning); border-color:var(--asm-warning-border); background:var(--asm-warning-soft)}
+/* garis aksen merek — 4px, warna utama BI (Bab 11 .asm-accent-bar) */
+.vk .accent{height:4px; background:var(--asm-primary)}
 
 /* tabs */
 .vk .tabs{max-width:1240px; margin:0 auto; padding:0 12px; display:flex; justify-content:center; gap:2px; overflow-x:auto;
   background:
-    linear-gradient(to right, var(--paper) 0, var(--paper) 0) left / 24px 100%,
-    linear-gradient(to left, var(--paper) 0, var(--paper) 0) right / 24px 100%,
-    linear-gradient(to right, rgba(32,34,31,.16), rgba(32,34,31,0) 24px) left / 24px 100%,
-    linear-gradient(to left, rgba(32,34,31,.16), rgba(32,34,31,0) 24px) right / 24px 100%;
+    linear-gradient(to right, var(--asm-card) 0, var(--asm-card) 0) left / 24px 100%,
+    linear-gradient(to left, var(--asm-card) 0, var(--asm-card) 0) right / 24px 100%,
+    linear-gradient(to right, rgba(51,51,51,.14), rgba(51,51,51,0) 24px) left / 24px 100%,
+    linear-gradient(to left, rgba(51,51,51,.14), rgba(51,51,51,0) 24px) right / 24px 100%;
   background-repeat:no-repeat;
   background-attachment:local, local, scroll, scroll;
 }
-.vk .tab{background:none; border:0; border-bottom:3px solid transparent; padding:10px 14px 8px; cursor:pointer;
-  font-family:var(--fd); font-size:13px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); white-space:nowrap}
-.vk .tab em{display:block; font-family:var(--fb); font-size:10px; letter-spacing:0; text-transform:none; font-weight:400}
-.vk .tab:hover{color:var(--ink)}
-.vk .tab.on{color:var(--ink); border-bottom-color:var(--marking)}
+.vk .tab{background:none; border:0; border-bottom:2px solid transparent; padding:10px 16px; cursor:pointer;
+  font-family:var(--fd); font-size:.875rem; font-weight:500; color:var(--asm-fg-muted); white-space:nowrap; margin-bottom:-1px}
+.vk .tab em{display:block; font-size:11px; font-weight:400; color:var(--asm-fg-muted)}
+.vk .tab:hover{background:var(--asm-secondary); color:var(--asm-fg)}
+.vk .tab.on{color:var(--asm-primary); font-weight:700; border-bottom-color:var(--asm-primary)}
 
-.vk .wrap{max-width:1240px; margin:0 auto; padding:20px}
+.vk .wrap{max-width:1240px; margin:0 auto; padding:24px 20px}
 
 /* section */
-.vk .sect{display:flex; justify-content:space-between; align-items:center; gap:16px; margin:4px 0 14px; flex-wrap:wrap}
+.vk .sect{display:flex; justify-content:space-between; align-items:center; gap:16px; margin:4px 0 16px; flex-wrap:wrap}
 .vk .sect-l{display:flex; align-items:center; gap:16px; flex-wrap:wrap; min-width:0; flex:1}
-.vk .sect h2{font-size:17px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; flex-shrink:0}
-.vk .sect h2 em{font-family:var(--fb); font-size:11px; letter-spacing:0; text-transform:none; color:var(--muted); margin-left:8px}
+.vk .sect h2{font-size:1.125rem; font-weight:700; letter-spacing:-.01em; flex-shrink:0; padding-left:10px; border-left:3px solid var(--asm-primary)}
+.vk .sect h2 em{font-size:12px; letter-spacing:0; color:var(--asm-fg-muted); margin-left:8px; font-weight:400}
 .vk .acts{display:flex; gap:8px; flex-wrap:wrap}
 
-/* buttons */
-.vk .btn{background:var(--paper); border:1px solid var(--line); border-radius:2px; padding:7px 12px; cursor:pointer;
-  font-family:var(--fd); font-size:12px; font-weight:600; letter-spacing:.05em; color:var(--ink)}
-.vk .btn em{display:block; font-family:var(--fb); font-size:9.5px; font-weight:400; letter-spacing:0; color:var(--muted)}
-.vk .btn:hover{border-color:var(--ink)}
-.vk .btn.pri{background:var(--ink); color:var(--paper); border-color:var(--ink)}
-.vk .btn.pri em{color:#B9BDB6}
-.vk .btn.pri:hover{background:#000}
-.vk .btn.sm{padding:4px 9px; font-size:11px}
-.vk .x{background:none; border:0; font-size:18px; line-height:1; cursor:pointer; color:var(--muted); padding:2px 6px}
-.vk .x:hover{color:var(--alert)}
+/* buttons (Bab 11 STEP 2) */
+.vk .btn{background:var(--asm-white); border:1px solid var(--asm-border); border-radius:var(--asm-radius-md);
+  padding:.5rem 1rem; min-height:36px; cursor:pointer; white-space:nowrap; box-shadow:none;
+  font-family:var(--fd); font-size:.875rem; font-weight:500; color:var(--asm-fg);
+  transition:color .15s, background-color .15s, border-color .15s}
+.vk .btn em{display:block; font-size:10.5px; font-weight:400; color:var(--asm-fg-muted)}
+.vk .btn:hover{background:var(--asm-secondary); color:var(--asm-primary); border-color:var(--asm-primary)}
+.vk .btn:hover em{color:inherit}
+.vk .btn.pri{background:var(--asm-primary); color:var(--asm-primary-fg); border-color:var(--asm-primary)}
+.vk .btn.pri em{color:var(--asm-primary-40)}
+.vk .btn.pri:hover{background:var(--asm-primary-hover); border-color:var(--asm-primary-hover); color:var(--asm-primary-fg)}
+.vk .btn.pri:active{background:var(--asm-primary-active); border-color:var(--asm-primary-active)}
+.vk .btn.sm{min-height:30px; padding:.375rem .75rem; font-size:.75rem}
+.vk .btn.lg{min-height:40px; padding:.5rem 1.5rem; font-weight:700}
+.vk .btn:disabled{opacity:.5; pointer-events:none}
+.vk .x{background:none; border:0; font-size:18px; line-height:1; cursor:pointer; color:var(--asm-fg-muted); padding:2px 6px; border-radius:var(--asm-radius-sm)}
+.vk .x:hover{color:var(--asm-danger); background:var(--asm-danger-soft)}
 .vk .x:disabled{opacity:.25; cursor:not-allowed}
-.vk button:focus-visible,.vk input:focus-visible,.vk select:focus-visible{outline:2px solid var(--marking); outline-offset:1px}
+.vk button:focus-visible,.vk input:focus-visible,.vk select:focus-visible{outline:none; box-shadow:0 0 0 3px var(--asm-primary-40)}
 
 /* kpi */
-.vk .kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px; margin-bottom:16px}
-.vk .grid3{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; margin-bottom:16px}
-.vk .kpi{background:var(--paper); border:1px solid var(--line); border-left:3px solid var(--rubber); padding:11px 13px}
-.vk .kpi.warn{border-left-color:var(--warn)}
-.vk .kpi.alert{border-left-color:var(--alert)}
-.vk .kl{font-family:var(--fd); font-size:11px; font-weight:600; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); display:block}
-.vk .kl em{font-family:var(--fb); letter-spacing:0; text-transform:none; margin-left:6px; font-size:10px}
-.vk .kv{display:block; font-size:19px; font-weight:600; margin:3px 0 1px}
-.vk .ks{font-size:10.5px; color:var(--muted)}
+.vk .kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:16px}
+.vk .grid3{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin-bottom:16px}
+.vk .kpi{background:var(--asm-card); border:1px solid var(--asm-border); border-left:3px solid var(--asm-primary);
+  border-radius:var(--asm-radius-lg); padding:12px 14px; container-type:inline-size}
+.vk .kpi.warn{border-left-color:var(--asm-warning)}
+.vk .kpi.alert{border-left-color:var(--asm-danger)}
+.vk .kl{font-size:12px; font-weight:500; color:var(--asm-fg-muted); display:block; margin-bottom:4px}
+.vk .kl em{margin-left:6px; font-size:11px; font-weight:400}
+.vk .kv{display:block; font-size:clamp(1.15rem, 8cqi, 1.5rem); font-weight:700; line-height:1.2; margin:2px 0 1px;
+  font-variant-numeric:tabular-nums; white-space:nowrap; letter-spacing:-.01em}
+.vk .ks{font-size:11px; color:var(--asm-fg-muted)}
 
 /* card */
-.vk .card{background:var(--paper); border:1px solid var(--line); margin-bottom:16px}
-.vk .card-hd{padding:10px 14px; border-bottom:1px solid var(--line)}
-.vk .card-hd h3{font-size:13px; font-weight:600; letter-spacing:.09em; text-transform:uppercase}
-.vk .card-hd h3 em{font-family:var(--fb); font-size:10.5px; letter-spacing:0; text-transform:none; color:var(--muted); margin-left:7px}
-.vk .note{margin:3px 0 0; font-size:10.5px; color:var(--muted)}
+.vk .card{background:var(--asm-card); border:1px solid var(--asm-border); border-radius:var(--asm-radius-lg); margin-bottom:16px}
+.vk .card-hd{padding:12px 16px; border-bottom:1px solid var(--asm-border); border-radius:var(--asm-radius-lg) var(--asm-radius-lg) 0 0}
+.vk .card-hd h3{font-size:.9375rem; font-weight:700; letter-spacing:-.01em}
+.vk .card-hd h3 em{font-size:11.5px; letter-spacing:0; color:var(--asm-fg-muted); margin-left:7px; font-weight:400}
+.vk .note{margin:3px 0 0; font-size:11.5px; color:var(--asm-fg-muted)}
 .vk .card-bd{padding:0}
+.vk .card-bd>.scroll{border-radius:0 0 var(--asm-radius-lg) var(--asm-radius-lg)}
 .vk .grid2{display:grid; grid-template-columns:1fr 1fr; gap:16px}
 @media (max-width:860px){.vk .grid2{grid-template-columns:1fr}}
 /* item grid tidak boleh melebar mengikuti tabel di dalamnya (min-width:auto
@@ -2343,56 +2498,62 @@ function Style() {
 
 /* accordion (Penjualan, dikelompokkan per tanggal) */
 .vk .card-hd.acc-hd{display:flex; align-items:center; gap:10px; width:100%; background:none; border:0;
-  border-bottom:1px solid var(--line); cursor:pointer; text-align:left; font:inherit; color:inherit}
-.vk .card-hd.acc-hd:hover{background:#EFF1EC}
-.vk .acc-chev{flex:none; width:12px; font-size:11px; color:var(--muted)}
-.vk .acc-tgl{flex:none; font-size:13px; font-weight:600; letter-spacing:.02em}
-.vk .acc-sub{flex:1; font-family:var(--fb); font-size:11px; color:var(--muted)}
+  border-bottom:1px solid var(--asm-border); cursor:pointer; text-align:left; font:inherit; color:inherit}
+.vk .card-hd.acc-hd:hover{background:var(--asm-primary-6)}
+.vk .acc-chev{flex:none; width:12px; font-size:11px; color:var(--asm-fg-muted)}
+.vk .acc-tgl{flex:none; font-size:.875rem; font-weight:700}
+.vk .acc-sub{flex:1; font-size:12px; color:var(--asm-fg-muted)}
 
-/* table */
+/* table (Bab 11 STEP 3) */
 .vk .scroll{overflow:auto; max-width:100%;
   background:
-    linear-gradient(to right, var(--paper) 0, var(--paper) 0) left / 18px 100%,
-    linear-gradient(to left, var(--paper) 0, var(--paper) 0) right / 18px 100%,
-    linear-gradient(to right, rgba(32,34,31,.14), rgba(32,34,31,0) 18px) left / 18px 100%,
-    linear-gradient(to left, rgba(32,34,31,.14), rgba(32,34,31,0) 18px) right / 18px 100%;
+    linear-gradient(to right, var(--asm-card) 0, var(--asm-card) 0) left / 18px 100%,
+    linear-gradient(to left, var(--asm-card) 0, var(--asm-card) 0) right / 18px 100%,
+    linear-gradient(to right, rgba(51,51,51,.12), rgba(51,51,51,0) 18px) left / 18px 100%,
+    linear-gradient(to left, rgba(51,51,51,.12), rgba(51,51,51,0) 18px) right / 18px 100%;
   background-repeat:no-repeat;
   background-attachment:local, local, scroll, scroll;
 }
 .vk .mut-more{display:flex; justify-content:center; padding:10px 0 2px}
-.vk .mut-note{text-align:center; font-size:11px; color:var(--muted); padding:6px 0 2px}
-.vk table{width:100%; border-collapse:collapse; font-size:12px}
-.vk thead th{position:sticky; top:0; background:var(--slab); text-align:left; padding:7px 10px; border-bottom:1px solid var(--line);
-  font-family:var(--fd); font-size:10.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; white-space:nowrap}
-.vk thead th em{font-family:var(--fb); font-size:9.5px; letter-spacing:0; text-transform:none; color:var(--muted); font-weight:400}
-.vk tbody td{padding:8px 10px; border-bottom:1px solid #E6E8E3; vertical-align:top}
-.vk tbody tr:hover{background:#EFF1EC}
-.vk tfoot td{padding:7px 10px; border-top:2px solid var(--ink)}
-.vk tfoot tr.tf-total td{background:var(--slab)}
-.vk tfoot tr.tf-avg td{border-top:0; padding-top:4px; font-size:11px}
-.vk .chip{display:inline-block; font-family:var(--fm); font-size:10.5px; font-weight:500; background:var(--rubber); color:var(--paper);
-  padding:1px 6px; border-radius:2px; letter-spacing:.03em}
+.vk .mut-note{text-align:center; font-size:11.5px; color:var(--asm-fg-muted); padding:6px 0 2px}
+.vk table{width:100%; border-collapse:collapse; font-size:13px}
+.vk thead th{position:sticky; top:0; z-index:2; background:var(--asm-primary-6); color:var(--asm-fg);
+  text-align:left; padding:9px 12px; border-bottom:2px solid var(--asm-primary);
+  font-family:var(--fd); font-size:12px; font-weight:500; white-space:nowrap}
+.vk thead th em{font-size:11px; color:var(--asm-fg-muted); font-weight:400}
+.vk tbody td{height:38px; padding:9px 12px; border-bottom:1px solid var(--asm-border-50); vertical-align:middle}
+.vk tbody tr:hover{background:var(--asm-primary-6)}
+.vk tbody td .mut2{font-size:12px}
+.vk tfoot td{padding:9px 12px; border-top:2px solid var(--asm-primary)}
+.vk tfoot tr.tf-total td{background:var(--asm-primary-10); color:var(--asm-primary); font-weight:700}
+.vk tfoot tr.tf-avg td{border-top:0; padding-top:4px; font-size:12px}
+.vk .chip{display:inline-block; font-size:11.5px; font-weight:500; background:var(--asm-primary-10); color:var(--asm-primary);
+  padding:1px 8px; border-radius:var(--asm-radius-sm)}
 
-/* tags & status */
-.vk .tag,.vk .st{display:inline-block; font-family:var(--fd); font-size:10px; font-weight:600; letter-spacing:.07em; text-transform:uppercase;
-  padding:2px 7px; border:1px solid currentColor; border-radius:2px; line-height:1.3}
-.vk .tag em,.vk .st em{display:block; font-family:var(--fb); font-size:9px; letter-spacing:0; text-transform:none; font-weight:400; opacity:.75}
-.vk .t-masuk{color:var(--ok)} .vk .t-keluar{color:var(--alert)}
-.vk .t-transfer{color:#4A6EA8} .vk .t-penyesuaian{color:var(--warn)}
-.vk .s-penawaran{color:var(--muted)} .vk .s-pesanan{color:#4A6EA8}
-.vk .s-kirim{color:var(--warn)} .vk .s-tagihan{color:#8A5AA8} .vk .s-lunas{color:var(--ok)}
-.vk .s-ok{color:var(--ok)} .vk .s-warn{color:var(--warn)} .vk .s-alert{color:var(--alert)}
+/* tags & status (Bab 11 .asm-badge) */
+.vk .tag,.vk .st,.vk .role{display:inline-block; font-family:var(--fd); font-size:11px; font-weight:700; letter-spacing:.04em;
+  padding:2px 8px; border:1px solid transparent; border-radius:var(--asm-radius-sm); line-height:1.4; white-space:nowrap;
+  background:var(--asm-neutral-soft); color:var(--asm-neutral); border-color:var(--asm-neutral-border)}
+.vk .tag em,.vk .st em,.vk .role em{display:block; font-size:9.5px; letter-spacing:0; font-weight:400; opacity:.75}
+.vk .t-masuk,.vk .s-lunas,.vk .s-ok{background:var(--asm-success-soft); color:var(--asm-success); border-color:var(--asm-success-border)}
+.vk .t-keluar,.vk .s-alert{background:var(--asm-danger-soft); color:var(--asm-danger); border-color:var(--asm-danger-border)}
+.vk .t-transfer,.vk .s-pesanan{background:var(--asm-info-soft); color:var(--asm-info); border-color:var(--asm-info-border)}
+.vk .t-penyesuaian,.vk .s-kirim,.vk .s-warn{background:var(--asm-warning-soft); color:var(--asm-warning); border-color:var(--asm-warning-border)}
+.vk .s-penawaran{background:var(--asm-neutral-soft); color:var(--asm-neutral); border-color:var(--asm-neutral-border)}
+/* tagihan = biru penuh, agar jelas berbeda dari "pesanan" yang biru lembut */
+.vk .s-tagihan{background:var(--asm-primary); color:var(--asm-primary-fg); border-color:var(--asm-primary)}
 
 /* flow */
-.vk .flow{display:flex; align-items:stretch; gap:4px; margin-bottom:14px; overflow-x:auto; padding-bottom:2px}
-.vk .step{flex:1; min-width:110px; background:var(--paper); border:1px solid var(--line); border-bottom:3px solid var(--line);
-  padding:8px 10px; cursor:pointer; text-align:left; display:flex; justify-content:space-between; align-items:center; gap:8px}
-.vk .step span{font-family:var(--fd); font-size:11.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase}
-.vk .step span em{display:block; font-family:var(--fb); font-size:9.5px; letter-spacing:0; text-transform:none; color:var(--muted); font-weight:400}
-.vk .step b{font-family:var(--fm); font-size:16px}
-.vk .step:hover{border-color:var(--muted)}
-.vk .step.on{border-bottom-color:var(--marking); background:#FDF6E4}
-.vk .arrow{align-self:center; color:var(--line); font-size:18px}
+.vk .flow{display:flex; align-items:stretch; gap:6px; margin-bottom:16px; overflow-x:auto; padding-bottom:2px}
+.vk .step{flex:1; min-width:110px; background:var(--asm-card); border:1px solid var(--asm-border); border-bottom:3px solid var(--asm-border);
+  border-radius:var(--asm-radius-md); padding:8px 12px; cursor:pointer; text-align:left; display:flex; justify-content:space-between; align-items:center; gap:8px}
+.vk .step span{font-family:var(--fd); font-size:12px; font-weight:500; color:var(--asm-fg-muted)}
+.vk .step span em{display:block; font-size:10px; color:var(--asm-fg-muted); font-weight:400}
+.vk .step b{font-size:17px; font-weight:700; font-variant-numeric:tabular-nums}
+.vk .step:hover{border-color:var(--asm-primary-40)}
+.vk .step.on{border-bottom-color:var(--asm-primary); background:var(--asm-primary-10)}
+.vk .step.on span,.vk .step.on b{color:var(--asm-primary)}
+.vk .arrow{align-self:center; color:var(--asm-border); font-size:18px}
 
 /* filters */
 .vk .filters{display:flex; gap:10px; margin-bottom:12px; flex-wrap:wrap}
@@ -2406,27 +2567,32 @@ function Style() {
 .vk .sect-l .filters select{width:auto; min-width:150px}
 .vk .sect-l .flow{margin-bottom:0; flex:1}
 
-/* fields */
-.vk .fld{display:block; margin-bottom:10px}
-.vk .lbl{font-family:var(--fd); font-size:10.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); display:block; margin-bottom:3px}
-.vk .lbl em{font-family:var(--fb); letter-spacing:0; text-transform:none; margin-left:6px; font-size:10px}
-.vk .lbl.mt{margin-top:14px}
-.vk input,.vk select{width:100%; padding:6px 8px; border:1px solid var(--line); border-radius:2px; background:#fff;
-  font-family:var(--fb); font-size:12.5px; color:var(--ink)}
-.vk input.err{border-color:var(--alert); background:#FDF1EF}
-.vk .hint{display:block; font-size:10px; color:var(--muted); margin-top:2px}
-.vk .row2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+/* fields (Bab 11 .form-control / .form-label) */
+.vk .fld{display:block; margin-bottom:12px}
+.vk .lbl{font-family:var(--fd); font-size:.75rem; font-weight:500; color:var(--asm-fg); display:block; margin-bottom:6px}
+.vk .lbl em{margin-left:6px; font-size:11px; font-weight:400; color:var(--asm-fg-muted)}
+.vk .lbl .req{color:var(--asm-danger)}
+.vk .lbl.mt{margin-top:16px}
+.vk input,.vk select{width:100%; min-height:36px; padding:.375rem .75rem; border:1px solid var(--asm-border); border-radius:var(--asm-radius-md);
+  background:var(--asm-white); font-family:var(--fb); font-size:.875rem; color:var(--asm-fg); box-shadow:none}
+.vk input::placeholder{color:var(--asm-fg-muted)}
+.vk input:focus,.vk select:focus{outline:none; border-color:var(--asm-primary); box-shadow:0 0 0 3px var(--asm-primary-40)}
+.vk input:disabled,.vk select:disabled{background:var(--asm-secondary); opacity:.6}
+.vk input.err{border-color:var(--asm-danger); background:var(--asm-danger-soft)}
+.vk .hint{display:block; font-size:11px; color:var(--asm-fg-muted); margin-top:3px}
+.vk .row2{display:grid; grid-template-columns:1fr 1fr; gap:12px}
 @media (max-width:560px){.vk .row2{grid-template-columns:1fr}}
 @media (max-width:520px){.vk .cust-info, .vk .spec-info{grid-template-columns:1fr 1fr}}
 
 /* dropdown pencarian */
 .vk .combo-wrap{position:relative}
-.vk .combo-list{position:absolute; top:calc(100% + 2px); left:0; right:0; z-index:30; margin:0; padding:2px;
-  list-style:none; background:#fff; border:1px solid var(--ink); max-height:220px; overflow:auto;
-  box-shadow:0 4px 10px rgba(0,0,0,.15)}
-.vk .combo-list li{padding:6px 8px; font-size:12.5px; cursor:pointer; border-radius:2px}
-.vk .combo-list li:hover,.vk .combo-list li[aria-selected="true"]{background:var(--slab)}
-.vk .combo-empty{color:var(--muted); cursor:default}
+.vk .combo-list{position:absolute; top:calc(100% + 2px); left:0; right:0; z-index:30; margin:0; padding:6px;
+  list-style:none; background:var(--asm-white); border:1px solid var(--asm-border); border-radius:var(--asm-radius-md);
+  max-height:220px; overflow:auto; box-shadow:var(--asm-shadow-md)}
+.vk .combo-list li{padding:8px 12px; font-size:.875rem; cursor:pointer; border-radius:var(--asm-radius-sm)}
+.vk .combo-list li:hover{background:var(--asm-secondary)}
+.vk .combo-list li[aria-selected="true"]{background:var(--asm-primary-10); color:var(--asm-primary); font-weight:700}
+.vk .combo-empty{color:var(--asm-fg-muted); cursor:default}
 .vk .combo-empty:hover{background:none}
 
 /* item lines */
@@ -2435,174 +2601,205 @@ function Style() {
   .vk .line{grid-template-columns:1fr 1fr}
   .vk .line>select,.vk .line>.combo-wrap{grid-column:1 / -1}
 }
-.vk .stokinfo{font-family:var(--fm); font-size:10.5px; color:var(--muted); text-align:right}
-.vk .stokinfo.bad{color:var(--alert); font-weight:600}
-.vk .sum{margin-top:14px; border-top:2px solid var(--ink); padding-top:8px; display:grid; gap:4px}
+.vk .stokinfo{font-size:11.5px; color:var(--asm-fg-muted); text-align:right; font-variant-numeric:tabular-nums}
+.vk .stokinfo.bad{color:var(--asm-danger); font-weight:700}
+.vk .sum{margin-top:16px; border-top:2px solid var(--asm-primary); padding-top:10px; display:grid; gap:5px}
 .vk .sum div{display:flex; justify-content:space-between; align-items:baseline}
-.vk .sum span{font-family:var(--fd); font-size:11px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; color:var(--muted)}
-.vk .sum span em{font-family:var(--fb); letter-spacing:0; text-transform:none; margin-left:6px; font-size:10px}
-.vk .sum b{font-size:16px}
-.vk .delta{display:flex; justify-content:space-between; padding:7px 10px; background:var(--slab); border:1px solid var(--line); margin-bottom:10px;
-  font-family:var(--fd); font-size:11px; letter-spacing:.06em; text-transform:uppercase}
-.vk .delta b{font-family:var(--fm); font-size:14px}
-.vk .peringatan{margin:12px 0 0; padding:8px 10px; font-size:11.5px; line-height:1.45;
-  background:#FDF6E4; border-left:3px solid var(--warn); color:#5A4413}
-.vk .peringatan b{font-weight:600}
-.vk .peringatan.bad-box{background:#FDF1EF; border-left-color:var(--alert); color:#6B241A}
+.vk .sum span{font-family:var(--fd); font-size:12px; font-weight:500; color:var(--asm-fg-muted)}
+.vk .sum span em{margin-left:6px; font-size:11px; font-weight:400}
+.vk .sum b{font-size:1.125rem; font-weight:700}
+.vk .delta{display:flex; justify-content:space-between; padding:9px 12px; background:var(--asm-primary-6); border:1px solid var(--asm-primary-40);
+  border-radius:var(--asm-radius-md); margin-bottom:12px; font-family:var(--fd); font-size:12px; font-weight:500}
+.vk .delta b{font-size:15px; font-weight:700}
+.vk .peringatan{margin:12px 0 0; padding:10px 12px; font-size:12.5px; line-height:1.5; border-radius:var(--asm-radius-md);
+  background:var(--asm-warning-soft); border:1px solid var(--asm-warning-border); border-left:3px solid var(--asm-warning); color:var(--asm-warning)}
+.vk .peringatan b{font-weight:700}
+.vk .peringatan.bad-box{background:var(--asm-danger-soft); border-color:var(--asm-danger-border); border-left-color:var(--asm-danger); color:var(--asm-danger)}
 
 /* alerts list */
 .vk .alerts{list-style:none; margin:0; padding:0}
-.vk .alerts li{display:flex; align-items:center; gap:9px; padding:8px 14px; border-bottom:1px solid #E6E8E3}
-.vk .alerts .an{flex:1; font-size:12px}
-.vk .empty{padding:22px 14px; text-align:center; color:var(--muted); font-size:12px}
-.vk .empty em{display:block; font-size:10.5px; margin-top:2px}
+.vk .alerts li{display:flex; align-items:center; gap:10px; padding:9px 16px; border-bottom:1px solid var(--asm-border-50)}
+.vk .alerts .an{flex:1; font-size:13px}
+.vk .empty{padding:24px 16px; text-align:center; color:var(--asm-fg-muted); font-size:13px}
+.vk .empty em{display:block; font-size:11.5px; margin-top:2px}
 
 /* grade badge */
 .vk .grade{font-family:var(--fd); font-size:15px; font-weight:700; width:28px; height:28px; display:inline-grid; place-items:center;
-  border:1px solid currentColor; border-radius:2px; flex:none; vertical-align:middle}
-.vk .gA{color:var(--ok)} .vk .gB{color:#4A6EA8} .vk .gC{color:var(--muted)}
+  border:1px solid transparent; border-radius:var(--asm-radius-sm); flex:none; vertical-align:middle}
+.vk .gA{background:var(--asm-success-soft); color:var(--asm-success); border-color:var(--asm-success-border)}
+.vk .gB{background:var(--asm-info-soft); color:var(--asm-info); border-color:var(--asm-info-border)}
+.vk .gC{background:var(--asm-neutral-soft); color:var(--asm-neutral); border-color:var(--asm-neutral-border)}
 
 /* modal */
-.vk .ov{position:fixed; inset:0; background:rgba(32,34,31,.55); display:grid; place-items:center; padding:16px; z-index:50}
-.vk .md{background:var(--paper); border:1px solid var(--ink); width:100%; max-width:440px; max-height:90vh; display:flex; flex-direction:column}
+.vk .ov{position:fixed; inset:0; background:rgb(51 51 51 / .5); display:grid; place-items:center; padding:16px; z-index:50}
+.vk .md{background:var(--asm-card); border:1px solid var(--asm-border); border-top:4px solid var(--asm-primary);
+  border-radius:var(--asm-radius-lg); box-shadow:var(--asm-shadow-lg);
+  width:100%; max-width:440px; max-height:90vh; display:flex; flex-direction:column}
 .vk .md.wide{max-width:720px}
-.vk .md-hd{display:flex; justify-content:space-between; align-items:center; padding:11px 14px; border-bottom:1px solid var(--line)}
-.vk .md-hd h3{font-size:13px; font-weight:600; letter-spacing:.09em; text-transform:uppercase}
-.vk .md-hd h3 em{font-family:var(--fb); font-size:10.5px; letter-spacing:0; text-transform:none; color:var(--muted); margin-left:7px}
-.vk .md-bd{padding:14px; overflow:auto}
-.vk .md-ft{display:flex; justify-content:flex-end; gap:8px; padding:11px 14px; border-top:1px solid var(--line); background:var(--slab)}
+.vk .md-hd{display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--asm-border)}
+.vk .md-hd h3{font-size:.9375rem; font-weight:700; letter-spacing:-.01em}
+.vk .md-hd h3 em{font-size:11.5px; letter-spacing:0; color:var(--asm-fg-muted); margin-left:7px; font-weight:400}
+.vk .md-bd{padding:16px; overflow:auto}
+.vk .md-ft{display:flex; justify-content:flex-end; gap:8px; padding:12px 16px; border-top:1px solid var(--asm-border);
+  background:var(--asm-secondary); border-radius:0 0 var(--asm-radius-lg) var(--asm-radius-lg)}
 
 /* footer & toast */
-.vk .ft{max-width:1240px; margin:0 auto; padding:16px 20px 28px; font-size:10.5px; color:var(--muted); text-align:center; border-top:1px solid var(--line)}
+.vk .ft{max-width:1240px; margin:0 auto; padding:16px 20px 28px; font-size:11.5px; color:var(--asm-fg-muted); text-align:center; border-top:1px solid var(--asm-border)}
 .vk .ft em{display:block}
-.vk .ft code{font-family:var(--fm); background:var(--paper); padding:1px 4px; border:1px solid var(--line)}
-.vk .toast{position:fixed; left:50%; bottom:22px; transform:translateX(-50%); background:var(--ink); color:var(--paper);
-  padding:9px 16px; border-radius:2px; font-size:12px; z-index:60; border-left:4px solid var(--ok); max-width:90%}
-.vk .toast.bad{border-left-color:var(--alert)}
+.vk .ft code{background:var(--asm-secondary); padding:1px 5px; border-radius:var(--asm-radius-sm); border:1px solid var(--asm-border)}
+.vk .toast{position:fixed; left:50%; bottom:22px; transform:translateX(-50%); background:var(--asm-dark); color:var(--asm-white);
+  padding:10px 16px; border-radius:var(--asm-radius-md); font-size:13px; z-index:60; border-left:4px solid var(--asm-success);
+  box-shadow:var(--asm-shadow-lg); max-width:90%}
+.vk .toast.bad{border-left-color:var(--asm-danger)}
 @media (prefers-reduced-motion:no-preference){
   .vk .toast{animation:vkup .22s ease-out}
   @keyframes vkup{from{opacity:0; transform:translate(-50%,8px)} to{opacity:1; transform:translate(-50%,0)}}
 }
 
 /* login & session */
-.vk .login{min-height:100vh; display:grid; place-items:center; padding:20px; background:
-  repeating-linear-gradient(45deg,rgba(0,0,0,.015) 0 12px,transparent 12px 24px), var(--slab)}
-.vk .splash{font-family:var(--fd); letter-spacing:.1em; text-transform:uppercase; color:var(--muted)}
-.vk .login-card{width:100%; max-width:380px; background:var(--paper); border:1px solid var(--ink)}
-.vk .login-brand{display:flex; gap:12px; align-items:center; padding:18px 20px 14px}
-.vk .login-brand h1{font-size:20px; font-weight:700; letter-spacing:.16em; text-transform:uppercase}
-.vk .login-brand p{margin:1px 0 0; font-size:11px; color:var(--muted)}
-.vk .login-brand p em{display:block; font-size:10px}
-.vk .login-bd{padding:18px 20px 20px}
-.vk .btn.lg{width:100%; padding:10px; font-size:13px; margin-top:4px}
+.vk .login{min-height:100vh; display:grid; place-items:center; padding:20px;
+  background:radial-gradient(120% 90% at 50% 0%, var(--asm-primary-6) 0%, var(--asm-bg) 60%)}
+.vk .splash{font-family:var(--fd); font-size:12px; font-weight:500; letter-spacing:.06em; color:var(--asm-primary)}
+.vk .login-card{width:100%; max-width:380px; background:var(--asm-card); border:1px solid var(--asm-border);
+  border-radius:var(--asm-radius-lg); box-shadow:var(--asm-shadow-md); overflow:hidden}
+.vk .login-brand{display:flex; gap:12px; align-items:flex-start; padding:22px 20px 16px}
+.vk .login-brand .lang{margin-left:auto; margin-top:2px}
+.vk .login-id{display:flex; flex-direction:column; gap:7px; min-width:0}
+.vk .login-brand h1{font-size:14px; font-weight:500; letter-spacing:.2em; text-transform:uppercase; color:var(--asm-fg-muted)}
+.vk .login-brand p{margin:1px 0 0; font-size:11.5px; color:var(--asm-fg-muted)}
+.vk .login-brand p em{display:block; font-size:10.5px}
+.vk .login-bd{padding:20px}
+.vk .btn.lg{width:auto}
+.vk .login .btn.lg{width:100%; margin-top:4px}
 .vk .login .conn{width:100%; text-align:center}
 
-/* header: who am I + logout */
-.vk .who{display:flex; align-items:center; gap:8px; margin-top:6px; justify-content:flex-end}
-.vk .wu{font-family:var(--fb); font-size:11px; letter-spacing:0; text-transform:none; color:var(--ink); display:inline-flex; align-items:center; gap:6px}
-.vk .wu-name{background:none; border:0; padding:0; margin:0; font:inherit; color:inherit; cursor:pointer}
-.vk .wu-name:hover{text-decoration:underline}
+/* pemilih bahasa: kendali tersegmen ID / KO */
+.vk .lang{display:inline-flex; border:1px solid var(--asm-border); border-radius:var(--asm-radius-md); overflow:hidden; background:var(--asm-card)}
+.vk .lang-b{background:none; border:0; padding:4px 9px; cursor:pointer; font:inherit; font-size:11px; font-weight:500;
+  letter-spacing:.06em; color:var(--asm-fg-muted); transition:background .15s, color .15s}
+.vk .lang-b + .lang-b{border-left:1px solid var(--asm-border)}
+.vk .lang-b:hover{background:var(--asm-primary-6); color:var(--asm-primary)}
+.vk .lang-b.on{background:var(--asm-primary); color:var(--asm-white)}
+.vk .lang-b:focus-visible{outline:2px solid var(--asm-primary); outline-offset:-2px}
+
+/* header: menu pengguna (identitas + aksi akun dalam satu tombol) */
+.vk .who{display:flex; align-items:center; gap:8px; justify-content:flex-end}
+.vk .um{position:relative}
+.vk .um-b{display:inline-flex; align-items:center; gap:7px; background:none; cursor:pointer; font:inherit; font-size:13px;
+  color:var(--asm-fg); border:1px solid var(--asm-border); border-radius:var(--asm-radius-md); padding:3px 8px 3px 4px}
+.vk .um-b:hover,.vk .um-b.on{border-color:var(--asm-primary); background:var(--asm-primary-6)}
+.vk .um-av{width:22px; height:22px; flex:none; display:grid; place-items:center; border-radius:50%;
+  font-family:var(--fd); font-size:11px; font-weight:700; line-height:1}
+.vk .um-nm{max-width:12ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.vk .um-ar{flex:none; color:var(--asm-fg-muted); transition:transform .15s}
+.vk .um-b.on .um-ar{transform:rotate(180deg)}
+.vk .um-pop{position:absolute; top:calc(100% + 6px); right:0; z-index:40; min-width:180px; padding:4px;
+  background:var(--asm-card); border:1px solid var(--asm-border); border-radius:var(--asm-radius-lg); box-shadow:var(--asm-shadow-md)}
+.vk .um-hd{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:7px 9px 8px;
+  border-bottom:1px solid var(--asm-border); margin-bottom:4px}
+.vk .um-hd b{font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.vk .um-i{display:block; width:100%; text-align:left; background:none; border:0; cursor:pointer; font:inherit; font-size:12.5px;
+  color:var(--asm-fg); padding:7px 9px; border-radius:var(--asm-radius-md)}
+.vk .um-i:hover{background:var(--asm-primary-6); color:var(--asm-primary)}
+.vk .um-i.keluar:hover{background:var(--asm-danger-soft); color:var(--asm-danger)}
 
 .vk .namelink{background:none; border:0; padding:0; margin:0; font:inherit; font-weight:inherit; color:inherit; cursor:pointer; text-align:left}
-.vk .namelink:hover{text-decoration:underline; color:var(--marking)}
+.vk .namelink:hover{text-decoration:underline; color:var(--asm-primary)}
 
 .vk .cust-info, .vk .spec-info{display:grid; grid-template-columns:repeat(3, 1fr); gap:12px 18px; margin-bottom:16px}
-.vk .cust-info .lbl2, .vk .spec-info .lbl2{display:block; font-family:var(--fb); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:3px}
-.vk .lo{background:none; border:1px solid var(--line); border-radius:2px; padding:2px 8px; cursor:pointer;
-  font-family:var(--fm); font-size:10px; color:var(--muted)}
-.vk .lo:hover{border-color:var(--alert); color:var(--alert)}
-
+.vk .cust-info .lbl2, .vk .spec-info .lbl2{display:block; font-size:11px; font-weight:500; color:var(--asm-fg-muted); margin-bottom:3px}
 /* role badge */
-.vk .role{display:inline-block; font-family:var(--fd); font-size:9.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase;
-  padding:1px 6px; border:1px solid currentColor; border-radius:2px; line-height:1.3}
-.vk .role em{display:block; font-family:var(--fb); font-size:8.5px; letter-spacing:0; text-transform:none; font-weight:400; opacity:.75}
-.vk .r-admin{color:var(--alert)} .vk .r-manager{color:#4A6EA8} .vk .r-staff{color:var(--muted)}
+.vk .role{font-size:10px; padding:1px 7px}
+.vk .role em{font-size:8.5px}
+.vk .r-admin{background:var(--asm-danger-soft); color:var(--asm-danger); border-color:var(--asm-danger-border)}
+.vk .r-manager{background:var(--asm-info-soft); color:var(--asm-info); border-color:var(--asm-info-border)}
+.vk .r-staff{background:var(--asm-neutral-soft); color:var(--asm-neutral); border-color:var(--asm-neutral-border)}
 
 /* danger buttons & action cell */
 .vk .aksi{display:inline-flex; gap:6px; justify-content:flex-end; align-items:center; flex-wrap:wrap}
-.vk .btn.danger{color:var(--alert); border-color:#E3B4AC}
-.vk .btn.danger:hover{background:var(--alert); color:var(--paper); border-color:var(--alert)}
+.vk .btn.danger{color:var(--asm-danger); border-color:var(--asm-danger-border)}
+.vk .btn.danger:hover{background:var(--asm-danger); color:var(--asm-white); border-color:var(--asm-danger)}
 .vk .btn.danger em{color:inherit}
 
-/* dokumen (faktur / penawaran) */
-.vk .doc-modal{background:var(--slab); border:1px solid var(--ink); width:100%; max-width:900px; max-height:94vh; display:flex; flex-direction:column}
-.vk .doc-bar{display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 14px; border-bottom:1px solid var(--ink); background:var(--paper); flex-wrap:wrap}
+/* dokumen (faktur / penawaran) — kop surat mengikuti BI */
+.vk .doc-modal{background:var(--asm-bg); border:1px solid var(--asm-border); border-top:4px solid var(--asm-primary);
+  border-radius:var(--asm-radius-lg); box-shadow:var(--asm-shadow-lg);
+  width:100%; max-width:900px; max-height:94vh; display:flex; flex-direction:column}
+.vk .doc-bar{display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--asm-border); background:var(--asm-card); flex-wrap:wrap}
 .vk .doc-tabs{display:flex; gap:6px}
 .vk .doc-firm{display:flex; gap:6px; align-items:center}
-.vk .doc-firm-lbl{font-family:var(--fd); font-size:10px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--muted)}
-.vk .doc-firm-lbl em{display:block; font-family:var(--fb); font-size:9px; letter-spacing:0; text-transform:none}
+.vk .doc-firm-lbl{font-family:var(--fd); font-size:11px; font-weight:500; color:var(--asm-fg-muted)}
+.vk .doc-firm-lbl em{display:block; font-size:9.5px}
 .vk .doc-bar-r{display:flex; gap:10px; align-items:center; margin-left:auto}
-.vk .doc-scroll{overflow:auto; padding:22px; background:#8d918a}
-.vk .doc-paper{background:#fff; color:#161816; width:100%; max-width:760px; margin:0 auto; padding:34px 40px 30px;
-  box-shadow:0 6px 24px rgba(0,0,0,.35); font-family:var(--fb); font-size:12px; line-height:1.5;
+.vk .doc-scroll{overflow:auto; padding:22px; background:#8C8C8C}
+.vk .doc-paper{background:#fff; color:#333333; width:100%; max-width:760px; margin:0 auto; padding:34px 40px 30px;
+  box-shadow:var(--asm-shadow-lg); font-family:var(--fb); font-size:12px; line-height:1.5;
   -webkit-print-color-adjust:exact; print-color-adjust:exact}
-.vk .doc-hd{display:flex; justify-content:space-between; align-items:flex-start; gap:16px; border-bottom:2px solid #161816; padding-bottom:14px}
+.vk .doc-hd{display:flex; justify-content:space-between; align-items:flex-start; gap:16px; border-bottom:2px solid #0062C6; padding-bottom:14px}
 .vk .doc-co{display:flex; gap:12px; align-items:center}
-.vk .doc-co h2{font-family:var(--fd); font-size:17px; font-weight:700; letter-spacing:.06em; color:#161816}
-.vk .doc-co p{margin:2px 0 0; font-size:11px; color:#555}
-.vk .doc-addr{font-size:10px !important; color:#777 !important}
+.vk .doc-co h2{font-family:var(--fd); font-size:17px; font-weight:700; letter-spacing:.06em; color:#0062C6}
+.vk .doc-co p{margin:2px 0 0; font-size:11px; color:#666666}
+.vk .doc-addr{font-size:10px !important; color:#666666 !important}
 .vk .doc-title{text-align:right}
-.vk .doc-title h1{font-family:var(--fd); font-size:20px; font-weight:700; letter-spacing:.05em; color:#161816}
-.vk .doc-title em{display:block; font-size:12px; color:#555; margin-top:2px}
+.vk .doc-title h1{font-family:var(--fd); font-size:20px; font-weight:700; letter-spacing:-.01em; color:#333333}
+.vk .doc-title em{display:block; font-size:12px; color:#666666; margin-top:2px}
 .vk .doc-meta{display:flex; justify-content:space-between; gap:20px; margin-top:16px}
-.vk .doc-lbl{display:block; font-family:var(--fd); font-size:9.5px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; color:#888; margin-bottom:4px}
-.vk .doc-to b{font-size:13px; color:#161816}
-.vk .doc-to p{margin:2px 0 0; font-size:11px; color:#555}
+.vk .doc-lbl{display:block; font-family:var(--fd); font-size:10px; font-weight:500; letter-spacing:.06em; text-transform:uppercase; color:#0062C6; margin-bottom:4px}
+.vk .doc-to b{font-size:13px; color:#333333}
+.vk .doc-to p{margin:2px 0 0; font-size:11px; color:#666666}
 .vk .doc-info{border-collapse:collapse; font-size:11px; min-width:230px}
 .vk .doc-info td{padding:2px 0}
-.vk .doc-info td:first-child{color:#888; padding-right:16px}
-.vk .doc-info td:last-child{text-align:right; font-family:var(--fm); color:#161816}
+.vk .doc-info td:first-child{color:#666666; padding-right:16px}
+.vk .doc-info td:last-child{text-align:right; color:#333333}
 .vk .doc-items{width:100%; border-collapse:collapse; margin-top:18px; font-size:11px}
-.vk .doc-items th{background:#161816; color:#fff; font-family:var(--fd); font-weight:600; letter-spacing:.04em;
-  text-align:left; padding:7px 8px; font-size:10.5px}
+.vk .doc-items th{background:#0062C6; color:#fff; font-family:var(--fd); font-weight:500;
+  text-align:left; padding:8px; font-size:10.5px}
 .vk .doc-items th.r{text-align:right} .vk .doc-items th.c{text-align:center; width:26px}
-.vk .doc-items td{padding:7px 8px; border-bottom:1px solid #e3e3e0; vertical-align:top; color:#333}
-.vk .doc-items td.r{text-align:right} .vk .doc-items td.c{text-align:center; color:#999}
-.vk .doc-items .n{font-family:var(--fm)}
-.vk .doc-brand{font-style:normal; color:#999; font-size:10px}
+.vk .doc-items td{padding:7px 8px; border-bottom:1px solid #EBEBEB; vertical-align:top; color:#333333}
+.vk .doc-items td.r{text-align:right} .vk .doc-items td.c{text-align:center; color:#666666}
+.vk .doc-brand{font-style:normal; color:#666666; font-size:10px}
 .vk .doc-sum{display:flex; justify-content:space-between; align-items:flex-start; gap:24px; margin-top:14px}
 .vk .doc-terbilang{flex:1; padding-top:2px}
-.vk .doc-terbilang i{font-style:italic; color:#444; font-size:11px}
+.vk .doc-terbilang i{font-style:italic; color:#666666; font-size:11px}
 .vk .doc-sum > table{border-collapse:collapse; min-width:240px; font-size:12px}
 .vk .doc-sum > table td{padding:4px 0}
-.vk .doc-sum > table td:first-child{color:#666; padding-right:24px}
-.vk .doc-sum > table td.r{text-align:right; font-family:var(--fm); color:#161816}
-.vk .doc-grand td{border-top:2px solid #161816; padding-top:7px !important; font-weight:700; font-size:13px; color:#161816 !important}
-.vk .doc-pay{margin-top:18px; padding:10px 12px; background:#f4f4f1; border-left:3px solid #161816}
-.vk .doc-pay p{margin:0; font-size:11px; color:#444}
+.vk .doc-sum > table td:first-child{color:#666666; padding-right:24px}
+.vk .doc-sum > table td.r{text-align:right; color:#333333}
+.vk .doc-grand td{border-top:2px solid #0062C6; padding-top:7px !important; font-weight:700; font-size:13px; color:#0062C6 !important}
+.vk .doc-pay{margin-top:18px; padding:12px; background:#F0F6FC; border-left:3px solid #0062C6; border-radius:var(--asm-radius-md)}
+.vk .doc-pay p{margin:0; font-size:11px; color:#333333}
 .vk .doc-sign{display:flex; justify-content:space-between; gap:40px; margin-top:34px}
 .vk .doc-sign > div{flex:1; text-align:center}
-.vk .doc-sign span{font-size:11px; color:#444}
-.vk .doc-sign em{display:block; font-size:10px; color:#999; margin-top:1px}
-.vk .doc-line{height:46px; border-bottom:1px solid #999; margin:0 10px 4px}
-.vk .doc-sign b{font-size:11px; color:#161816}
-.vk .doc-foot{margin-top:26px; padding-top:10px; border-top:1px solid #e3e3e0; font-size:9.5px; color:#aaa; text-align:center}
+.vk .doc-sign span{font-size:11px; color:#333333}
+.vk .doc-sign em{display:block; font-size:10px; color:#666666; margin-top:1px}
+.vk .doc-line{height:46px; border-bottom:1px solid #D6D6D6; margin:0 10px 4px}
+.vk .doc-sign b{font-size:11px; color:#333333}
+.vk .doc-foot{margin-top:26px; padding-top:10px; border-top:1px solid #EBEBEB; font-size:9.5px; color:#666666; text-align:center}
 
 /* ---------- layar kecil (tablet & ponsel) ---------- */
 @media (max-width:900px){
-  .vk .hd-in{padding:13px 14px 10px}
+  .vk .hd-in{padding:12px 14px}
   .vk .wrap{padding:16px 14px}
   .vk .sect-l .filters .fld{flex:1 1 170px}
   .vk .sect-l .filters select{min-width:0; width:100%}
 }
 @media (max-width:720px){
-  .vk{font-size:13.5px}
-  .vk .hd-in{padding:12px 12px 10px; gap:10px}
-  .vk .hd h1{font-size:18px; letter-spacing:.12em}
+  .vk .hd-in{padding:12px; gap:10px}
+  .vk .hd h1{font-size:18px; letter-spacing:.1em}
   .vk .hd-meta{text-align:left; width:100%}
-  .vk .who{margin-top:0; justify-content:flex-start; flex-wrap:wrap}
+  .vk .who{justify-content:flex-start; flex-wrap:wrap}
   /* justify-content:center memotong tab pertama saat baris ini ikut scroll */
   .vk .tabs{justify-content:flex-start; padding:0 10px; scrollbar-width:thin}
-  .vk .tab{padding:10px 11px 8px}
-  .vk .wrap{padding:14px 12px}
+  .vk .tab{padding:10px 12px}
+  .vk .wrap{padding:16px 12px}
   .vk .sect{align-items:stretch}
   .vk .sect-l{gap:10px}
-  .vk .sect h2{font-size:15px}
+  .vk .sect h2{font-size:1rem}
   .vk .acts{width:100%}
   .vk .acts .btn{flex:1 1 auto; text-align:center}
   .vk .filters,.vk .sect-l .flow{width:100%}
   .vk .step{min-width:92px; padding:7px 9px}
-  .vk .step b{font-size:14px}
+  .vk .step b{font-size:15px}
   .vk .kpis,.vk .grid3{grid-template-columns:1fr 1fr}
   .vk .ft{padding:6px 12px 24px}
   .vk .ov{padding:10px}
@@ -2621,8 +2818,8 @@ function Style() {
   /* label + kontrol ditumpuk agar tidak saling menekan */
   .vk .sect-l .filters .fld{display:block}
   .vk .sect-l .filters .lbl{margin-bottom:3px}
-  .vk .line{grid-template-columns:1fr 1fr; gap:6px; padding:9px; margin-bottom:9px;
-    background:var(--slab); border:1px solid var(--line)}
+  .vk .line{grid-template-columns:1fr 1fr; gap:6px; padding:10px; margin-bottom:10px;
+    background:var(--asm-secondary); border:1px solid var(--asm-border); border-radius:var(--asm-radius-md)}
   .vk .line>select,.vk .line>.combo-wrap{grid-column:1 / -1}
   .vk .line>.stokinfo{text-align:left; align-self:center}
   .vk .line>.x{justify-self:end}
