@@ -58,20 +58,22 @@ export const api = {
   createPengguna: (u) => j("/pengguna", { method: "POST", body: u }),
   deletePengguna: (id) => j(`/pengguna/${id}`, { method: "DELETE" }),
 
-  // muat semua koleksi sekaligus
+  // muat semua koleksi sekaligus — SATU permintaan ke /bootstrap
+  // (sebelumnya 7 permintaan paralel = sampai 7 invokasi serverless).
   async loadAll() {
-    const [gudang, produk, pelanggan, pemasok, mutasi, penjualan, pembelian] = await Promise.all([
-      j("/gudang"), j("/produk"), j("/pelanggan"), j("/pemasok"),
-      j("/mutasi"), j("/penjualan"), j("/pembelian"),
-    ]);
+    const d = await j("/bootstrap");
     return {
-      gudang,
-      produk: produk.map(normProduk),
-      pelanggan: pelanggan.map(normPelanggan),
-      pemasok,
-      mutasi: mutasi.map(normMutasi),
-      penjualan: penjualan.map(normTrx),
-      pembelian: pembelian.map(normTrx),
+      gudang: d.gudang,
+      produk: d.produk.map(normProduk),
+      pelanggan: d.pelanggan.map(normPelanggan),
+      pemasok: d.pemasok,
+      // stok resmi dari view v_stok (seluruh buku mutasi), bukan hasil jumlah
+      // 500 baris mutasi terakhir yang dikirim untuk tampilan.
+      stok: (d.stok || []).map((r) => ({ gudang: r.gudang, produk: r.produk, stok: num(r.stok) })),
+      mutasi: d.mutasi.map(normMutasi),
+      mutasiLimit: d.mutasiLimit,
+      penjualan: d.penjualan.map(normTrx),
+      pembelian: d.pembelian.map(normTrx),
     };
   },
 

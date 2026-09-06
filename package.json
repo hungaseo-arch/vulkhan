@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "buat-admin": "node scripts/buat-admin.mjs"
+    "buat-admin": "node scripts/buat-admin.mjs",
+    "deploy": "npm run lint && npm run build && vercel --prod"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

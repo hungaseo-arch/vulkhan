@@ -200,6 +200,53 @@ app.delete("/api/pengguna/:id", requireRole("admin"), wrap(async (req, res) => {
   res.status(204).end();
 }));
 
+// Gabungkan baris item ke header-nya lewat Map — O(h + i), bukan filter per header.
+const gabungItem = (head, items, kunci) => {
+  const m = new Map();
+  for (const it of items) {
+    const k = it[kunci];
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(it);
+  }
+  return head.map((h) => ({ ...h, items: m.get(h.id) || [] }));
+};
+
+// Buku mutasi untuk tampilan: 500 baris TERBARU, dikirim urut naik (lama→baru)
+// supaya klien tinggal membalik. Ini bukan sumber kebenaran stok — lihat v_stok.
+const MUTASI_LIMIT = 500;
+const mutasiTerbaru = () => sql`
+  SELECT * FROM (SELECT * FROM stok_mutasi ORDER BY id DESC LIMIT ${MUTASI_LIMIT}) t
+  ORDER BY id ASC`;
+
+// ---------- bootstrap: semua koleksi dalam SATU permintaan ----------
+// Sebelumnya klien memanggil 7 endpoint sekaligus → di Vercel berarti sampai
+// 7 invokasi fungsi (masing-masing bisa cold start + ensureUsers). Sekarang satu
+// invokasi, kueri dijalankan paralel di sisi server.
+app.get("/api/bootstrap", wrap(async (_req, res) => {
+  const [gudang, produk, pelanggan, pemasok, stok, mutasi, soHead, soItem, poHead, poItem] = await Promise.all([
+    sql`SELECT * FROM gudang ORDER BY kode`,
+    sql`SELECT * FROM produk ORDER BY kode`,
+    sql`
+      SELECT p.*, COALESCE(pi.piutang,0) AS piutang
+      FROM pelanggan p
+      LEFT JOIN v_piutang pi ON pi.pelanggan = p.id
+      ORDER BY p.kode`,
+    sql`SELECT * FROM pemasok ORDER BY kode`,
+    sql`SELECT * FROM v_stok`,
+    mutasiTerbaru(),
+    sql`SELECT * FROM v_penjualan ORDER BY tgl DESC, no DESC`,
+    sql`SELECT * FROM penjualan_item`,
+    sql`SELECT * FROM pembelian ORDER BY tgl DESC, no DESC`,
+    sql`SELECT * FROM pembelian_item`,
+  ]);
+  res.json({
+    gudang, produk, pelanggan, pemasok, stok, mutasi,
+    mutasiLimit: MUTASI_LIMIT,
+    penjualan: gabungItem(soHead, soItem, "penjualan"),
+    pembelian: gabungItem(poHead, poItem, "pembelian"),
+  });
+}));
+
 // ---------- master ----------
 app.get("/api/gudang", wrap(async (_req, res) => {
   res.json(await sql`SELECT * FROM gudang ORDER BY kode`);
@@ -241,7 +288,7 @@ app.get("/api/stok/total", wrap(async (_req, res) => {
 }));
 
 app.get("/api/mutasi", wrap(async (_req, res) => {
-  res.json(await sql`SELECT * FROM stok_mutasi ORDER BY id DESC LIMIT 500`);
+  res.json(await mutasiTerbaru());
 }));
 
 // transfer antar gudang → dua baris mutasi (keluar + masuk)
@@ -256,10 +303,14 @@ app.post("/api/mutasi/transfer", wrap(async (req, res) => {
     WHERE gudang = ${dari} AND produk = ${produk}`;
   if (Number(stok) < q) return res.status(400).json({ error: `Stok tidak cukup (${stok}).` });
 
-  await sql`INSERT INTO stok_mutasi (gudang, produk, tipe, qty, ref, catatan)
-            VALUES (${dari}, ${produk}, 'transfer', ${-q}, 'TRF', ${catatan || "Keluar transfer"})`;
-  await sql`INSERT INTO stok_mutasi (gudang, produk, tipe, qty, ref, catatan)
-            VALUES (${ke}, ${produk}, 'transfer', ${q}, 'TRF', ${catatan || "Masuk transfer"})`;
+  // Dua baris (keluar + masuk) dalam SATU transaksi — tidak mungkin tersisa
+  // hanya baris keluar bila baris masuk gagal.
+  await sql.transaction([
+    sql`INSERT INTO stok_mutasi (gudang, produk, tipe, qty, ref, catatan)
+        VALUES (${dari}, ${produk}, 'transfer', ${-q}, 'TRF', ${catatan || "Keluar transfer"})`,
+    sql`INSERT INTO stok_mutasi (gudang, produk, tipe, qty, ref, catatan)
+        VALUES (${ke}, ${produk}, 'transfer', ${q}, 'TRF', ${catatan || "Masuk transfer"})`,
+  ]);
   res.status(201).json({ ok: true });
 }));
 
@@ -292,21 +343,27 @@ const langkahBerikut = (flow, sekarang, tujuan) => {
 
 // ---------- penjualan ----------
 app.get("/api/penjualan", wrap(async (_req, res) => {
-  const head = await sql`SELECT * FROM v_penjualan ORDER BY tgl DESC, no DESC`;
-  const items = await sql`SELECT * FROM penjualan_item`;
-  res.json(head.map((h) => ({ ...h, items: items.filter((i) => i.penjualan === h.id) })));
+  const [head, items] = await Promise.all([
+    sql`SELECT * FROM v_penjualan ORDER BY tgl DESC, no DESC`,
+    sql`SELECT * FROM penjualan_item`,
+  ]);
+  res.json(gabungItem(head, items, "penjualan"));
 }));
 
 app.post("/api/penjualan", wrap(async (req, res) => {
   const s = req.body;
-  const [row] = await sql`
-    INSERT INTO penjualan (id, no, tgl, pelanggan, gudang, status)
-    VALUES (${s.id}, ${s.no}, ${s.tgl}, ${s.pelanggan}, ${s.gudang}, 'penawaran')
-    RETURNING *`;
-  for (const it of s.items) {
-    await sql`INSERT INTO penjualan_item (penjualan, produk, qty, harga)
-              VALUES (${s.id}, ${it.produk}, ${it.qty}, ${it.harga})`;
-  }
+  if (!Array.isArray(s.items) || !s.items.length)
+    return res.status(400).json({ error: "Minimal satu baris barang." });
+  // Header + semua item dalam satu transaksi & satu perjalanan HTTP ke Neon:
+  // tidak ada SO tanpa item bila salah satu insert gagal.
+  const [[row]] = await sql.transaction([
+    sql`INSERT INTO penjualan (id, no, tgl, pelanggan, gudang, status)
+        VALUES (${s.id}, ${s.no}, ${s.tgl}, ${s.pelanggan}, ${s.gudang}, 'penawaran')
+        RETURNING *`,
+    ...s.items.map((it) => sql`
+        INSERT INTO penjualan_item (penjualan, produk, qty, harga)
+        VALUES (${s.id}, ${it.produk}, ${it.qty}, ${it.harga})`),
+  ]);
   res.status(201).json(row);
 }));
 
@@ -343,21 +400,25 @@ app.patch("/api/penjualan/:id/status", wrap(async (req, res) => {
 
 // ---------- pembelian ----------
 app.get("/api/pembelian", wrap(async (_req, res) => {
-  const head = await sql`SELECT * FROM pembelian ORDER BY tgl DESC, no DESC`;
-  const items = await sql`SELECT * FROM pembelian_item`;
-  res.json(head.map((h) => ({ ...h, items: items.filter((i) => i.pembelian === h.id) })));
+  const [head, items] = await Promise.all([
+    sql`SELECT * FROM pembelian ORDER BY tgl DESC, no DESC`,
+    sql`SELECT * FROM pembelian_item`,
+  ]);
+  res.json(gabungItem(head, items, "pembelian"));
 }));
 
 app.post("/api/pembelian", wrap(async (req, res) => {
   const p = req.body;
-  const [row] = await sql`
-    INSERT INTO pembelian (id, no, tgl, pemasok, gudang, status)
-    VALUES (${p.id}, ${p.no}, ${p.tgl}, ${p.pemasok}, ${p.gudang}, 'order')
-    RETURNING *`;
-  for (const it of p.items) {
-    await sql`INSERT INTO pembelian_item (pembelian, produk, qty, harga)
-              VALUES (${p.id}, ${it.produk}, ${it.qty}, ${it.harga})`;
-  }
+  if (!Array.isArray(p.items) || !p.items.length)
+    return res.status(400).json({ error: "Minimal satu baris barang." });
+  const [[row]] = await sql.transaction([
+    sql`INSERT INTO pembelian (id, no, tgl, pemasok, gudang, status)
+        VALUES (${p.id}, ${p.no}, ${p.tgl}, ${p.pemasok}, ${p.gudang}, 'order')
+        RETURNING *`,
+    ...p.items.map((it) => sql`
+        INSERT INTO pembelian_item (pembelian, produk, qty, harga)
+        VALUES (${p.id}, ${it.produk}, ${it.qty}, ${it.harga})`),
+  ]);
   res.status(201).json(row);
 }));
 
@@ -380,18 +441,23 @@ app.patch("/api/pembelian/:id/status", wrap(async (req, res) => {
 app.delete("/api/penjualan/:id", requireRole("manager"), wrap(async (req, res) => {
   const [row] = await sql`SELECT no FROM penjualan WHERE id = ${req.params.id}`;
   if (!row) return res.status(404).json({ error: "Data penjualan tidak ditemukan." });
-  await sql`DELETE FROM stok_mutasi WHERE ref = ${row.no}`;
-  await sql`DELETE FROM penjualan_item WHERE penjualan = ${req.params.id}`;
-  await sql`DELETE FROM penjualan WHERE id = ${req.params.id}`;
+  // Tiga DELETE dalam satu transaksi — mutasi, item, dan header hilang bersama.
+  await sql.transaction([
+    sql`DELETE FROM stok_mutasi WHERE ref = ${row.no}`,
+    sql`DELETE FROM penjualan_item WHERE penjualan = ${req.params.id}`,
+    sql`DELETE FROM penjualan WHERE id = ${req.params.id}`,
+  ]);
   res.status(204).end();
 }));
 
 app.delete("/api/pembelian/:id", requireRole("manager"), wrap(async (req, res) => {
   const [row] = await sql`SELECT no FROM pembelian WHERE id = ${req.params.id}`;
   if (!row) return res.status(404).json({ error: "Data pembelian tidak ditemukan." });
-  await sql`DELETE FROM stok_mutasi WHERE ref = ${row.no}`;
-  await sql`DELETE FROM pembelian_item WHERE pembelian = ${req.params.id}`;
-  await sql`DELETE FROM pembelian WHERE id = ${req.params.id}`;
+  await sql.transaction([
+    sql`DELETE FROM stok_mutasi WHERE ref = ${row.no}`,
+    sql`DELETE FROM pembelian_item WHERE pembelian = ${req.params.id}`,
+    sql`DELETE FROM pembelian WHERE id = ${req.params.id}`,
+  ]);
   res.status(204).end();
 }));
 

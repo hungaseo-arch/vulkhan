@@ -15,7 +15,12 @@ const nf = new Intl.NumberFormat("id-ID");
 const fmt = (n) => nf.format(Math.round(Number(n) || 0));
 const rp = (n) => "Rp " + fmt(n);
 const uid = (p) => p + "-" + Math.random().toString(36).slice(2, 8).toUpperCase();
-const TODAY = "2026-07-23";
+/* tanggal hari ini (zona waktu lokal) sebagai YYYY-MM-DD — dihitung saat dipakai,
+   bukan konstanta, agar formulir & nama berkas selalu memakai tanggal berjalan */
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 /* Nomor dokumen berurutan: PREFIX-YYMM-### berdasarkan nomor tertinggi yang
    sudah ada pada bulan yang sama — menghindari tabrakan nomor acak. */
@@ -183,6 +188,9 @@ export default function App() {
   const [mutasi, setMutasi] = useState(SEED_MUTASI);
   const [penjualan, setPenjualan] = useState(SEED_PENJUALAN);
   const [pembelian, setPembelian] = useState(SEED_PEMBELIAN);
+  /* stok resmi dari server (v_stok). null = belum ada / offline → hitung dari mutasi */
+  const [stokServer, setStokServer] = useState(null);
+  const [mutasiLimit, setMutasiLimit] = useState(null); // batas baris mutasi yang dikirim server
   const [toast, setToast] = useState(null);
   const [conn, setConn] = useState("loading"); // "loading" | "online" | "offline"
   const online = conn === "online";
@@ -224,6 +232,7 @@ export default function App() {
     setUser(null);
     api.setToken(null);
     try { localStorage.removeItem("vk_user"); } catch { /* noop */ }
+    setStokServer(null);
     setTab("dasbor");
   };
 
@@ -234,6 +243,8 @@ export default function App() {
     setPelanggan(d.pelanggan);
     setPemasok(d.pemasok);
     setMutasi(d.mutasi);
+    setStokServer(d.stok || null);
+    setMutasiLimit(d.mutasiLimit || null);
     setPenjualan(d.penjualan);
     setPembelian(d.pembelian);
   };
@@ -263,15 +274,22 @@ export default function App() {
     return () => { alive = false; };
   }, [user, conn]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* stok dihitung dari buku mutasi — tidak pernah diedit langsung */
+  /* stok tidak pernah diedit langsung.
+     Online  → dari view v_stok di server (menjumlah SELURUH buku mutasi).
+     Offline → dijumlah dari mutasi di memori (mode demo).
+     Jangan menjumlah `mutasi` saat online: server hanya mengirim 500 baris terakhir. */
   const stok = useMemo(() => {
     const m = {};
+    if (stokServer) {
+      stokServer.forEach((r) => { m[r.gudang + "|" + r.produk] = r.stok; });
+      return m;
+    }
     mutasi.forEach((x) => {
       const k = x.gudang + "|" + x.produk;
       m[k] = (m[k] || 0) + x.qty;
     });
     return m;
-  }, [mutasi]);
+  }, [stokServer, mutasi]);
   const getStok = (g, p) => stok[g + "|" + p] || 0;
   const stokTotal = (p) => GUDANG.reduce((s, g) => s + getStok(g.id, p), 0);
 
@@ -308,7 +326,7 @@ export default function App() {
         await reload();
       } else {
         if (next === "kirim")
-          addMutasi(so.items.map((it) => ({ tgl: TODAY, gudang: so.gudang, produk: it.produk, tipe: "keluar", qty: -it.qty, ref: so.no, catatan: "Pengiriman penjualan" })));
+          addMutasi(so.items.map((it) => ({ tgl: today(), gudang: so.gudang, produk: it.produk, tipe: "keluar", qty: -it.qty, ref: so.no, catatan: "Pengiriman penjualan" })));
         setPenjualan((list) => list.map((x) => (x.id === so.id ? { ...x, status: next } : x)));
       }
       say(`${so.no} → ${SO_LABEL[next].id}`);
@@ -325,7 +343,7 @@ export default function App() {
         await reload();
       } else {
         if (next === "diterima")
-          addMutasi(po.items.map((it) => ({ tgl: TODAY, gudang: po.gudang, produk: it.produk, tipe: "masuk", qty: it.qty, ref: po.no, catatan: "Penerimaan pembelian" })));
+          addMutasi(po.items.map((it) => ({ tgl: today(), gudang: po.gudang, produk: it.produk, tipe: "masuk", qty: it.qty, ref: po.no, catatan: "Penerimaan pembelian" })));
         setPembelian((list) => list.map((x) => (x.id === po.id ? { ...x, status: next } : x)));
       }
       say(`${po.no} → ${PO_LABEL[next].id}`);
@@ -335,8 +353,8 @@ export default function App() {
   async function doTransfer(p) {
     if (online) await api.transfer(p);
     else addMutasi([
-      { tgl: TODAY, gudang: p.dari, produk: p.produk, tipe: "transfer", qty: -p.qty, ref: "TRF", catatan: "Keluar transfer" },
-      { tgl: TODAY, gudang: p.ke, produk: p.produk, tipe: "transfer", qty: p.qty, ref: "TRF", catatan: "Masuk transfer" },
+      { tgl: today(), gudang: p.dari, produk: p.produk, tipe: "transfer", qty: -p.qty, ref: "TRF", catatan: "Keluar transfer" },
+      { tgl: today(), gudang: p.ke, produk: p.produk, tipe: "transfer", qty: p.qty, ref: "TRF", catatan: "Masuk transfer" },
     ]);
     if (online) await reload();
     say("Transfer tercatat.");
@@ -344,7 +362,7 @@ export default function App() {
 
   async function doAdjust(p) {
     if (online) await api.penyesuaian({ gudang: p.gudang, produk: p.produk, fisik: p.fisik, catatan: p.catatan });
-    else addMutasi([{ tgl: TODAY, gudang: p.gudang, produk: p.produk, tipe: "penyesuaian", qty: p.selisih, ref: "ADJ", catatan: p.catatan || "Hasil stok opname" }]);
+    else addMutasi([{ tgl: today(), gudang: p.gudang, produk: p.produk, tipe: "penyesuaian", qty: p.selisih, ref: "ADJ", catatan: p.catatan || "Hasil stok opname" }]);
     if (online) await reload();
     say("Penyesuaian tercatat.");
   }
@@ -387,7 +405,7 @@ export default function App() {
   }
 
   const ctx = {
-    produk, pelanggan, pemasok, mutasi, penjualan, pembelian,
+    produk, pelanggan, pemasok, mutasi, mutasiLimit, penjualan, pembelian,
     getStok, stokTotal, pById, cById, gById, sById, totalSO,
     piutang, piutangTotal, majuSO, majuPO, say, online,
     doTransfer, doAdjust, doCreatePenjualan, doCreatePembelian, doCreatePelanggan,
@@ -395,6 +413,7 @@ export default function App() {
   };
 
   const TABS = [
+    ["dasbor", "Ringkasan"],
     ["stok", "Stok Gudang"],
     ["jual", "Penjualan"],
     ["beli", "Pembelian"],
@@ -407,7 +426,7 @@ export default function App() {
   if (conn === "loading")
     return <div className="vk"><Style /><div className="login"><div className="splash">Menyambung…</div></div></div>;
   if (!user)
-    return <Login doLogin={doLogin} onOk={login} say={say} toast={toast} />;
+    return <Login doLogin={doLogin} onOk={login} say={say} toast={toast} conn={conn} />;
 
   return (
     <div className="vk">
@@ -464,7 +483,7 @@ export default function App() {
 }
 
 /* ============================ LOGIN ============================ */
-function Login({ doLogin, onOk, say, toast }) {
+function Login({ doLogin, onOk, say, toast, conn }) {
   const [f, setF] = useState({ username: "", sandi: "" });
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
@@ -497,7 +516,10 @@ function Login({ doLogin, onOk, say, toast }) {
               <span className="lbl">Kata Sandi</span>
               <input type="password" value={f.sandi} onChange={set("sandi")} onKeyDown={onKey} />
             </label>
-            <button className="btn pri lg" onClick={masuk} disabled={busy}>{busy ? "Memproses…" : "Masuk"}</button>
+            <button className="btn pri lg" onClick={masuk} disabled={busy || conn !== "online"}>{busy ? "Memproses…" : "Masuk"}</button>
+            <span className={"conn " + conn}>
+              {conn === "online" ? "● Neon terhubung" : "○ Server tidak terhubung — jalankan api-server.js"}
+            </span>
           </div>
         </div>
       </div>
@@ -631,7 +653,7 @@ function PenggunaAdmin({ online, say, user, minta }) {
       </SectionTitle>
       <div className="grid3">
         {Object.entries(ROLE_LABEL).map(([k, v]) => (
-          <Kpi key={k} label={v.id} val={(users || []).filter((u) => u.peran === k).length + " akun"} sub={v.desc} />
+          <Kpi key={k} label={v.id} val={users === null ? "…" : users.filter((u) => u.peran === k).length + " akun"} sub={v.desc} />
         ))}
       </div>
       <Card title="Daftar Pengguna"
@@ -659,6 +681,7 @@ function PenggunaAdmin({ online, say, user, minta }) {
                   </td>
                 </tr>
               ))}
+              {users === null && <tr><td colSpan={4}><Empty id="Memuat…" /></td></tr>}
               {users && users.length === 0 && <tr><td colSpan={4}><Empty id="Belum ada pengguna." /></td></tr>}
             </tbody>
           </table>
@@ -764,6 +787,12 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
     });
     return [...m.values()].sort((a, b) => b.bulan.localeCompare(a.bulan));
   })();
+  const totalBulanan = jualBulanan.reduce((a, b) => {
+    a.n += b.n; a.qty += b.qty; a.nilai += b.nilai;
+    GUDANG.forEach((g) => { a.perGudang[g.id] = (a.perGudang[g.id] || 0) + (b.perGudang[g.id] || 0); });
+    return a;
+  }, { n: 0, qty: 0, nilai: 0, perGudang: {} });
+  const jumlahBulan = jualBulanan.length;
 
   const { piutangF, piutang90, rasio90 } = hitungPiutang(penjualan, cById, totalSO);
 
@@ -771,7 +800,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
     <>
       <SectionTitle id="Ringkasan Operasi" />
       <div className="kpis">
-        <Kpi label="Nilai Stok" val={rp(nilaiStok)} sub="harga pokok" />
+        <Kpi label="Nilai Stok" val={rp(nilaiStok)} sub={nilaiStok < 0 ? "⚠ stok negatif — periksa Buku Mutasi Stok" : "harga pokok"} tone={nilaiStok < 0 ? "alert" : ""} />
         <Kpi label="Penjualan" val={rp(jual)} sub={`${jualKonfirm.length} transaksi`} />
         <Kpi label="Pembelian" val={rp(beli)} sub={`${pembelian.length} transaksi`} />
         <Kpi label="Piutang Berjalan" val={rp(piutangF)} sub="belum lunas" tone={piutangF > 0 ? "warn" : ""} />
@@ -807,6 +836,28 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
               ))}
               {jualBulanan.length === 0 && <tr><td colSpan={4 + GUDANG.length}><Empty id="Tidak ada penjualan pada periode ini." /></td></tr>}
             </tbody>
+            {jumlahBulan > 0 && (
+              <tfoot>
+                <tr className="tf-total">
+                  <td><b>Total</b></td>
+                  <td className="r n strong">{fmt(totalBulanan.n)}</td>
+                  {GUDANG.map((g) => (
+                    <td className="r n strong" key={g.id}>{fmt(totalBulanan.perGudang[g.id] || 0)}</td>
+                  ))}
+                  <td className="r n strong">{fmt(totalBulanan.qty)}</td>
+                  <td className="r n strong">{rp(totalBulanan.nilai)}</td>
+                </tr>
+                <tr className="tf-avg">
+                  <td><em className="mut2">Rata-rata / bulan</em></td>
+                  <td className="r n mut">{fmt(totalBulanan.n / jumlahBulan)}</td>
+                  {GUDANG.map((g) => (
+                    <td className="r n mut" key={g.id}>{fmt((totalBulanan.perGudang[g.id] || 0) / jumlahBulan)}</td>
+                  ))}
+                  <td className="r n mut">{fmt(totalBulanan.qty / jumlahBulan)}</td>
+                  <td className="r n mut">{rp(totalBulanan.nilai / jumlahBulan)}</td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </Scroll>
       </Card>
@@ -831,9 +882,9 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
                 return (
                   <tr key={g.id}>
                     <td><span className="chip">{g.kode}</span> {g.nama}</td>
-                    <td className="r n">{fmt(jadi)}</td>
-                    <td className="r n">{fmt(cs)}</td>
-                    <td className="r n">{rp(val)}</td>
+                    <td className={"r n " + (jadi < 0 ? "bad strong" : "")}>{fmt(jadi)}</td>
+                    <td className={"r n " + (cs < 0 ? "bad strong" : "")}>{fmt(cs)}</td>
+                    <td className={"r n " + (val < 0 ? "bad strong" : "")}>{rp(val)}</td>
                   </tr>
                 );
               })}
@@ -846,12 +897,16 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
 }
 
 /* ============================ STOK ============================ */
-function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, doTransfer, doAdjust, say }) {
+const MUTASI_PAGE = 50;
+
+function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, doTransfer, doAdjust, say }) {
   const [g, setG] = useState("ALL");
   const [kat, setKat] = useState("ALL");
   const [cari, setCari] = useState("");
   const [modal, setModal] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [mutasiTampil, setMutasiTampil] = useState(MUTASI_PAGE);
+  const mutasiUrut = useMemo(() => [...mutasi].reverse(), [mutasi]);
 
   /* pencarian bebas: kode, nama, ukuran, pola, atau merek */
   const q = cari.trim().toLowerCase();
@@ -868,7 +923,7 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, doTransfer, do
         stokTotal(p.id), p.min, p.satuan,
       ]),
     ];
-    downloadXlsx(`stok_${TODAY}`, "Stok", aoa);
+    downloadXlsx(`stok_${today()}`, "Stok", aoa);
   };
 
   return (
@@ -922,10 +977,11 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, doTransfer, do
                     <td className="r n">{rp(p.hpp)}</td>
                     <td className="r n">{rp(p.harga)}</td>
                     <td className="r n mut">{p.hargaUser != null ? rp(p.hargaUser) : "—"}</td>
-                    {cols.map((x) => (
-                      <td key={x.id} className="r n">{fmt(getStok(x.id, p.id))}</td>
-                    ))}
-                    <td className={"r n strong " + (tot < p.min ? "bad" : "")}>{fmt(tot)}</td>
+                    {cols.map((x) => {
+                      const s = getStok(x.id, p.id);
+                      return <td key={x.id} className={"r n " + (s < 0 ? "bad strong" : "")}>{fmt(s)}</td>;
+                    })}
+                    <td className={"r n strong " + (tot < 0 ? "bad" : tot < p.min ? "warn" : "")}>{fmt(tot)}</td>
                     <td className="r n mut">{fmt(p.min)}</td>
                   </tr>
                 );
@@ -956,7 +1012,7 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, doTransfer, do
               </tr>
             </thead>
             <tbody>
-              {[...mutasi].reverse().map((m) => (
+              {mutasiUrut.slice(0, mutasiTampil).map((m) => (
                 <tr key={m.id}>
                   <td className="n">{m.tgl}</td>
                   <td><span className="chip">{gById(m.gudang).kode}</span></td>
@@ -970,6 +1026,17 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, doTransfer, do
             </tbody>
           </table>
         </Scroll>
+        {mutasiTampil < mutasiUrut.length && (
+          <div className="mut-more">
+            <button className="btn sm" onClick={() => setMutasiTampil((n) => n + MUTASI_PAGE)}>
+              Muat {Math.min(MUTASI_PAGE, mutasiUrut.length - mutasiTampil)} lagi
+              <em>{mutasiTampil} dari {mutasiUrut.length} baris</em>
+            </button>
+          </div>
+        )}
+        {mutasiLimit && mutasi.length >= mutasiLimit && (
+          <div className="mut-note">Menampilkan {fmt(mutasiLimit)} mutasi terakhir. Stok di atas tetap dihitung dari seluruh buku mutasi.</div>
+        )}
       </Card>
 
       {modal === "transfer" && <FormTransfer produk={produk} getStok={getStok} submit={doTransfer} say={say} close={() => setModal(null)} />}
@@ -1133,15 +1200,15 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
 
   const unduhExcel = () => {
     const aoa = [
-      ["No.", "Tanggal", "Pelanggan", "Kota", "Gudang", "Status", "Rincian", "Total"],
+      ["No.", "Tanggal", "Pelanggan", "PIC", "Kota", "Gudang", "Status", "Rincian", "Total"],
       ...list.map((s) => [
-        s.no, s.tgl, cById(s.pelanggan).nama, cById(s.pelanggan).kota, gById(s.gudang).kode,
+        s.no, s.tgl, cById(s.pelanggan).nama, cById(s.pelanggan).pic, cById(s.pelanggan).kota, gById(s.gudang).kode,
         SO_LABEL[s.status].id,
         s.items.map((i) => `${pById(i.produk).kode} × ${fmt(i.qty)}`).join(", "),
         totalSO(s),
       ]),
     ];
-    downloadXlsx(`penjualan_${TODAY}`, "Penjualan", aoa);
+    downloadXlsx(`penjualan_${today()}`, "Penjualan", aoa);
   };
 
   return (
@@ -1151,11 +1218,11 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
           <div className="filters">
             <label className="fld">
               <span className="lbl">Dari</span>
-              <input type="date" value={dari} onChange={(e) => setDari(e.target.value)} max={sampai || undefined} />
+              <input type="date" lang="id-ID" value={dari} onChange={(e) => setDari(e.target.value)} max={sampai || undefined} />
             </label>
             <label className="fld">
               <span className="lbl">Sampai</span>
-              <input type="date" value={sampai} onChange={(e) => setSampai(e.target.value)} min={dari || undefined} />
+              <input type="date" lang="id-ID" value={sampai} onChange={(e) => setSampai(e.target.value)} min={dari || undefined} />
             </label>
             <label className="fld cari">
               <span className="lbl">Pelanggan</span>
@@ -1397,7 +1464,7 @@ function DokumenPenjualan({ so, pById, cById, gById, totalSO, close }) {
 function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit, nomor }) {
   /* yang bisa dijual: ban jadi + Ban Jasa */
   const jadi = produk.filter((p) => ["jadi", "jasa"].includes(p.kategori));
-  const [f, setF] = useState({ pelanggan: "", gudang: "", tgl: TODAY });
+  const [f, setF] = useState({ pelanggan: "", gudang: "", tgl: today() });
   const [items, setItems] = useState([{ produk: "", qty: "", harga: "" }]);
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
 
@@ -1512,7 +1579,7 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
         tot(p),
       ]),
     ];
-    downloadXlsx(`pembelian_${TODAY}`, "Pembelian", aoa);
+    downloadXlsx(`pembelian_${today()}`, "Pembelian", aoa);
   };
 
   return (
@@ -1522,11 +1589,11 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
           <div className="filters">
             <label className="fld">
               <span className="lbl">Dari</span>
-              <input type="date" value={dari} onChange={(e) => setDari(e.target.value)} max={sampai || undefined} />
+              <input type="date" lang="id-ID" value={dari} onChange={(e) => setDari(e.target.value)} max={sampai || undefined} />
             </label>
             <label className="fld">
               <span className="lbl">Sampai</span>
-              <input type="date" value={sampai} onChange={(e) => setSampai(e.target.value)} min={dari || undefined} />
+              <input type="date" lang="id-ID" value={sampai} onChange={(e) => setSampai(e.target.value)} min={dari || undefined} />
             </label>
             {filterAktif && <button className="btn sm" onClick={() => { setDari(""); setSampai(""); }}>Reset Filter</button>}
           </div>
@@ -1635,7 +1702,7 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
 function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
   /* yang bisa dibeli: casing & bahan baku */
   const beliable = produk.filter((p) => ["casing", "bahan"].includes(p.kategori));
-  const [f, setF] = useState({ pemasok: "", gudang: "", tgl: TODAY });
+  const [f, setF] = useState({ pemasok: "", gudang: "", tgl: today() });
   const [items, setItems] = useState([{ produk: "", qty: "", harga: "" }]);
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
   const ubah = (i, k, v) => setItems((l) => l.map((x, n) => {
@@ -1709,7 +1776,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
         c.kode, c.nama, c.pic, c.telp, c.kota, c.grade, c.limit, c.termin, piutang(c.id), omzet(c.id),
       ]),
     ];
-    downloadXlsx(`pelanggan_${TODAY}`, "Pelanggan", aoa);
+    downloadXlsx(`pelanggan_${today()}`, "Pelanggan", aoa);
   };
 
   return (
@@ -1910,7 +1977,7 @@ function Piutang({ penjualan, cById, totalSO }) {
       ["No.", "Pelanggan", "Tanggal", "Jatuh Tempo", "Telat (hari)", "Nilai"],
       ...rincian.map((r) => [r.so.no, r.c.nama, r.so.tgl, r.tempo, r.telat, r.nilai]),
     ];
-    downloadXlsx(`piutang_${TODAY}`, "Piutang", aoa);
+    downloadXlsx(`piutang_${today()}`, "Piutang", aoa);
   };
 
   return (
@@ -2173,14 +2240,13 @@ const Modal = ({ title, close, onSave, children, wide, saveLabel }) => {
 function Style() {
   return (
     <style>{`
-@import url('https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap');
-
+/* font dimuat dari index.html (preload non-blocking) — jangan @import di sini */
 .vk{
   --slab:#E4E6E1; --paper:#F7F8F5; --ink:#20221F; --rubber:#2C302D;
   --muted:#71766F; --line:#CBCEC6; --marking:#DFA71C;
   --ok:#3B7A57; --warn:#B45A1E; --alert:#A63A28;
-  --fd:'Archivo Narrow','IBM Plex Sans KR',system-ui,sans-serif;
-  --fb:'IBM Plex Sans KR',system-ui,-apple-system,sans-serif;
+  --fd:'Archivo Narrow','IBM Plex Sans',system-ui,sans-serif;
+  --fb:'IBM Plex Sans',system-ui,-apple-system,sans-serif;
   --fm:'IBM Plex Mono',ui-monospace,monospace;
   background:var(--slab); color:var(--ink); font-family:var(--fb);
   font-size:13px; line-height:1.45; min-height:100%;
@@ -2213,7 +2279,15 @@ function Style() {
 .vk .hazard{height:5px; background:repeating-linear-gradient(45deg,var(--marking) 0 12px,var(--ink) 12px 24px)}
 
 /* tabs */
-.vk .tabs{max-width:1240px; margin:0 auto; padding:0 12px; display:flex; justify-content:center; gap:2px; overflow-x:auto}
+.vk .tabs{max-width:1240px; margin:0 auto; padding:0 12px; display:flex; justify-content:center; gap:2px; overflow-x:auto;
+  background:
+    linear-gradient(to right, var(--paper) 0, var(--paper) 0) left / 24px 100%,
+    linear-gradient(to left, var(--paper) 0, var(--paper) 0) right / 24px 100%,
+    linear-gradient(to right, rgba(32,34,31,.16), rgba(32,34,31,0) 24px) left / 24px 100%,
+    linear-gradient(to left, rgba(32,34,31,.16), rgba(32,34,31,0) 24px) right / 24px 100%;
+  background-repeat:no-repeat;
+  background-attachment:local, local, scroll, scroll;
+}
 .vk .tab{background:none; border:0; border-bottom:3px solid transparent; padding:10px 14px 8px; cursor:pointer;
   font-family:var(--fd); font-size:13px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); white-space:nowrap}
 .vk .tab em{display:block; font-family:var(--fb); font-size:10px; letter-spacing:0; text-transform:none; font-weight:400}
@@ -2276,13 +2350,26 @@ function Style() {
 .vk .acc-sub{flex:1; font-family:var(--fb); font-size:11px; color:var(--muted)}
 
 /* table */
-.vk .scroll{overflow:auto; max-width:100%}
+.vk .scroll{overflow:auto; max-width:100%;
+  background:
+    linear-gradient(to right, var(--paper) 0, var(--paper) 0) left / 18px 100%,
+    linear-gradient(to left, var(--paper) 0, var(--paper) 0) right / 18px 100%,
+    linear-gradient(to right, rgba(32,34,31,.14), rgba(32,34,31,0) 18px) left / 18px 100%,
+    linear-gradient(to left, rgba(32,34,31,.14), rgba(32,34,31,0) 18px) right / 18px 100%;
+  background-repeat:no-repeat;
+  background-attachment:local, local, scroll, scroll;
+}
+.vk .mut-more{display:flex; justify-content:center; padding:10px 0 2px}
+.vk .mut-note{text-align:center; font-size:11px; color:var(--muted); padding:6px 0 2px}
 .vk table{width:100%; border-collapse:collapse; font-size:12px}
 .vk thead th{position:sticky; top:0; background:var(--slab); text-align:left; padding:7px 10px; border-bottom:1px solid var(--line);
   font-family:var(--fd); font-size:10.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; white-space:nowrap}
 .vk thead th em{font-family:var(--fb); font-size:9.5px; letter-spacing:0; text-transform:none; color:var(--muted); font-weight:400}
 .vk tbody td{padding:8px 10px; border-bottom:1px solid #E6E8E3; vertical-align:top}
 .vk tbody tr:hover{background:#EFF1EC}
+.vk tfoot td{padding:7px 10px; border-top:2px solid var(--ink)}
+.vk tfoot tr.tf-total td{background:var(--slab)}
+.vk tfoot tr.tf-avg td{border-top:0; padding-top:4px; font-size:11px}
 .vk .chip{display:inline-block; font-family:var(--fm); font-size:10.5px; font-weight:500; background:var(--rubber); color:var(--paper);
   padding:1px 6px; border-radius:2px; letter-spacing:.03em}
 
