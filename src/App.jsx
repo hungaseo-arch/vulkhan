@@ -3942,10 +3942,8 @@ function Style() {
 .vk .jual-filter{align-items:flex-end; gap:12px}
 .vk .jual-filter .fld{min-width:170px}
 
-/* KPI dengan pembanding */
-.vk .jual-kpi .kpi{border-left-width:3px}
-.vk .kpi.tren .kv{font-size:20px; font-weight:500}
-.vk .kpi.tren .kl,.vk .kpi.tren .ks{font-size:11px; font-weight:400}
+/* KPI dengan pembanding: ukuran huruf mengikuti .kpi biasa (label 12px,
+   nilai clamp, keterangan 11px) supaya tab penjualan tidak tampak "lain" */
 .vk .delta em{font-style:normal; margin-left:5px; color:var(--asm-fg-muted)}
 .vk .delta.naik{color:var(--asm-success)}
 .vk .delta.turun{color:var(--asm-danger)}
@@ -4023,7 +4021,6 @@ function Style() {
 /* sumbu analisis: chip di bawah KPI, bukan di deret penyaring — yang berganti
    bukan angka yang dihitung melainkan cara membacanya */
 .vk .chips.sumbu{margin:0 0 12px}
-.vk .chips.sumbu .chip-b{padding:8px 16px; font-size:13px}
 .vk .rank-grup{padding:10px 12px; border-bottom:.5px solid var(--asm-border-50)}
 
 /* tabel peringkat: bentuk baris sama dengan tabel drill, ditambah kolom nomor
