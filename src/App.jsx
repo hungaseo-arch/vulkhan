@@ -139,11 +139,6 @@ const bulanRentang = (d0, d1) => {
   return out;
 };
 const BULAN_SINGKAT = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
-/* Bulan tepat sebelum ym, untuk pembanding bulan-ke-bulan. */
-const bulanSebelum = (ym) => {
-  const y = Number(String(ym).slice(0, 4)), m = Number(String(ym).slice(5, 7));
-  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
-};
 const bulanSingkat = (ym, lang) => {
   const m = Number(String(ym).slice(5, 7));
   return lang === "ko" ? `${m}월` : BULAN_SINGKAT[m - 1];
@@ -1610,14 +1605,12 @@ function DetailProduk({ p, getStok, stokTotal, close }) {
 /* Kartu permintaan hapus. Dipakai tiga layar (penjualan, pembelian,
    pelanggan) dengan jenis yang berbeda; yang tampil hanya usulan untuk jenis
    layarnya sendiri, supaya daftar di layar penjualan tidak dipenuhi permintaan
-   hapus pelanggan. Kartunya disembunyikan kalau tidak ada yang menunggu dan
-   pembacanya bukan admin — petugas tidak perlu melihat arsip putusan lama. */
+   hapus pelanggan. Tidak ada usulan sama sekali berarti kartunya tidak muncul:
+   kartu kosong memakan tinggi layar untuk mengatakan "tidak ada apa-apa". */
 function KartuUsulHapus({ jenis, hapusUsulan, can, onPutuskan }) {
   const { t } = useLang();
-  if (hapusUsulan === null) return null;
-  const rows = hapusUsulan.filter((u) => u.jenis === jenis);
-  const menunggu = rows.filter((u) => u.status === "menunggu");
-  if (!menunggu.length && !can("putusan")) return null;
+  const rows = (hapusUsulan || []).filter((u) => u.jenis === jenis);
+  if (!rows.length) return null;
   return (
     <Card title={t("Permintaan Hapus")}
       note={t("Diajukan oleh petugas, disahkan oleh admin. Data terhapus tepat saat usulan disetujui.")}>
@@ -1649,7 +1642,6 @@ function KartuUsulHapus({ jenis, hapusUsulan, can, onPutuskan }) {
                 </td>
               </tr>
             ))}
-            {rows.length === 0 && <tr><td colSpan={6}><Empty id={t("Belum ada permintaan hapus.")} /></td></tr>}
           </tbody>
         </table>
       </Scroll>
@@ -1825,17 +1817,6 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
     return r.n ? r : null;
   }, [perNama, d0, d1, agregat]);
 
-  /* Nilai per bulan dari SELURUH buku, bukan hanya rentang terpilih: "vs bulan
-     lalu" pada bulan pertama rentang harus tetap terisi. */
-  const nilaiBulan = useMemo(() => {
-    const m = new Map();
-    for (const s of perNama) {
-      const ym = s.tgl.slice(0, 7);
-      m.set(ym, (m.get(ym) || 0) + totalSO(s));
-    }
-    return m;
-  }, [perNama, totalSO]);
-
   const isiBulan = useMemo(() => {
     const m = new Map();
     for (const s of list) {
@@ -1865,27 +1846,22 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
         /* bulan yang belum tiba dibedakan dari bulan bernilai nol: yang satu
            belum terjadi, yang lain terjadi tanpa penjualan */
         datang: ym > ymIni,
-        mom: naikTurun(total, nilaiBulan.get(bulanSebelum(ym))),
       };
     });
-  }, [isiBulan, d0, d1, hariIni, nilaiBulan]);
+  }, [isiBulan, d0, d1, hariIni]);
 
-  /* Pohon tabel: tahun → kuartal → bulan, semuanya menurun (terbaru dulu).
-     Kuartal hanya baris subtotal, bukan kolom — matriks 4 kolom yang lama
-     memaksa bulan yang dibuka keluar dari tata letaknya. */
+  /* Pohon tabel: tahun → bulan → hari → transaksi, semuanya menurun (terbaru
+     dulu). Tanpa tingkat kuartal: subtotalnya menyisipkan baris yang tidak
+     pernah dibuka di antara bulan-bulan yang justru dibaca berurutan. */
   const tahunan = useMemo(() => {
     const th = new Map();
     for (const g of [...graf].reverse()) {
       const y = g.ym.slice(0, 4);
-      if (!th.has(y)) th.set(y, { tahun: y, ...KOSONG(), kuartal: new Map() });
+      if (!th.has(y)) th.set(y, { tahun: y, ...KOSONG(), bulan: [] });
       const Y = th.get(y);
-      Y.n += g.n; Y.qty += g.qty; Y.total += g.total;
-      const k = Math.ceil(Number(g.ym.slice(5, 7)) / 3);
-      if (!Y.kuartal.has(k)) Y.kuartal.set(k, { k, ...KOSONG(), bulan: [] });
-      const K = Y.kuartal.get(k);
-      K.n += g.n; K.qty += g.qty; K.total += g.total; K.bulan.push(g);
+      Y.n += g.n; Y.qty += g.qty; Y.total += g.total; Y.bulan.push(g);
     }
-    return [...th.values()].map((y) => ({ ...y, kuartal: [...y.kuartal.values()] }));
+    return [...th.values()];
   }, [graf]);
 
   /* Peringkat pelanggan atas rentang terpilih. Barisnya menyimpan SO-nya
@@ -2128,7 +2104,6 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
                   <th scope="col" className="r">{t("Qty")}</th>
                   <th scope="col" className="r">{t("Nilai Penjualan")}</th>
                   <th scope="col" className="r">{t("Harga Rata-rata")}</th>
-                  <th scope="col" className="r">{t("vs Bulan Lalu")}</th>
                 </tr>
               </thead>
               {tahunan.map((y) => (
@@ -2137,58 +2112,46 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
                     <tr className="br-thn">
                       <td>{lang === "ko" ? `${y.tahun}년` : y.tahun}</td>
                       {angka({ ...y, harga: hargaRata(y.total, y.qty) })}
-                      <td />
                     </tr>
                   )}
-                  {y.kuartal.map((k) => (
-                    <React.Fragment key={k.k}>
-                      <tr className="br-k">
-                        <td>{t("Subtotal Kuartal {k}", { k: k.k })}</td>
-                        {angka({ ...k, harga: hargaRata(k.total, k.qty) })}
-                        <td />
-                      </tr>
-                      {k.bulan.map((b) => {
-                        const onB = bukaBulan.has(b.ym);
-                        return (
-                          <React.Fragment key={b.ym}>
-                            <tr className={"br-b" + (b.datang ? " datang" : "")}
-                              ref={(el) => { if (el) barisRef.current.set(b.ym, el); else barisRef.current.delete(b.ym); }}>
-                              <td>
-                                {b.n === 0
-                                  ? <span className="per per-b mut">{bulanPendek(b.ym, lang)}</span>
-                                  : (
-                                    <button type="button" className="per per-b buka" aria-expanded={onB}
-                                      onClick={() => setBukaBulan((s) => balik(s, b.ym))}>
-                                      <span className="chev">{onB ? "▾" : "▸"}</span>{bulanPendek(b.ym, lang)}
-                                    </button>
-                                  )}
-                              </td>
-                              {angka(b)}
-                              <td className={"r n delta " + arah(b.mom)}>{pct(b.mom)}</td>
-                            </tr>
-                            {onB && b.hari.map((h) => {
-                              const onH = bukaHari.has(h.tgl);
-                              return (
-                                <React.Fragment key={h.tgl}>
-                                  <tr className="br-h">
-                                    <td>
-                                      <button type="button" className="per per-h buka" aria-expanded={onH}
-                                        onClick={() => setBukaHari((s) => balik(s, h.tgl))}>
-                                        <span className="chev">{onH ? "▾" : "▸"}</span>{hariLabel(h.tgl, lang)}
-                                      </button>
-                                    </td>
-                                    {angka({ ...h, harga: hargaRata(h.total, h.qty) })}
-                                    <td />
-                                  </tr>
-                                  {onH && h.rows.map((s) => barisSO(s, "per-t", false, 1))}
-                                </React.Fragment>
-                              );
-                            })}
-                          </React.Fragment>
-                        );
-                      })}
-                    </React.Fragment>
-                  ))}
+                  {y.bulan.map((b) => {
+                    const onB = bukaBulan.has(b.ym);
+                    return (
+                      <React.Fragment key={b.ym}>
+                        <tr className={"br-b" + (b.datang ? " datang" : "")}
+                          ref={(el) => { if (el) barisRef.current.set(b.ym, el); else barisRef.current.delete(b.ym); }}>
+                          <td>
+                            {b.n === 0
+                              ? <span className="per per-b mut">{bulanPendek(b.ym, lang)}</span>
+                              : (
+                                <button type="button" className="per per-b buka" aria-expanded={onB}
+                                  onClick={() => setBukaBulan((s) => balik(s, b.ym))}>
+                                  <span className="chev">{onB ? "▾" : "▸"}</span>{bulanPendek(b.ym, lang)}
+                                </button>
+                              )}
+                          </td>
+                          {angka(b)}
+                        </tr>
+                        {onB && b.hari.map((h) => {
+                          const onH = bukaHari.has(h.tgl);
+                          return (
+                            <React.Fragment key={h.tgl}>
+                              <tr className="br-h">
+                                <td>
+                                  <button type="button" className="per per-h buka" aria-expanded={onH}
+                                    onClick={() => setBukaHari((s) => balik(s, h.tgl))}>
+                                    <span className="chev">{onH ? "▾" : "▸"}</span>{hariLabel(h.tgl, lang)}
+                                  </button>
+                                </td>
+                                {angka({ ...h, harga: hargaRata(h.total, h.qty) })}
+                              </tr>
+                              {onH && h.rows.map((s) => barisSO(s, "per-t", false, 0))}
+                            </React.Fragment>
+                          );
+                        })}
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
               ))}
             </table>
@@ -2443,11 +2406,14 @@ function GrafBulanan({ data, lang, onPilih }) {
   const { t } = useLang();
   const [tip, setTip] = useState(null);
   const maxNilai = Math.max(...data.map((d) => d.total), 0);
-  const maxHarga = Math.max(...data.map((d) => d.harga || 0), 0);
+  const maxQty = Math.max(...data.map((d) => d.qty), 0);
   if (!data.length) return null;
 
+  /* Bulan yang belum tiba dilewati, bukan digambar sebagai nol: garisnya akan
+     terjun ke dasar dan terbaca sebagai penurunan yang belum terjadi. Bulan
+     yang sudah lewat tanpa penjualan tetap digambar — nol di situ nyata. */
   const titik = data
-    .map((d, i) => (d.harga == null ? null : `${((i + 0.5) / data.length) * 100},${GRAF_DASAR - (d.harga / maxHarga) * GRAF_BAR}`))
+    .map((d, i) => (d.datang ? null : `${((i + 0.5) / data.length) * 100},${GRAF_DASAR - (maxQty ? (d.qty / maxQty) * GRAF_BAR : 0)}`))
     .filter(Boolean).join(" ");
   const aktif = tip == null ? null : data[tip];
 
@@ -2455,10 +2421,10 @@ function GrafBulanan({ data, lang, onPilih }) {
     <Card cls="graf-card">
       <div className="graf-hd">
         <h3>{t("Tren Bulanan")}</h3>
-        <p className="note">{t("Batang = nilai (juta) · garis = harga rata-rata (juta/pcs)")}</p>
+        <p className="note">{t("Batang = nilai (juta) · garis = kuantitas (pcs)")}</p>
       </div>
       <div className="graf-plot" style={{ height: GRAF_T }}>
-        {maxHarga > 0 && (
+        {maxQty > 0 && (
           <svg className="graf-garis" viewBox={`0 0 100 ${GRAF_T}`} preserveAspectRatio="none" aria-hidden="true">
             <polyline points={titik} vectorEffect="non-scaling-stroke" />
           </svg>
@@ -2477,7 +2443,7 @@ function GrafBulanan({ data, lang, onPilih }) {
         ))}
         {/* sumbu kanan: hanya batas atas dan nol — garisnya untuk arah, bukan
             untuk dibaca nilainya satu per satu */}
-        <span className="graf-y atas">{maxHarga ? satuan(maxHarga) : ""}</span>
+        <span className="graf-y atas">{maxQty ? `${fmt(maxQty)} pcs` : ""}</span>
         <span className="graf-y bawah">0</span>
         {aktif && (
           <div className="graf-tip" style={{ left: `calc((100% - 56px) * ${(tip + 0.5) / data.length})` }}>
@@ -2485,7 +2451,6 @@ function GrafBulanan({ data, lang, onPilih }) {
             <span>{t("Transaksi|kolom")}<em>{fmt(aktif.n)}</em></span>
             <span>{t("Qty")}<em>{fmt(aktif.qty)} pcs</em></span>
             <span>{t("Nilai Penjualan")}<em>{rpRingkas(aktif.total)}</em></span>
-            <span>{t("Harga Rata-rata")}<em>{aktif.harga == null ? "—" : rpRingkas(aktif.harga)}</em></span>
           </div>
         )}
       </div>
@@ -4108,7 +4073,7 @@ function Style() {
 .vk .graf-tip span{display:flex; justify-content:space-between; gap:12px; color:var(--asm-fg-muted)}
 .vk .graf-tip em{font-style:normal; color:var(--asm-fg); font-variant-numeric:tabular-nums}
 
-/* tabel drill-down: kuartal > bulan > hari > transaksi, semuanya di dalam satu
+/* tabel drill-down: tahun > bulan > hari > transaksi, semuanya di dalam satu
    lebar kolom yang sama. Pendalaman tidak boleh mengubah tata letak — itulah
    yang membuat matriks kuartal lama pecah begitu satu bulan dibuka. */
 .vk .drill-card .card-bd{padding:0}
@@ -4124,7 +4089,6 @@ function Style() {
 .vk table.drill td:first-child{padding:0}
 .vk table.drill tr:last-child td{border-bottom:0}
 .vk .br-thn>td{background:var(--pl-utama); font-size:13px; font-weight:500}
-.vk .br-k>td{background:var(--pl-lembut); font-size:11px; color:var(--asm-fg-muted)}
 .vk .br-b>td{font-size:13px; font-weight:500}
 .vk .br-b.datang>td{color:var(--asm-fg-muted); font-weight:400}
 .vk .br-h>td{font-size:12px; font-weight:400; background:var(--asm-card)}
@@ -4140,7 +4104,7 @@ function Style() {
 .vk button.per{width:100%; background:none; border:0; cursor:pointer}
 .vk button.per:hover{background:var(--pl-utama)}
 .vk .per .chev{display:inline-block; width:14px; font-size:10px; color:var(--asm-fg-muted)}
-.vk .br-thn>td:first-child,.vk .br-k>td:first-child{padding:6px 12px}
+.vk .br-thn>td:first-child{padding:6px 12px}
 .vk .per-t .namelink{margin-right:8px}
 .vk .per-t .mut2{margin-top:1px; font-weight:400}
 /* tombol aksi pindah ke dialog rincian; "Hapus" dijauhkan dari tombol lain */

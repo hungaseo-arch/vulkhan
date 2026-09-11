@@ -154,7 +154,6 @@ const KO = {
   "Setujui & Hapus": "승인 및 삭제",
   "Menunggu Putusan": "결재 대기",
   "Data|sasaran usulan hapus": "대상",
-  "Belum ada permintaan hapus.": "삭제 요청 없음",
   "Diajukan oleh petugas, disahkan oleh admin. Data terhapus tepat saat usulan disetujui.":
     "담당자 기안 → 관리자 확정. 승인하는 순간 데이터 삭제",
   "Data belum terhapus. Penghapusan berjalan saat admin menyetujui usulan ini.":
@@ -316,13 +315,11 @@ const KO = {
   "Harga Rata-rata": "평균단가",
   "Jumlah Transaksi": "거래건수",
   "Transaksi|kolom": "건수",
-  "vs Bulan Lalu": "전월비",
   "vs tahun lalu": "전년 동기 대비",
   "tidak ada data tahun lalu": "전년 데이터 없음",
   "rata-rata {n}/bulan": "월평균 {n}건",
   "Tren Bulanan": "월별 추이",
-  "Batang = nilai (juta) · garis = harga rata-rata (juta/pcs)": "막대 = 매출액 (juta) · 선 = 평균단가 (juta/pcs)",
-  "Subtotal Kuartal {k}": "{k}분기 소계",
+  "Batang = nilai (juta) · garis = kuantitas (pcs)": "막대 = 매출액 (juta) · 선 = 판매수량 (pcs)",
 
   /* sumbu analisis penjualan (VLK-UI-2026-001 tahap 4) */
   "Sumbu Analisis": "분석 기준",
