@@ -2317,9 +2317,37 @@ const GRAF_T = 200, GRAF_BAR = 150, GRAF_BATANG = GRAF_BAR * 0.9, GRAF_X = 16,
 function GrafBulanan({ data, lang, pilih, onPilih }) {
   const { t } = useLang();
   const [tip, setTip] = useState(null);
+  const plotRef = useRef(null);
+  const [lebarKol, setLebarKol] = useState(0);
+  useEffect(() => {
+    const el = plotRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(([e]) => setLebarKol(e.contentRect.width / Math.max(data.length, 1)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [data.length]);
   const maxNilai = Math.max(...data.map((d) => d.total), 0);
   const maxQty = Math.max(...data.map((d) => d.qty), 0);
   if (!data.length) return null;
+
+  /* Label kuantitas di atas titiknya — tetapi di lembah, ruas garis ke
+     tetangga yang lebih tinggi lewat tepat di tempat label itu. Maka label
+     diangkat setinggi garis pada tepi kiri/kanan label: tinggi garis pada
+     jarak w dari titik adalah interpolasi linear ke titik tetangga, dan w
+     adalah setengah lebar label dibagi lebar kolom. Lebar kolom diukur,
+     bukan ditebak, karena grafik melar mengikuti lebar layar. */
+  const tinggiQ = (d) => (d.datang || maxQty === 0 ? null : (d.qty / maxQty) * GRAF_BAR);
+  const angkatLabel = (i) => {
+    const h = tinggiQ(data[i]);
+    if (h == null || !lebarKol) return 0;
+    const r = Math.min(0.5, ((`${fmt(data[i].qty)} pcs`.length * 6.5) / 2 + 2) / lebarKol);
+    let naik = 0;
+    for (const j of [i - 1, i + 1]) {
+      const hj = j >= 0 && j < data.length ? tinggiQ(data[j]) : null;
+      if (hj != null) naik = Math.max(naik, (hj - h) * r);
+    }
+    return naik;
+  };
 
   /* Bulan yang belum tiba dilewati, bukan digambar sebagai nol: garisnya akan
      terjun ke dasar dan terbaca sebagai penurunan yang belum terjadi. Bulan
@@ -2331,7 +2359,7 @@ function GrafBulanan({ data, lang, pilih, onPilih }) {
 
   return (
     <Card cls="graf-card" title={t("Tren Bulanan")} note={t("Batang = nilai penjualan · garis = kuantitas")}>
-      <div className="graf-plot" style={{ height: GRAF_T }}>
+      <div className="graf-plot" ref={plotRef} style={{ height: GRAF_T }}>
         {maxQty > 0 && (
           <svg className="graf-garis" viewBox={`0 0 100 ${GRAF_T}`} preserveAspectRatio="none" aria-hidden="true">
             <polyline points={titik} vectorEffect="non-scaling-stroke" />
@@ -2352,7 +2380,7 @@ function GrafBulanan({ data, lang, pilih, onPilih }) {
             </span>
             <span className="graf-x">{bulanSingkat(d.ym, lang)}</span>
             {!d.datang && d.qty > 0 && (
-              <span className="graf-q" style={{ bottom: GRAF_X + GRAF_ANGKAT + (maxQty ? (d.qty / maxQty) * GRAF_BAR : 0) + 3 }}>
+              <span className="graf-q" style={{ bottom: Math.min(GRAF_T - 12, GRAF_X + GRAF_ANGKAT + tinggiQ(d) + angkatLabel(i) + 3) }}>
                 {fmt(d.qty)} pcs
               </span>
             )}
