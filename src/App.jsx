@@ -1825,17 +1825,26 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
      rentang (sumbu pelanggan) dan atas satu bulan yang diklik di grafik (sumbu
      waktu). Barisnya menyimpan SO-nya sendiri supaya pendalaman tidak perlu
      menyaring ulang seluruh buku. */
+  /* Kuantitas dipecah menurut kategori produk: ban jadi (dijual dari stok) dan
+     ban jasa (casing milik pelanggan yang divulkanisir). Keduanya "pcs", tetapi
+     yang satu keluar dari gudang dan yang lain tidak — jumlah gabungannya
+     tidak menjawab "berapa ban yang terjual". */
+  const qtyKat = useCallback(
+    (s, kat) => s.items.reduce((a, i) => a + (pById(i.produk).kategori === kat ? Number(i.qty) || 0 : 0), 0),
+    [pById],
+  );
   const peringkatPelanggan = useCallback((rows) => {
     const m = new Map();
     for (const s of rows) {
       let b = m.get(s.pelanggan);
-      if (!b) { b = { id: s.pelanggan, ...KOSONG(), rows: [] }; m.set(s.pelanggan, b); }
-      b.n += 1; b.qty += qtySO(s); b.total += totalSO(s); b.rows.push(s);
+      if (!b) { b = { id: s.pelanggan, ...KOSONG(), jadi: 0, jasa: 0, rows: [] }; m.set(s.pelanggan, b); }
+      b.n += 1; b.qty += qtySO(s); b.jadi += qtyKat(s, "jadi"); b.jasa += qtyKat(s, "jasa");
+      b.total += totalSO(s); b.rows.push(s);
     }
     return [...m.values()]
       .map((b) => ({ ...b, c: cById(b.id), harga: hargaRata(b.total, b.qty) }))
       .sort((a, z) => z.total - a.total);
-  }, [cById, totalSO]);
+  }, [cById, totalSO, qtyKat]);
   const perPelanggan = useMemo(() => peringkatPelanggan(list), [list, peringkatPelanggan]);
   /* Pembagi rata-rata bulanan = bulan di dalam rentang, bukan dua belas bulan
      sumbu grafik: Oktober yang belum tiba tidak boleh menurunkan rata-rata. */
@@ -1932,8 +1941,8 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
   const unduhExcel = () => {
     const aoa = sumbu === "pelanggan"
       ? [
-          [t("Peringkat"), t("Pelanggan"), t("Kota"), t("Transaksi|kolom"), t("Qty"), t("Nilai Penjualan"), t("Harga Rata-rata"), t("Piutang")],
-          ...perPelanggan.map((b, i) => [i + 1, b.c.nama, b.c.kota, b.n, b.qty, b.total, b.harga ?? "", tagihanCust.get(b.id)?.nilai || 0]),
+          [t("Peringkat"), t("Pelanggan"), t("Kota"), t("Transaksi|kolom"), t("Ban Jadi"), t("Ban Jasa"), t("Total Qty"), t("Nilai Penjualan"), t("Harga Rata-rata"), t("Piutang")],
+          ...perPelanggan.map((b, i) => [i + 1, b.c.nama, b.c.kota, b.n, b.jadi, b.jasa, b.qty, b.total, b.harga ?? "", tagihanCust.get(b.id)?.nilai || 0]),
         ]
       : sumbu === "produk"
         ? [
@@ -1955,6 +1964,9 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
   /* Baris transaksi di bawah pelanggan yang dibuka. Jumlah selnya harus persis
      sama dengan baris peringkat — baris dengan jumlah sel yang salah merusak
      lebar seluruh tabel. */
+  /* nol kategori ditulis "—", bukan "0": baris yang hanya menjual ban jadi
+     tidak "menjual 0 jasa", kategorinya saja tidak ada di situ */
+  const selQty = (n) => <td className="r n">{n ? fmt(n) : <span className="mut">—</span>}</td>;
   const barisSO = (s) => (
     <tr key={s.id} className="br-t klik" onClick={() => setRinci(s)}>
       <td className="no" />
@@ -1969,6 +1981,8 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
         </span>
       </td>
       <td />
+      {selQty(qtyKat(s, "jadi"))}
+      {selQty(qtyKat(s, "jasa"))}
       <td className="r n">{fmt(qtySO(s))}</td>
       <td className="r n">{satuan(totalSO(s))}</td>
       <td className="r n mut">{hargaRata(totalSO(s), qtySO(s)) == null ? "—" : satuan(hargaRata(totalSO(s), qtySO(s)))}</td>
@@ -1988,7 +2002,9 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
             <th scope="col" className="no">#</th>
             <th scope="col">{t("Pelanggan")}</th>
             <th scope="col" className="r">{t("Transaksi|kolom")}</th>
-            <th scope="col" className="r">{t("Qty")}</th>
+            <th scope="col" className="r">{t("Jadi|kolom")}</th>
+            <th scope="col" className="r">{t("Jasa|kolom")}</th>
+            <th scope="col" className="r">{t("Total Qty")}</th>
             <th scope="col" className="r">{t("Nilai Penjualan")}</th>
             <th scope="col" className="r">{t("Harga Rata-rata")}</th>
             <th scope="col" className="r porsi-th">{t("Porsi")}</th>
@@ -2015,6 +2031,8 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
                     </span>
                   </td>
                   <td className="r n">{fmt(b.n)}</td>
+                  {selQty(b.jadi)}
+                  {selQty(b.jasa)}
                   <td className="r n">{fmt(b.qty)}</td>
                   <td className="r n strong">{satuan(b.total)}</td>
                   <td className="r n">{b.harga == null ? "—" : satuan(b.harga)}</td>
@@ -2030,7 +2048,7 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
               </React.Fragment>
             );
           })}
-          {rows.length === 0 && <tr><td colSpan={8}><Empty id={t("Tidak ada transaksi pada filter ini.")} /></td></tr>}
+          {rows.length === 0 && <tr><td colSpan={10}><Empty id={t("Tidak ada transaksi pada filter ini.")} /></td></tr>}
         </tbody>
       </table>
       {rows.length > PERINGKAT_N && (

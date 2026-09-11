@@ -226,6 +226,11 @@ const KO = {
   "Bulan": "월",
   "Transaksi": "거래",
   "Qty": "수량",
+  /* kolom kuantitas peringkat pelanggan: kategori produk disingkat karena
+     "Ban Jadi"/"Ban Jasa" lengkap tidak muat di kepala kolom angka */
+  "Jadi|kolom": "완제품",
+  "Jasa|kolom": "서비스",
+  "Total Qty": "합계 수량",
   "Nilai": "금액",
   "Total": "합계",
   "Rata-rata / bulan": "월평균",
