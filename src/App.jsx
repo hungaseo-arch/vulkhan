@@ -2291,7 +2291,7 @@ function DaftarGerak({ rows, kepala, kolom, kosong, takJelas, onPilih }) {
    garis tidak sepadan dengan ~150 kB tambahan di bundel.
    Tinggi batang dihitung dalam piksel, bukan persen, supaya garis SVG yang
    dibentangkan di atasnya memakai sistem koordinat yang persis sama. */
-const GRAF_T = 204, GRAF_BAR = 150, GRAF_X = 46, GRAF_DASAR = GRAF_T - GRAF_X;
+const GRAF_T = 200, GRAF_BAR = 150, GRAF_X = 16, GRAF_DASAR = GRAF_T - GRAF_X;
 function GrafBulanan({ data, lang, pilih, onPilih }) {
   const { t } = useLang();
   const [tip, setTip] = useState(null);
@@ -2322,14 +2322,18 @@ function GrafBulanan({ data, lang, pilih, onPilih }) {
             onMouseEnter={() => setTip(i)} onMouseLeave={() => setTip(null)}
             onFocus={() => setTip(i)} onBlur={() => setTip(null)}
             onClick={() => onPilih(d.ym)}>
-            <span className="graf-bar" style={{ height: maxNilai ? Math.round((d.total / maxNilai) * GRAF_BAR) : 0 }} />
+            {/* nilai di tengah batangnya, kuantitas tepat di atas titik garisnya:
+                tiap angka menempel pada bentuk yang diwakilinya. Nilai ditulis
+                lengkap dengan satuannya — tabel di bawah grafik sudah tidak ada. */}
+            <span className="graf-bar" style={{ height: maxNilai ? Math.round((d.total / maxNilai) * GRAF_BAR) : 0 }}>
+              {d.total > 0 && <span className="graf-nilai">{satuan(d.total)}</span>}
+            </span>
             <span className="graf-x">{bulanSingkat(d.ym, lang)}</span>
-            {/* kedua angka di bawah sumbu, bukan di puncak batang: puncak batang
-                dan titik garis dinormalkan ke tinggi yang sama, jadi label di
-                situ selalu tertimpa garis. Nilai ditulis lengkap dengan
-                satuannya — tabel di bawah grafik sudah tidak ada. */}
-            <span className="graf-nilai">{d.datang ? "" : satuan(d.total)}</span>
-            <span className="graf-q">{d.datang || !d.qty ? "" : `${fmt(d.qty)} pcs`}</span>
+            {!d.datang && d.qty > 0 && (
+              <span className="graf-q" style={{ bottom: GRAF_X + (maxQty ? (d.qty / maxQty) * GRAF_BAR : 0) + 3 }}>
+                {fmt(d.qty)} pcs
+              </span>
+            )}
           </button>
         ))}
         {aktif && (
@@ -3938,29 +3942,30 @@ function Style() {
    tidak boleh terlihat sebagai jenis kotak yang berbeda */
 .vk .graf-card .card-bd{padding:12px 16px}
 .vk .graf-plot{position:relative; display:flex; align-items:flex-end}
-.vk .graf-kol{flex:1; min-width:0; display:flex; flex-direction:column; justify-content:flex-end; align-items:center;
+.vk .graf-kol{position:relative; flex:1; min-width:0; display:flex; flex-direction:column; justify-content:flex-end; align-items:center;
   height:100%; background:none; border:0; padding:0; font:inherit; cursor:pointer}
 .vk .graf-kol:disabled{cursor:default}
-.vk .graf-nilai{height:15px; line-height:15px; font-size:11px; color:var(--asm-fg); font-variant-numeric:tabular-nums; white-space:nowrap}
+.vk .graf-nilai{font-size:11px; color:var(--asm-fg); font-variant-numeric:tabular-nums; white-space:nowrap}
 /* batang bulan berjalan dipekatkan; bulan yang belum tiba tidak digambar sama
    sekali, sedangkan bulan nol tetap memberi label "0" pada sumbu */
 .vk .graf-bar{width:58%; background:var(--pl-utama); border:.5px solid var(--asm-primary-40);
-  border-radius:3px 3px 0 0; transition:background .12s}
+  border-radius:3px 3px 0 0; transition:background .12s; display:flex; align-items:center; justify-content:center; overflow:visible}
 .vk .graf-kol.sorot .graf-bar{background:var(--asm-primary-20)}
 .vk .graf-kol.pilih .graf-bar{background:var(--asm-primary-20); border-color:var(--asm-primary)}
 .vk .graf-kol.pilih .graf-x{color:var(--asm-primary); font-weight:500}
 .vk .graf-kol.datang .graf-bar{display:none}
 .vk .graf-x{height:16px; line-height:16px; font-size:11px; color:var(--asm-fg-muted)}
 .vk .graf-kol.datang .graf-x{opacity:.45}
-/* kuantitas sewarna garisnya, supaya tanpa sumbu kanan pun jelas angka mana
-   milik garis */
-.vk .graf-q{height:15px; line-height:15px; font-size:11px; color:var(--asm-success); font-variant-numeric:tabular-nums; white-space:nowrap}
+/* kuantitas sewarna garisnya, diletakkan mutlak di atas titik garis (bottom
+   dihitung dari tinggi titik yang sama dengan polyline) */
+.vk .graf-q{position:absolute; left:50%; transform:translateX(-50%); line-height:1; font-size:11px;
+  color:var(--asm-success); font-variant-numeric:tabular-nums; white-space:nowrap; pointer-events:none}
 /* lebar SVG harus eksplisit: elemen pengganti dengan width:auto mengambil
    lebar dari rasio viewBox-nya (100:200), bukan dari left/right, sehingga
    garisnya terjepit di 100px di sisi kiri */
 .vk .graf-garis{position:absolute; left:0; top:0; width:100%; height:100%; overflow:visible; pointer-events:none}
 .vk .graf-garis polyline{fill:none; stroke:var(--asm-success); stroke-width:1.5; stroke-linejoin:round}
-.vk .graf-tip{position:absolute; bottom:54px; transform:translateX(-50%); z-index:2; pointer-events:none;
+.vk .graf-tip{position:absolute; bottom:24px; transform:translateX(-50%); z-index:2; pointer-events:none;
   min-width:150px; padding:7px 9px; background:var(--asm-card); border:.5px solid var(--pl-tinta);
   border-radius:var(--asm-radius-lg); box-shadow:var(--asm-shadow-md); font-size:11px}
 .vk .graf-tip b{display:block; margin-bottom:3px; font-weight:500}
