@@ -2308,8 +2308,12 @@ function DaftarGerak({ rows, kepala, kolom, kosong, takJelas, onPilih }) {
    HTML + satu polyline SVG, tanpa pustaka grafik: dua belas batang dan satu
    garis tidak sepadan dengan ~150 kB tambahan di bundel.
    Tinggi batang dihitung dalam piksel, bukan persen, supaya garis SVG yang
-   dibentangkan di atasnya memakai sistem koordinat yang persis sama. */
-const GRAF_T = 200, GRAF_BAR = 150, GRAF_X = 16, GRAF_DASAR = GRAF_T - GRAF_X;
+   dibentangkan di atasnya memakai sistem koordinat yang persis sama.
+   Skala batang dibuat 10% lebih pendek dari skala garis dan garis diangkat
+   10% tinggi plot dari dasar, supaya titik garis tidak menempel di puncak
+   batang bulan yang nilai dan kuantitasnya sama-sama tertinggi. */
+const GRAF_T = 200, GRAF_BAR = 150, GRAF_BATANG = GRAF_BAR * 0.9, GRAF_X = 16,
+  GRAF_DASAR = GRAF_T - GRAF_X, GRAF_ANGKAT = GRAF_T * 0.1;
 function GrafBulanan({ data, lang, pilih, onPilih }) {
   const { t } = useLang();
   const [tip, setTip] = useState(null);
@@ -2321,7 +2325,7 @@ function GrafBulanan({ data, lang, pilih, onPilih }) {
      terjun ke dasar dan terbaca sebagai penurunan yang belum terjadi. Bulan
      yang sudah lewat tanpa penjualan tetap digambar — nol di situ nyata. */
   const titik = data
-    .map((d, i) => (d.datang ? null : `${((i + 0.5) / data.length) * 100},${GRAF_DASAR - (maxQty ? (d.qty / maxQty) * GRAF_BAR : 0)}`))
+    .map((d, i) => (d.datang ? null : `${((i + 0.5) / data.length) * 100},${GRAF_DASAR - GRAF_ANGKAT - (maxQty ? (d.qty / maxQty) * GRAF_BAR : 0)}`))
     .filter(Boolean).join(" ");
   const aktif = tip == null ? null : data[tip];
 
@@ -2343,12 +2347,12 @@ function GrafBulanan({ data, lang, pilih, onPilih }) {
             {/* nilai di tengah batangnya, kuantitas tepat di atas titik garisnya:
                 tiap angka menempel pada bentuk yang diwakilinya. Nilai ditulis
                 lengkap dengan satuannya — tabel di bawah grafik sudah tidak ada. */}
-            <span className="graf-bar" style={{ height: maxNilai ? Math.round((d.total / maxNilai) * GRAF_BAR) : 0 }}>
+            <span className="graf-bar" style={{ height: maxNilai ? Math.round((d.total / maxNilai) * GRAF_BATANG) : 0 }}>
               {d.total > 0 && <span className="graf-nilai">{satuan(d.total)}</span>}
             </span>
             <span className="graf-x">{bulanSingkat(d.ym, lang)}</span>
             {!d.datang && d.qty > 0 && (
-              <span className="graf-q" style={{ bottom: GRAF_X + (maxQty ? (d.qty / maxQty) * GRAF_BAR : 0) + 3 }}>
+              <span className="graf-q" style={{ bottom: GRAF_X + GRAF_ANGKAT + (maxQty ? (d.qty / maxQty) * GRAF_BAR : 0) + 3 }}>
                 {fmt(d.qty)} pcs
               </span>
             )}
