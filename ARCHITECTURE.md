@@ -94,7 +94,9 @@ App() → <LangProvider> → Aplikasi()
 ### 브랜딩
 
 아센도 BI를 따릅니다. 색 토큰은 `Style()` 상단 `--asm-*`(primary `#0062C6`, dark `#333333`)이며
-BI 색은 바꾸지 않습니다. 로고 자산은 `public/ascendo-symbol.png`(심볼, 헤더·파비콘)와
+BI 색은 바꾸지 않습니다. 글자 크기도 같은 자리의 `--asm-fs-*` 9단계(2xs 10px ~ 2xl 20px, KPI 값은
+`--asm-fs-kpi`)만 씁니다 — 화면 CSS에 px·rem 크기를 직접 적지 않습니다. 인쇄 서류(`.doc-*`)만
+자체 크기를 가집니다. 로고 자산은 `public/ascendo-symbol.png`(심볼, 헤더·파비콘)와
 `public/ascendo-signature.png`(시그니처, 로그인 화면·`og:image`) 두 개입니다.
 
 인쇄 서류 kop은 아센도 로고를 쓰지 않고 중립 마크(`TreadMark`)를 씁니다. 그 서류의 발행처는
