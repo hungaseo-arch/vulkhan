@@ -53,9 +53,13 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }));
 // Seed pengguna bawaan sekali (memoized) — berjalan di lokal & serverless.
 // Reset ke null bila gagal agar dicoba lagi pada request berikutnya.
 let ready;
-const ensureReady = () => (ready ||= Promise.all([ensureUsers(), ensureUsulan()])
+const ensureReady = () => (ready ||= Promise.all([ensureUsers(), ensureUsulan(), ensurePelanggan()])
   .catch((e) => { ready = null; throw e; }));
 app.use((req, res, next) => ensureReady().then(() => next()).catch(next));
+
+// Kolom teks pelanggan NOT NULL DEFAULT '' — undefined/null dari klien lama
+// harus jadi string kosong, bukan NULL yang ditolak basis data.
+const teks = (v) => String(v ?? "").trim();
 
 const wrap = (fn) => (req, res) =>
   Promise.resolve(fn(req, res)).catch((e) => {
@@ -167,13 +171,34 @@ async function ensureUsulan() {
       pengusul    TEXT NOT NULL, pengusul_nama TEXT NOT NULL,
       diusulkan   TIMESTAMPTZ NOT NULL DEFAULT now(),
       penentu     TEXT, penentu_nama TEXT, diputuskan TIMESTAMPTZ,
-      catatan     TEXT NOT NULL DEFAULT ''
+      catatan     TEXT NOT NULL DEFAULT '',
+      termin_lama INTEGER,
+      termin_baru INTEGER CHECK (termin_baru >= 0)
     )`;
+  // Kolom termin (TOP) menyusul setelah tabel dipakai, jadi ditambahkan juga
+  // lewat ALTER untuk basis data yang sudah ada — CREATE TABLE IF NOT EXISTS
+  // di atas tidak menyentuh tabel yang sudah terbentuk. NULL pada baris lama
+  // berarti "usulan itu tidak menyangkut termin", bukan termin nol.
+  await sql`ALTER TABLE limit_usulan ADD COLUMN IF NOT EXISTS termin_lama INTEGER`;
+  await sql`ALTER TABLE limit_usulan ADD COLUMN IF NOT EXISTS termin_baru INTEGER CHECK (termin_baru >= 0)`;
   // Satu usulan menunggu per pelanggan — mencegah dua angka berbeda menunggu
   // keputusan untuk pelanggan yang sama.
   await sql`
     CREATE UNIQUE INDEX IF NOT EXISTS limit_usulan_menunggu
     ON limit_usulan (pelanggan) WHERE status = 'menunggu'`;
+}
+
+/* Tabel pelanggan sudah ada sejak awal, jadi kolom profil ditambahkan lewat
+   ALTER ... IF NOT EXISTS: tidak ada migrasi manual yang harus dijalankan
+   orang, dan basis data yang sudah menerimanya tidak berubah lagi.
+   DEFAULT '' supaya UI tidak perlu membedakan "belum diisi" dari NULL. */
+async function ensurePelanggan() {
+  await sql`ALTER TABLE pelanggan ADD COLUMN IF NOT EXISTS pemilik TEXT NOT NULL DEFAULT ''`;
+  await sql`ALTER TABLE pelanggan ADD COLUMN IF NOT EXISTS alamat  TEXT NOT NULL DEFAULT ''`;
+  await sql`ALTER TABLE pelanggan ADD COLUMN IF NOT EXISTS email   TEXT NOT NULL DEFAULT ''`;
+  await sql`ALTER TABLE pelanggan ADD COLUMN IF NOT EXISTS npwp    TEXT NOT NULL DEFAULT ''`;
+  await sql`ALTER TABLE pelanggan ADD COLUMN IF NOT EXISTS sales   TEXT NOT NULL DEFAULT ''`;
+  await sql`ALTER TABLE pelanggan ADD COLUMN IF NOT EXISTS catatan TEXT NOT NULL DEFAULT ''`;
 }
 
 async function ensureUsers() {
@@ -356,11 +381,31 @@ app.get("/api/pelanggan", wrap(async (_req, res) => {
 app.post("/api/pelanggan", wrap(async (req, res) => {
   const c = req.body;
   const [row] = await sql`
-    INSERT INTO pelanggan (id, kode, nama, pic, telp, kota, grade, limit_kredit, termin)
-    VALUES (${c.id}, ${c.kode}, ${c.nama}, ${c.pic}, ${c.telp}, ${c.kota},
-            ${c.grade}, ${c.limit}, ${c.termin})
+    INSERT INTO pelanggan (id, kode, nama, pemilik, pic, telp, email, alamat, kota, npwp,
+                           sales, catatan, grade, limit_kredit, termin)
+    VALUES (${c.id}, ${c.kode}, ${c.nama}, ${teks(c.pemilik)}, ${teks(c.pic)}, ${teks(c.telp)},
+            ${teks(c.email)}, ${teks(c.alamat)}, ${teks(c.kota)}, ${teks(c.npwp)},
+            ${teks(c.sales)}, ${teks(c.catatan)}, ${c.grade}, ${c.limit}, ${c.termin})
     RETURNING *`;
   res.status(201).json(row);
+}));
+
+// Limit kredit dan termin sengaja TIDAK ada di sini: keduanya hanya berubah
+// lewat usulan yang disetujui admin, supaya jejak persetujuannya utuh.
+app.put("/api/pelanggan/:id", wrap(async (req, res) => {
+  const c = req.body || {};
+  if (!String(c.nama || "").trim())
+    return res.status(400).json({ error: "Nama pelanggan wajib diisi." });
+  const [row] = await sql`
+    UPDATE pelanggan SET
+      nama = ${String(c.nama).trim()}, pemilik = ${teks(c.pemilik)}, pic = ${teks(c.pic)},
+      telp = ${teks(c.telp)}, email = ${teks(c.email)}, alamat = ${teks(c.alamat)},
+      kota = ${teks(c.kota)}, npwp = ${teks(c.npwp)}, sales = ${teks(c.sales)},
+      catatan = ${teks(c.catatan)}, grade = ${c.grade}
+    WHERE id = ${req.params.id}
+    RETURNING *`;
+  if (!row) return res.status(404).json({ error: "Pelanggan tidak ditemukan." });
+  res.json(row);
 }));
 
 // ---------- usulan limit kredit (diajukan staf, diputuskan admin) ----------
@@ -377,15 +422,22 @@ app.get("/api/limit-usulan", wrap(async (_req, res) => {
 }));
 
 app.post("/api/limit-usulan", wrap(async (req, res) => {
-  const { pelanggan, limit, alasan } = req.body || {};
+  const { pelanggan, limit, termin, alasan } = req.body || {};
   const baru = Number(limit);
   if (!Number.isFinite(baru) || baru < 0)
     return res.status(400).json({ error: "Limit kredit harus angka nol atau lebih." });
+  // Termin = TOP, jumlah HARI jatuh tempo, jadi harus bulat. Pecahan hari tidak
+  // punya arti di faktur dan akan membuat perhitungan umur piutang meleset.
+  const terminBaru = Number(termin);
+  if (!Number.isInteger(terminBaru) || terminBaru < 0)
+    return res.status(400).json({ error: "Termin harus bilangan bulat nol hari atau lebih." });
 
-  const [c] = await sql`SELECT limit_kredit FROM pelanggan WHERE id = ${pelanggan}`;
+  const [c] = await sql`SELECT limit_kredit, termin FROM pelanggan WHERE id = ${pelanggan}`;
   if (!c) return res.status(404).json({ error: "Pelanggan tidak ditemukan." });
-  if (Number(c.limit_kredit) === baru)
-    return res.status(400).json({ error: "Limit yang diusulkan sama dengan limit sekarang." });
+  // Cukup salah satu yang berubah. Usulan yang tidak mengubah apa pun ditolak
+  // supaya tidak ada baris yang meminta admin memutuskan hal yang nihil.
+  if (Number(c.limit_kredit) === baru && Number(c.termin) === terminBaru)
+    return res.status(400).json({ error: "Limit dan termin sama dengan yang berlaku sekarang." });
 
   const [menunggu] = await sql`
     SELECT 1 FROM limit_usulan WHERE pelanggan = ${pelanggan} AND status = 'menunggu'`;
@@ -396,8 +448,10 @@ app.post("/api/limit-usulan", wrap(async (req, res) => {
     SELECT COALESCE(MAX(SUBSTRING(id FROM 3)::int), 0) AS maks
     FROM limit_usulan WHERE id ~ '^UL[0-9]+$'`;
   const [row] = await sql`
-    INSERT INTO limit_usulan (id, pelanggan, limit_lama, limit_baru, alasan, pengusul, pengusul_nama)
+    INSERT INTO limit_usulan (id, pelanggan, limit_lama, limit_baru, termin_lama, termin_baru,
+                              alasan, pengusul, pengusul_nama)
     VALUES (${"UL" + (Number(maks) + 1)}, ${pelanggan}, ${Number(c.limit_kredit)}, ${baru},
+            ${Number(c.termin)}, ${terminBaru},
             ${String(alasan || "").trim()}, ${req.user.id}, ${req.user.username})
     RETURNING *`;
   res.status(201).json(row);
@@ -435,7 +489,11 @@ app.post("/api/limit-usulan/:id/putusan", requireRole("admin"), wrap(async (req,
   const [[row]] = await sql.transaction([
     tandai(),
     sql`
-      UPDATE pelanggan p SET limit_kredit = u.limit_baru
+      UPDATE pelanggan p
+      SET limit_kredit = u.limit_baru,
+          -- COALESCE: usulan lama dibuat sebelum termin ikut diusulkan dan
+          -- menyimpan NULL. Menyetujuinya tidak boleh menghapus termin berjalan.
+          termin = COALESCE(u.termin_baru, p.termin)
       FROM limit_usulan u
       WHERE u.id = ${u.id} AND u.status = 'disetujui' AND u.penentu = ${req.user.id}
         AND p.id = u.pelanggan`,

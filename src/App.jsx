@@ -502,6 +502,13 @@ function Aplikasi() {
     say(t("{nama} ditambahkan.", { nama: c.nama }));
   }
 
+  // Limit kredit & termin tidak ikut: keduanya hanya berubah lewat usulan.
+  async function doUpdatePelanggan(c) {
+    if (online) { await api.updatePelanggan(c.id, c); await reload(); }
+    else setPelanggan((l) => l.map((x) => (x.id === c.id ? c : x)));
+    say(t("{nama} diperbarui.", { nama: c.nama }));
+  }
+
   /* ---------- hapus (manager ke atas) ---------- */
   async function doDeletePenjualan(so) {
     if (online) { await api.deletePenjualan(so.id); await reload(); }
@@ -526,7 +533,7 @@ function Aplikasi() {
     getStok, stokTotal, pById, cById, gById, sById, totalSO,
     piutang, piutangTotal, majuSO, mundurSO, majuPO, mundurPO, say, online,
     doTransfer, doAdjust, doSaldoAwal, doCreatePenjualan, doCreatePembelian, doCreatePelanggan,
-    user, can, minta, doDeletePenjualan, doDeletePembelian, doDeletePelanggan, reload,
+    doUpdatePelanggan, user, can, minta, doDeletePenjualan, doDeletePembelian, doDeletePelanggan, reload,
   };
 
   const TABS = [
@@ -1472,6 +1479,7 @@ function DetailProduk({ p, getStok, stokTotal, close }) {
 /* ============================ PENJUALAN ============================ */
 function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cById, gById, totalSO, majuSO, mundurSO, getStok, piutang, say, can, minta, doDeletePenjualan }) {
   const { t, lang } = useLang();
+  const [rinci, setRinci] = useState(null); // penjualan yang rinciannya dibuka
   const [buka, setBuka] = useState(false);
   const [dok, setDok] = useState(null);
   const [dari, setDari] = useState("");
@@ -1589,9 +1597,12 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
                         <td>{cById(s.pelanggan).nama}<em className="mut2">{t("Grade {g}", { g: cById(s.pelanggan).grade })}</em></td>
                         <td><span className="chip">{gById(s.gudang).kode}</span></td>
                         <td className="mut">
-                          {s.items.map((i, k) => (
-                            <div key={k}>{pById(i.produk).kode} × {fmt(i.qty)}</div>
-                          ))}
+                          {/* tombol, bukan sel yang bisa diklik: tetap terjangkau lewat keyboard */}
+                          <button type="button" className="namelink" title={t("Lihat rincian")} onClick={() => setRinci(s)}>
+                            {s.items.map((i, k) => (
+                              <div key={k}>{pById(i.produk).kode} × {fmt(i.qty)}</div>
+                            ))}
+                          </button>
                         </td>
                         <td className="r n strong">{rp(totalSO(s))}</td>
                         <td><Status s={s.status} map={SO_LABEL} /></td>
@@ -1632,6 +1643,10 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
           nomor={(tgl) => nomorBaru("SO", penjualan, tgl)}
         />
       )}
+      {rinci && (
+        <RincianPenjualan so={rinci} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
+          close={() => setRinci(null)} onCetak={() => { setDok(rinci); setRinci(null); }} />
+      )}
       {dok && (
         <DokumenPenjualan so={dok} pById={pById} cById={cById} gById={gById} totalSO={totalSO} close={() => setDok(null)} />
       )}
@@ -1644,6 +1659,77 @@ const PENERBIT = {
   spb: { nama: "CV. Sinar Perkasa Ban", ppn: false, sub: "Ban Vulkanisir" },
   dfj: { nama: "PT. Daimond Fajar Jaya", ppn: true, sub: "Ban Vulkanisir" },
 };
+
+/* Rincian satu penjualan: layar tabel hanya memuat kode & qty, sedangkan harga
+   satuan dan subtotal per baris baru terbaca di sini — tanpa harus membuka
+   dokumen cetak yang formatnya untuk pelanggan, bukan untuk petugas. */
+function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak }) {
+  const { t, lang } = useLang();
+  const box = useDialog(close);
+  const judul = useId();
+  const c = cById(so.pelanggan);
+  const total = totalSO(so);
+  const qty = so.items.reduce((a, i) => a + i.qty, 0);
+
+  return (
+    <div className="ov" onClick={close}>
+      <div className="md wide" ref={box} role="dialog" aria-modal="true" aria-labelledby={judul} onClick={(e) => e.stopPropagation()}>
+        <div className="md-hd">
+          <h3 id={judul}>{so.no} <em>{tglPanjang(so.tgl, lang)}</em></h3>
+          <button className="x" onClick={close} aria-label={t("Tutup dialog")}>×</button>
+        </div>
+        <div className="md-bd">
+          <div className="cust-info">
+            <div><span className="lbl2">{t("Pelanggan")}</span><b>{c.nama}</b></div>
+            <div><span className="lbl2">{t("PIC")}</span><b>{c.pic || "-"}</b></div>
+            <div><span className="lbl2">{t("Gudang")}</span><b>{gById(so.gudang).nama}</b></div>
+            <div><span className="lbl2">{t("Status")}</span><Status s={so.status} map={SO_LABEL} /></div>
+            <div><span className="lbl2">{t("Termin")}</span><b>{t("{n} hari", { n: c.termin })}</b></div>
+            <div><span className="lbl2">{t("Jatuh Tempo")}</span><b>{addDays(so.tgl, Number(c.termin) || 30)}</b></div>
+          </div>
+
+          <Scroll max={300}>
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">{t("Produk")}</th>
+                  <th scope="col" className="r">{t("Qty")}</th>
+                  <th scope="col" className="r">{t("Harga")}</th>
+                  <th scope="col" className="r">{t("Subtotal")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {so.items.map((i, k) => {
+                  const pr = pById(i.produk);
+                  return (
+                    <tr key={k}>
+                      <td><span className="chip">{pr.kode}</span><em className="mut2">{pr.nama}</em></td>
+                      <td className="r n">{fmt(i.qty)}</td>
+                      <td className="r n mut">{rp(i.harga)}</td>
+                      <td className="r n strong">{rp(i.qty * i.harga)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="tf-total">
+                  <td><b>{t("Total")}</b></td>
+                  <td className="r n strong">{fmt(qty)}</td>
+                  <td />
+                  <td className="r n strong">{rp(total)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </Scroll>
+        </div>
+        <div className="md-ft">
+          {onCetak && <button className="btn" onClick={onCetak}>{t("Cetak")}</button>}
+          <button className="btn pri" onClick={close}>{t("Tutup")}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function DokumenPenjualan({ so, pById, cById, gById, totalSO, close }) {
   const { t } = useLang();
@@ -1703,8 +1789,9 @@ function DokumenPenjualan({ so, pById, cById, gById, totalSO, close }) {
               <div className="doc-to">
                 <span className="doc-lbl">Kepada Yth.</span>
                 <b>{c.nama}</b>
+                <p>{[c.alamat, c.kota].filter(Boolean).join(", ") || "-"}</p>
                 <p>{[c.pic, c.telp].filter(Boolean).join(" · ") || "-"}</p>
-                <p>{c.kota || "-"}</p>
+                {c.npwp && <p>NPWP: {c.npwp}</p>}
               </div>
               <table className="doc-info"><tbody>
                 <tr><td>No.</td><td>{so.no}</td></tr>
@@ -2086,9 +2173,10 @@ function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
 }
 
 /* ============================ PELANGGAN ============================ */
-function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, gById, pById, say, can, minta, doDeletePelanggan, online, reload }) {
+function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan, totalSO, piutang, gById, pById, say, can, minta, doDeletePelanggan, online, reload }) {
   const { t } = useLang();
   const [buka, setBuka] = useState(false);
+  const [ubah, setUbah] = useState(null);       // pelanggan yang sedang diubah
   const [detail, setDetail] = useState(null);
   const [cari, setCari] = useState("");
   // Usulan limit dimuat terpisah dari /bootstrap: hanya layar ini yang memakainya.
@@ -2119,14 +2207,17 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
   const list = useMemo(() => {
     const q = cari.trim().toLowerCase();
     if (!q) return pelanggan;
-    return pelanggan.filter((c) => [c.kode, c.nama, c.pic, c.kota].some((v) => (v || "").toLowerCase().includes(q)));
+    return pelanggan.filter((c) =>
+      [c.kode, c.nama, c.pemilik, c.pic, c.kota, c.sales].some((v) => (v || "").toLowerCase().includes(q)));
   }, [pelanggan, cari]);
 
   const unduhExcel = () => {
     const aoa = [
-      [t("Kode"), t("Nama"), t("PIC"), t("Telepon"), t("Kota"), t("Grade"), t("Limit Kredit"), t("Termin (hari)"), t("Piutang"), t("Omzet")],
+      [t("Kode"), t("Nama"), t("Pemilik"), t("PIC"), t("Telepon"), t("Email"), t("Alamat"), t("Kota"),
+       t("NPWP"), t("Sales"), t("Grade"), t("Limit Kredit"), t("Termin (hari)"), t("Piutang"), t("Omzet"), t("Catatan")],
       ...list.map((c) => [
-        c.kode, c.nama, c.pic, c.telp, c.kota, c.grade, c.limit, c.termin, piutang(c.id), omzet(c.id),
+        c.kode, c.nama, c.pemilik, c.pic, c.telp, c.email, c.alamat, c.kota, c.npwp, c.sales,
+        c.grade, c.limit, c.termin, piutang(c.id), omzet(c.id), c.catatan,
       ]),
     ];
     downloadXlsx(`pelanggan_${today()}`, "Pelanggan", aoa);
@@ -2139,7 +2230,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
           <div className="filters">
             <label className="fld cari">
               <span className="lbl">{t("Cari")}</span>
-              <input type="search" value={cari} onChange={(e) => setCari(e.target.value)} placeholder={t("Kode / nama / PIC / kota")} />
+              <input type="search" value={cari} onChange={(e) => setCari(e.target.value)} placeholder={t("Kode / nama / pemilik / PIC / kota / sales")} />
             </label>
           </div>
         }>
@@ -2157,6 +2248,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
                   <th scope="col">{t("Pelanggan")}</th>
                   <th scope="col" className="r">{t("Limit Sekarang")}</th>
                   <th scope="col" className="r">{t("Usulan")}</th>
+                  <th scope="col" className="r">{t("Termin")}</th>
                   <th scope="col">{t("Alasan")}</th>
                   <th scope="col">{t("Pengaju")}</th>
                   <th scope="col">{t("Status")}</th>
@@ -2169,6 +2261,11 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
                     <td><span className="chip">{u.pelanggan_kode}</span> {u.pelanggan_nama}</td>
                     <td className="r n mut">{rp(Number(u.limit_lama))}</td>
                     <td className="r n strong">{rp(Number(u.limit_baru))}</td>
+                    {/* NULL = usulan lama, dibuat sebelum TOP ikut diusulkan. */}
+                    <td className="r n mut">
+                      {u.termin_baru == null ? "—"
+                        : <>{Number(u.termin_lama)} → <b>{t("{n} hari", { n: Number(u.termin_baru) })}</b></>}
+                    </td>
                     <td className="mut">{u.alasan || "—"}</td>
                     <td className="mut">{u.pengusul_nama}<em className="mut2">{String(u.diusulkan).slice(0, 10)}</em></td>
                     <td><span className={"role u-" + u.status}>{t(USULAN_LABEL[u.status])}</span></td>
@@ -2179,7 +2276,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
                     </td>
                   </tr>
                 ))}
-                {(usulan || []).length === 0 && <tr><td colSpan={7}><Empty id={t("Belum ada usulan limit.")} /></td></tr>}
+                {(usulan || []).length === 0 && <tr><td colSpan={8}><Empty id={t("Belum ada usulan limit.")} /></td></tr>}
               </tbody>
             </table>
           </Scroll>
@@ -2207,10 +2304,10 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
                 const p = piutang(c.id);
                 const lewat = p > c.limit;
                 return (
-                  <tr key={c.id}>
+                  <tr key={c.id} className="klik" onClick={() => setDetail(c)}>
                     <td><span className="chip">{c.kode}</span></td>
                     <td>
-                      <button type="button" className="namelink" onClick={() => setDetail(c)}>{c.nama}</button>
+                      <b>{c.nama}</b>
                       <em className="mut2">{c.pic} · {c.telp}</em>
                     </td>
                     <td className="mut">{c.kota}</td>
@@ -2219,7 +2316,8 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
                     <td className={"r n strong " + (lewat ? "bad" : "")}>{rp(p)}</td>
                     <td className="r n">{rp(c.limit)}</td>
                     <td className="r n">{rp(omzet(c.id))}</td>
-                    <td className="r">
+                    {/* tombol tidak boleh ikut membuka detail baris */}
+                    <td className="r" onClick={(e) => e.stopPropagation()}>
                       <div className="aksi">
                         <button className="btn sm" onClick={() => setUsul(c)}>{t("Usul Limit")}</button>
                         {can("delete") && (
@@ -2240,47 +2338,86 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
       {buka && (
         <FormPelanggan close={() => setBuka(false)} say={say} submit={doCreatePelanggan} />
       )}
+      {ubah && <FormPelanggan c={ubah} close={() => setUbah(null)} say={say} submit={doUpdatePelanggan} />}
       {usul && <FormUsulLimit c={usul} close={() => setUsul(null)} say={say} submit={ajukan} />}
       {putusan && <FormPutusan u={putusan} close={() => setPutusan(null)} say={say} submit={putuskan} />}
       {detail && (
         <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang}
-          gById={gById} pById={pById} close={() => setDetail(null)} />
+          gById={gById} pById={pById} close={() => setDetail(null)}
+          onUsul={() => { setUsul(detail); setDetail(null); }}
+          onUbah={() => { setUbah(detail); setDetail(null); }} />
       )}
     </>
   );
 }
 
-function FormPelanggan({ close, say, submit }) {
+/* Satu formulir untuk tambah dan ubah: c terisi berarti mode ubah. Saat ubah,
+   limit & termin tidak ditampilkan — keduanya hanya berpindah lewat usulan
+   yang disetujui admin, supaya jejak persetujuannya tidak bisa dilewati. */
+function FormPelanggan({ c, close, say, submit }) {
   const { t } = useLang();
-  const [f, setF] = useState({ nama: "", pic: "", telp: "", kota: "", grade: "B", limit: "100000000", termin: "30" });
+  const [f, setF] = useState({
+    nama: c?.nama || "", pemilik: c?.pemilik || "", pic: c?.pic || "", telp: c?.telp || "",
+    email: c?.email || "", alamat: c?.alamat || "", kota: c?.kota || "", npwp: c?.npwp || "",
+    sales: c?.sales || "", catatan: c?.catatan || "", grade: c?.grade || "B",
+    limit: String(c?.limit ?? 100000000), termin: String(c?.termin ?? 30),
+  });
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
   const kirim = async () => {
     if (!f.nama.trim()) return say(t("Nama pelanggan wajib diisi."), true);
+    const isi = {
+      nama: f.nama.trim(), pemilik: f.pemilik.trim(), pic: f.pic.trim(), telp: f.telp.trim(),
+      email: f.email.trim(), alamat: f.alamat.trim(), kota: f.kota.trim(), npwp: f.npwp.trim(),
+      sales: f.sales.trim(), catatan: f.catatan.trim(), grade: f.grade,
+    };
     try {
-      await submit({ id: uid("C"), kode: "PLG-" + String(Math.floor(Math.random() * 900) + 100), ...f, limit: Number(f.limit), termin: Number(f.termin) });
+      await submit(c
+        ? { ...c, ...isi }
+        : { id: uid("C"), kode: "PLG-" + String(Math.floor(Math.random() * 900) + 100), ...isi,
+            limit: Number(f.limit), termin: Number(f.termin) });
       close();
     } catch (e) { say(e.message, true); }
   };
   return (
-    <Modal title={t("Pelanggan Baru")} close={close} onSave={kirim}>
+    <Modal title={c ? t("Ubah Pelanggan") : t("Pelanggan Baru")} close={close} onSave={kirim} wide>
+      <h4 className="mut2">{t("Identitas Faktur")}</h4>
       <Inp label={t("Nama Perusahaan")} value={f.nama} onChange={set("nama")} />
       <div className="row2">
-        <Inp label={t("PIC")} value={f.pic} onChange={set("pic")} />
-        <Inp label={t("Telepon")} value={f.telp} onChange={set("telp")} />
+        <Inp label={t("Pemilik")} value={f.pemilik} onChange={set("pemilik")} hint={t("Nama pemilik/direktur.")} />
+        <Inp label={t("NPWP")} value={f.npwp} onChange={set("npwp")} hint={t("Nomor pajak, dicetak di faktur.")} />
       </div>
+      <Inp label={t("Alamat")} value={f.alamat} onChange={set("alamat")} hint={t("Alamat penagihan lengkap.")} />
       <div className="row2">
         <Inp label={t("Kota")} value={f.kota} onChange={set("kota")} />
-        <Sel label={t("Grade")} value={f.grade} onChange={set("grade")} opts={[["A", "A"], ["B", "B"], ["C", "C"]]} />
+        <Inp label={t("Email")} value={f.email} onChange={set("email")} />
       </div>
       <div className="row2">
-        <Inp label={t("Limit Kredit (Rp)")} type="number" value={f.limit} onChange={set("limit")} />
-        <Inp label={t("Termin (hari)")} type="number" value={f.termin} onChange={set("termin")} />
+        <Inp label={t("PIC")} value={f.pic} onChange={set("pic")} hint={t("Penanggung jawab di tempat pelanggan.")} />
+        <Inp label={t("Telepon")} value={f.telp} onChange={set("telp")} />
       </div>
+
+      <h4 className="mut2">{t("Data Penjualan")}</h4>
+      <div className="row2">
+        <Inp label={t("Sales")} value={f.sales} onChange={set("sales")} hint={t("Petugas penjualan penanggung akun.")} />
+        <Sel label={t("Grade")} value={f.grade} onChange={set("grade")} opts={[["A", "A"], ["B", "B"], ["C", "C"]]} />
+      </div>
+      {c ? (
+        <p className="note">
+          {t("Limit Kredit")}: <b>{rp(c.limit)}</b> · {t("Termin")}: <b>{t("{n} hari", { n: c.termin })}</b>
+          {" — "}{t("Hanya berubah lewat usulan yang disetujui admin.")}
+        </p>
+      ) : (
+        <div className="row2">
+          <Inp label={t("Limit Kredit (Rp)")} type="number" value={f.limit} onChange={set("limit")} />
+          <Inp label={t("Termin (hari)")} type="number" value={f.termin} onChange={set("termin")} />
+        </div>
+      )}
+      <Inp label={t("Catatan")} value={f.catatan} onChange={set("catatan")} hint={t("Catatan internal, tidak dicetak.")} />
     </Modal>
   );
 }
 
-function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close }) {
+function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close, onUsul, onUbah }) {
   const { t } = useLang();
   const box = useDialog(close);
   const judul = useId();
@@ -2299,13 +2436,26 @@ function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close }
           <button className="x" onClick={close} aria-label={t("Tutup dialog")}>×</button>
         </div>
         <div className="md-bd">
+          <h4 className="mut2">{t("Identitas Faktur")}</h4>
           <div className="cust-info">
+            <div><span className="lbl2">{t("Pemilik")}</span><b>{c.pemilik || "-"}</b></div>
             <div><span className="lbl2">{t("PIC")}</span><b>{c.pic || "-"}</b></div>
             <div><span className="lbl2">{t("Telepon")}</span><b>{c.telp || "-"}</b></div>
+            <div><span className="lbl2">{t("Email")}</span><b>{c.email || "-"}</b></div>
+            <div><span className="lbl2">{t("NPWP")}</span><b>{c.npwp || "-"}</b></div>
             <div><span className="lbl2">{t("Kota")}</span><b>{c.kota || "-"}</b></div>
+            <div className="span3"><span className="lbl2">{t("Alamat")}</span><b>{c.alamat || "-"}</b></div>
+          </div>
+
+          <h4 className="mut2">{t("Data Penjualan")}</h4>
+          <div className="cust-info">
+            <div><span className="lbl2">{t("Sales")}</span><b>{c.sales || "-"}</b></div>
             <div><span className="lbl2">{t("Grade")}</span><span className={"grade g" + c.grade}>{c.grade}</span></div>
             <div><span className="lbl2">{t("Termin")}</span><b>{t("{n} hari", { n: c.termin })}</b></div>
             <div><span className="lbl2">{t("Limit Kredit")}</span><b>{rp(c.limit)}</b></div>
+            <div><span className="lbl2">{t("Sisa Limit")}</span><b>{rp(Math.max(0, c.limit - p))}</b></div>
+            <div><span className="lbl2">{t("Transaksi Terakhir")}</span><b>{riwayat[0]?.tgl || "-"}</b></div>
+            {c.catatan && <div className="span3"><span className="lbl2">{t("Catatan")}</span><b>{c.catatan}</b></div>}
           </div>
 
           <div className="kpis">
@@ -2347,6 +2497,8 @@ function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close }
           </Scroll>
         </div>
         <div className="md-ft">
+          {onUbah && <button className="btn" onClick={onUbah}>{t("Ubah Pelanggan")}</button>}
+          {onUsul && <button className="btn" onClick={onUsul}>{t("Usul Limit Kredit")}</button>}
           <button className="btn pri" onClick={close}>{t("Tutup")}</button>
         </div>
       </div>
@@ -2358,14 +2510,20 @@ function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close }
    berlaku tetap limit lama sampai admin memutuskan. */
 function FormUsulLimit({ c, close, say, submit }) {
   const { t } = useLang();
-  const [f, setF] = useState({ limit: String(c.limit ?? 0), alasan: "" });
+  const [f, setF] = useState({ limit: String(c.limit ?? 0), termin: String(c.termin ?? 0), alasan: "" });
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
   const kirim = async () => {
     const n = Number(f.limit);
     if (!Number.isFinite(n) || n < 0) return say(t("Limit kredit harus angka nol atau lebih."), true);
-    if (n === Number(c.limit)) return say(t("Limit yang diusulkan sama dengan limit sekarang."), true);
+    // Termin = TOP, jumlah HARI jatuh tempo, jadi harus bulat. Pecahan hari tidak
+    // punya arti di faktur dan membuat umur piutang meleset.
+    const hari = Number(f.termin);
+    if (!Number.isInteger(hari) || hari < 0) return say(t("Termin harus bilangan bulat nol hari atau lebih."), true);
+    // Cukup salah satu yang berubah — usulan TOP saja tetap sah.
+    if (n === Number(c.limit) && hari === Number(c.termin))
+      return say(t("Limit dan termin sama dengan yang berlaku sekarang."), true);
     try {
-      await submit({ pelanggan: c.id, limit: n, alasan: f.alasan.trim() });
+      await submit({ pelanggan: c.id, limit: n, termin: hari, alasan: f.alasan.trim() });
       close();
     } catch (e) { say(e.message, true); }
   };
@@ -2374,6 +2532,8 @@ function FormUsulLimit({ c, close, say, submit }) {
       <p className="note">{c.kode} · {c.nama}</p>
       <Inp label={t("Limit Kredit Baru (Rp)")} type="number" value={f.limit} onChange={set("limit")}
         hint={t("Limit sekarang: {n}", { n: rp(c.limit) })} />
+      <Inp label={t("Termin Baru (hari)")} type="number" value={f.termin} onChange={set("termin")}
+        hint={t("Termin sekarang: {n} hari", { n: c.termin })} />
       <Inp label={t("Alasan")} value={f.alasan} onChange={set("alasan")} hint={t("Dibaca admin saat memutuskan.")} />
     </Modal>
   );
@@ -2397,6 +2557,11 @@ function FormPutusan({ u, close, say, submit }) {
         {rp(Number(u.limit_lama))} → <b>{rp(Number(u.limit_baru))}</b>
         {" · "}{t("Diajukan oleh {u}", { u: u.pengusul_nama })}
       </p>
+      {u.termin_baru != null && (
+        <p className="note">
+          {t("Termin")}: {t("{n} hari", { n: Number(u.termin_lama) })} → <b>{t("{n} hari", { n: Number(u.termin_baru) })}</b>
+        </p>
+      )}
       {u.alasan && <p className="note">{t("Alasan")}: {u.alasan}</p>}
       <Sel label={t("Putusan")} value={f.putusan} onChange={set("putusan")}
         opts={[["disetujui", t("Setujui")], ["ditolak", t("Tolak")]]} />
@@ -3098,6 +3263,7 @@ function Style() {
 .vk .namelink:hover{text-decoration:underline; color:var(--asm-primary)}
 
 .vk .cust-info, .vk .spec-info{display:grid; grid-template-columns:repeat(3, 1fr); gap:12px 18px; margin-bottom:16px}
+.vk .cust-info .span3{grid-column:1 / -1}
 .vk .cust-info .lbl2, .vk .spec-info .lbl2{display:block; font-size:11px; font-weight:500; color:var(--asm-fg-muted); margin-bottom:3px}
 /* role badge */
 .vk .role{font-size:10px; padding:1px 7px}

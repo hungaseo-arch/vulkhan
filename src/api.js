@@ -81,6 +81,7 @@ export const api = {
 
   // tulis
   createPelanggan: (c) => j("/pelanggan", { method: "POST", body: c }),
+  updatePelanggan: (id, c) => j(`/pelanggan/${id}`, { method: "PUT", body: c }),
   transfer: (b) => j("/mutasi/transfer", { method: "POST", body: b }),
   penyesuaian: (b) => j("/mutasi/penyesuaian", { method: "POST", body: b }),
   // saldo awal (기초재고) — baca per gudang, simpan sekaligus banyak barang

@@ -17,8 +17,19 @@ CREATE TABLE IF NOT EXISTS limit_usulan (
   pengusul    TEXT NOT NULL, pengusul_nama TEXT NOT NULL,
   diusulkan   TIMESTAMPTZ NOT NULL DEFAULT now(),
   penentu     TEXT, penentu_nama TEXT, diputuskan TIMESTAMPTZ,
-  catatan     TEXT NOT NULL DEFAULT ''
+  catatan     TEXT NOT NULL DEFAULT '',
+  -- TOP (term of payment), in whole days. NULL on rows created before TOP was part
+  -- of a proposal: that means "this proposal does not concern TOP", not zero days.
+  -- Approval therefore uses COALESCE(termin_baru, pelanggan.termin) so approving an
+  -- old proposal cannot wipe the customer's current TOP.
+  termin_lama INTEGER,
+  termin_baru INTEGER CHECK (termin_baru >= 0)
 );
+
+-- Separate ALTERs for databases that already ran an earlier version of this file:
+-- CREATE TABLE IF NOT EXISTS does not touch a table that already exists.
+ALTER TABLE limit_usulan ADD COLUMN IF NOT EXISTS termin_lama INTEGER;
+ALTER TABLE limit_usulan ADD COLUMN IF NOT EXISTS termin_baru INTEGER CHECK (termin_baru >= 0);
 
 -- One pending proposal per customer, so two different numbers can never wait
 -- for the same decision.
