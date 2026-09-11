@@ -265,10 +265,20 @@ const PO_LABEL = {
   lunas: { id: "Lunas" },
 };
 
-/* ---------- hak akses (RBAC 3 tingkat) ---------- */
-const RANK = { staff: 1, manager: 2, admin: 3 };
+/* ---------- hak akses (RBAC 3 tingkat) ----------
+   Klien tidak lagi membandingkan peringkat peran: setiap izin yang dibatasi
+   sekarang milik admin saja, dan sisanya terbuka untuk semua peran yang login.
+   Peringkatnya tetap ada di server (RANK di api-server.js), tempat keputusannya
+   benar-benar berlaku — yang di sini hanya menyembunyikan tombol. */
 // Status usulan limit kredit — harus sama dengan CHECK di tabel limit_usulan.
 const USULAN_LABEL = { menunggu: "Menunggu", disetujui: "Disetujui", ditolak: "Ditolak" };
+// Jenis data yang bisa diusulkan penghapusannya — sama dengan CHECK di tabel hapus_usulan.
+const HAPUS_LABEL = { penjualan: "Penjualan", pembelian: "Pembelian", pelanggan: "Pelanggan" };
+/* Sasaran yang usulan hapusnya sedang menunggu. Dipakai untuk mematikan tombol
+   usul kedua atas baris yang sama — server menolaknya dengan 409, tapi tombol
+   yang jelas-jelas mati lebih baik daripada pesan galat setelah ditekan. */
+const menungguHapus = (usulan, jenis) =>
+  new Set((usulan || []).filter((u) => u.jenis === jenis && u.status === "menunggu").map((u) => u.sasaran));
 
 const ROLE_LABEL = {
   admin:   { id: "Admin", desc: "Akses penuh" },
@@ -379,9 +389,11 @@ function Aplikasi() {
   /* hak akses berdasarkan peran */
   const can = (perm) => {
     if (!user) return false;
-    if (perm === "delete") return RANK[user.peran] >= RANK.manager;
-    if (perm === "users" || perm === "putusan") return user.peran === "admin";
-    return true; // input & ubah: semua peran yang login
+    /* Menghapus penjualan/pembelian membuang juga mutasi stoknya, jadi satu klik
+       yang salah menggeser saldo gudang tanpa jejak. Sejak ada usulan hapus,
+       tombol langsungnya hanya untuk admin; peran lain mengajukannya lebih dulu. */
+    if (perm === "delete" || perm === "users" || perm === "putusan") return user.peran === "admin";
+    return true; // input, ubah & usul: semua peran yang login
   };
 
   async function doLogin(username, sandi) {
@@ -601,7 +613,7 @@ function Aplikasi() {
     say(t("{nama} diperbarui.", { nama: c.nama }));
   }
 
-  /* ---------- hapus (manager ke atas) ---------- */
+  /* ---------- hapus (admin saja) & usulan hapus (semua peran) ---------- */
   async function doDeletePenjualan(so) {
     if (online) { await api.deletePenjualan(so.id); await reload(); }
     else { setPenjualan((l) => l.filter((x) => x.id !== so.id)); setMutasi((m) => m.filter((x) => x.ref !== so.no)); }
@@ -620,12 +632,38 @@ function Aplikasi() {
     say(t("{nama} dihapus.", { nama: c.nama }));
   }
 
+  /* Usulan hapus dimuat sekali di sini, bukan di tiap layar: penjualan,
+     pembelian dan pelanggan sama-sama memakainya, dan menyetujui satu usulan
+     berarti menghapus barisnya — jadi muat ulangnya menyentuh seluruh buku,
+     bukan hanya layar yang sedang terbuka. */
+  const [hapusUsulan, setHapusUsulan] = useState(null);
+  const muatHapus = async () => {
+    if (!online || !user) return setHapusUsulan([]);
+    try { setHapusUsulan(await api.listHapusUsulan()); } catch (e) { setHapusUsulan([]); say(e.message, true); }
+  };
+  useEffect(() => { muatHapus(); }, [online, user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const ajukanHapus = async (u) => {
+    if (!online) return say(t("Usulan hapus hanya tersedia saat online."), true);
+    await api.createHapusUsulan(u);
+    await muatHapus();
+    say(t("Usulan hapus dikirim, menunggu persetujuan admin."));
+  };
+  // Persetujuan menjalankan penghapusannya, jadi data utama ikut dimuat ulang.
+  const putusanHapus = async (id, hasil, catatan) => {
+    if (!online) return say(t("Putusan hapus hanya tersedia saat online."), true);
+    await api.putusanHapusUsulan(id, hasil, catatan);
+    await Promise.all([muatHapus(), reload()]);
+    say(hasil === "disetujui" ? t("Usulan disetujui, data dihapus.") : t("Usulan ditolak."));
+  };
+
   const ctx = {
     produk, pelanggan, pemasok, mutasi, mutasiLimit, penjualan, pembelian,
     getStok, stokTotal, pById, cById, gById, sById, totalSO,
     piutang, piutangTotal, majuSO, mundurSO, majuPO, mundurPO, say, online,
     doTransfer, doAdjust, doSaldoAwal, doCreatePenjualan, doCreatePembelian, doCreatePelanggan,
     doUpdatePelanggan, user, can, minta, doDeletePenjualan, doDeletePembelian, doDeletePelanggan, reload,
+    hapusUsulan, ajukanHapus, putusanHapus,
   };
 
   const TABS = [
@@ -1568,6 +1606,131 @@ function DetailProduk({ p, getStok, stokTotal, close }) {
   );
 }
 
+/* ============================ USULAN HAPUS ============================ */
+/* Kartu permintaan hapus. Dipakai tiga layar (penjualan, pembelian,
+   pelanggan) dengan jenis yang berbeda; yang tampil hanya usulan untuk jenis
+   layarnya sendiri, supaya daftar di layar penjualan tidak dipenuhi permintaan
+   hapus pelanggan. Kartunya disembunyikan kalau tidak ada yang menunggu dan
+   pembacanya bukan admin — petugas tidak perlu melihat arsip putusan lama. */
+function KartuUsulHapus({ jenis, hapusUsulan, can, onPutuskan }) {
+  const { t } = useLang();
+  if (hapusUsulan === null) return null;
+  const rows = hapusUsulan.filter((u) => u.jenis === jenis);
+  const menunggu = rows.filter((u) => u.status === "menunggu");
+  if (!menunggu.length && !can("putusan")) return null;
+  return (
+    <Card title={t("Permintaan Hapus")}
+      note={t("Diajukan oleh petugas, disahkan oleh admin. Data terhapus tepat saat usulan disetujui.")}>
+      <Scroll max={260}>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">{t("Data|sasaran usulan hapus")}</th>
+              <th scope="col" className="r">{t("Nilai")}</th>
+              <th scope="col">{t("Alasan")}</th>
+              <th scope="col">{t("Pengaju")}</th>
+              <th scope="col">{t("Status")}</th>
+              <th scope="col" className="r">{t("Aksi")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((u) => (
+              <tr key={u.id}>
+                <td><span className="chip">{u.sasaran_no}</span><em className="mut2">{u.sasaran_ket}</em></td>
+                {/* pelanggan tidak punya nilai transaksi — nol berarti "tidak berlaku" */}
+                <td className="r n mut">{Number(u.nilai) ? rp(Number(u.nilai)) : "—"}</td>
+                <td className="mut">{u.alasan || "—"}</td>
+                <td className="mut">{u.pengusul_nama}<em className="mut2">{String(u.diusulkan).slice(0, 10)}</em></td>
+                <td><span className={"role u-" + u.status}>{t(USULAN_LABEL[u.status])}</span></td>
+                <td className="r">
+                  {u.status === "menunggu" && can("putusan")
+                    ? <button className="btn sm pri" onClick={() => onPutuskan(u)}>{t("Putuskan")}</button>
+                    : <span className="mut2">{u.penentu_nama || "—"}</span>}
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && <tr><td colSpan={6}><Empty id={t("Belum ada permintaan hapus.")} /></td></tr>}
+          </tbody>
+        </table>
+      </Scroll>
+    </Card>
+  );
+}
+
+/* Tombol hapus satu baris: admin membuang datanya langsung, peran lain hanya
+   bisa mengusulkan. Selama usulannya menunggu, tombolnya mati — server menolak
+   usulan kedua dengan 409, dan tombol yang jelas mati lebih baik daripada
+   pesan galat yang baru muncul setelah ditekan. */
+const TombolHapus = ({ can, tunggu, onHapus, onUsul }) => {
+  const { t } = useLang();
+  if (tunggu)
+    return (
+      /* .btn:disabled memakai pointer-events:none, jadi judulnya dipasang di
+         pembungkus — kalau tidak, tidak ada yang menjelaskan tombol yang mati. */
+      <span title={t("Permintaan hapus sedang menunggu putusan admin.")}>
+        <button className="btn sm" disabled>{t("Menunggu Putusan")}</button>
+      </span>
+    );
+  return can("delete")
+    ? <button className="btn sm danger" title={t("Hapus")} onClick={onHapus}>{t("Hapus")}</button>
+    : <button className="btn sm" onClick={onUsul}>{t("Usul Hapus")}</button>;
+};
+
+/* Pengajuan hapus: siapa pun yang login boleh mengusulkan, tidak ada yang
+   terhapus sampai admin menyetujui. Alasan WAJIB diisi — admin memutuskan atas
+   dasar itu, dan setelah barisnya hilang alasan inilah satu-satunya keterangan
+   mengapa data itu pernah ada lalu tidak ada. */
+function FormUsulHapus({ jenis, sasaran, judul, ket, close, say, submit }) {
+  const { t } = useLang();
+  const [alasan, setAlasan] = useState("");
+  const kirim = async () => {
+    const a = alasan.trim();
+    if (!a) return say(t("Alasan penghapusan wajib diisi."), true);
+    try {
+      await submit({ jenis, sasaran, alasan: a });
+      close();
+    } catch (e) { say(e.message, true); }
+  };
+  return (
+    <Modal title={t("Usul Hapus")} close={close} onSave={kirim} saveLabel={t("Ajukan")}>
+      <p className="note"><b>{judul}</b>{ket ? " · " + ket : ""}</p>
+      <p className="note">{t("Data belum terhapus. Penghapusan berjalan saat admin menyetujui usulan ini.")}</p>
+      <Inp label={t("Alasan")} value={alasan} onChange={setAlasan} hint={t("Dibaca admin saat memutuskan.")} />
+    </Modal>
+  );
+}
+
+/* Pengesahan oleh admin. Berbeda dari putusan limit: menyetujui di sini
+   MENGHAPUS datanya seketika, jadi nomor dan keterangan sasaran diulang di
+   dialog — setelah tombol ditekan tidak ada layar yang bisa menampilkannya lagi. */
+function FormPutusanHapus({ u, close, say, submit }) {
+  const { t } = useLang();
+  const [f, setF] = useState({ putusan: "disetujui", catatan: "" });
+  const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
+  const kirim = async () => {
+    try {
+      await submit(u.id, f.putusan, f.catatan.trim());
+      close();
+    } catch (e) { say(e.message, true); }
+  };
+  return (
+    <Modal title={t("Putusan Permintaan Hapus")} close={close} onSave={kirim}>
+      <p className="note">{t(HAPUS_LABEL[u.jenis])} · <b>{u.sasaran_no}</b> · {u.sasaran_ket}</p>
+      {Number(u.nilai) > 0 && <p className="note">{t("Nilai")}: <b className="n">{rp(Number(u.nilai))}</b></p>}
+      <p className="note">{t("Diajukan oleh {u}", { u: u.pengusul_nama })}</p>
+      {u.alasan && <p className="note">{t("Alasan")}: {u.alasan}</p>}
+      {/* pelanggan tidak punya mutasi stok — peringatannya tidak boleh menjanjikan
+          akibat yang tidak akan terjadi */}
+      <p className="note"><b className="bad">{u.jenis === "pelanggan"
+        ? t("Menyetujui akan menghapus data ini. Tidak bisa dibatalkan.")
+        : t("Menyetujui akan menghapus data ini beserta mutasi stoknya. Tidak bisa dibatalkan.")}</b></p>
+      <Sel label={t("Putusan")} value={f.putusan} onChange={set("putusan")}
+        opts={[["disetujui", t("Setujui & Hapus")], ["ditolak", t("Tolak")]]} />
+      <Inp label={t("Catatan")} value={f.catatan} onChange={set("catatan")} />
+    </Modal>
+  );
+}
+
 /* ============================ PENJUALAN ============================ */
 /* Layar penjualan disusun tiga tingkat ke bawah: penyaring → ringkasan (KPI &
    grafik) → tabel rincian. Susunan lama menumpuk angka tanpa pembanding —
@@ -1606,13 +1769,16 @@ const bacaPeriodeUrl = () => {
   };
 };
 
-function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cById, gById, totalSO, majuSO, mundurSO, getStok, piutang, say, can, minta, doDeletePenjualan }) {
+function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cById, gById, totalSO, majuSO, mundurSO, getStok, piutang, say, can, minta, doDeletePenjualan, hapusUsulan, ajukanHapus, putusanHapus }) {
   const { t, lang } = useLang();
   const [rinci, setRinci] = useState(null); // penjualan yang rinciannya dibuka
   const [baru, setBaru] = useState(false);
   const [dok, setDok] = useState(null);
   const [detail, setDetail] = useState(null); // pelanggan yang dibuka dari peringkat
   const [tagihan, setTagihan] = useState(null); // piutang satu pelanggan
+  const [usulHapus, setUsulHapus] = useState(null);   // SO yang diusulkan dihapus
+  const [putusanH, setPutusanH] = useState(null);     // usulan hapus yang diputuskan
+  const tungguHapus = useMemo(() => menungguHapus(hapusUsulan, "penjualan"), [hapusUsulan]);
   const [f, setF] = useState(bacaPeriodeUrl);
   const { periode, kuartal, sumbu, kelompok, dari, sampai, cust } = f;
   const ubah = (b) => setF((s) => ({ ...s, ...b }));
@@ -1928,6 +2094,8 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
         <button className="btn pri" onClick={() => setBaru(true)}>{t("+ Penjualan Baru")}</button>
       </SectionTitle>
 
+      <KartuUsulHapus jenis="penjualan" hapusUsulan={hapusUsulan} can={can} onPutuskan={setPutusanH} />
+
       <div className="kpis jual-kpi">
         <KpiTren label={t("Nilai Penjualan")} val={rpRingkas(kini.total)} delta={naikTurun(kini.total, lalu?.total)} />
         <KpiTren label={t("Kuantitas")} val={`${fmt(kini.qty)} pcs`} delta={naikTurun(kini.qty, lalu?.qty)} />
@@ -2186,10 +2354,15 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
           close={() => setRinci(null)} onCetak={() => { setDok(rinci); setRinci(null); }}
           onMaju={rinci.status !== "lunas" ? () => { majuSO(rinci); setRinci(null); } : null}
           onMundur={SO_FLOW.indexOf(rinci.status) > SO_FLOW.indexOf("kirim") ? () => { mundurSO(rinci); setRinci(null); } : null}
-          onHapus={can("delete")
-            ? () => minta(t("Hapus penjualan {no}? Data & mutasi stoknya ikut terhapus.", { no: rinci.no }),
-                () => { doDeletePenjualan(rinci); setRinci(null); })
-            : null} />
+          hapus={{
+            label: can("delete") ? t("Hapus") : t("Usul Hapus"),
+            tunggu: tungguHapus.has(rinci.id),
+            aksi: can("delete")
+              ? () => minta(t("Hapus penjualan {no}? Data & mutasi stoknya ikut terhapus.", { no: rinci.no }),
+                  () => { doDeletePenjualan(rinci); setRinci(null); })
+              /* dialog berurutan, bukan bertumpuk: rincian ditutup dulu */
+              : () => { setUsulHapus(rinci); setRinci(null); },
+          }} />
       )}
       {detail && (
         <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang}
@@ -2202,6 +2375,14 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
       )}
       {dok && (
         <DokumenPenjualan so={dok} pById={pById} cById={cById} gById={gById} totalSO={totalSO} close={() => setDok(null)} />
+      )}
+      {usulHapus && (
+        <FormUsulHapus jenis="penjualan" sasaran={usulHapus.id} judul={usulHapus.no}
+          ket={`${usulHapus.tgl} · ${cById(usulHapus.pelanggan).nama} · ${rp(totalSO(usulHapus))}`}
+          close={() => setUsulHapus(null)} say={say} submit={ajukanHapus} />
+      )}
+      {putusanH && (
+        <FormPutusanHapus u={putusanH} close={() => setPutusanH(null)} say={say} submit={putusanHapus} />
       )}
     </>
   );
@@ -2322,7 +2503,7 @@ const PENERBIT = {
 /* Rincian satu penjualan: layar tabel hanya memuat kode & qty, sedangkan harga
    satuan dan subtotal per baris baru terbaca di sini — tanpa harus membuka
    dokumen cetak yang formatnya untuk pelanggan, bukan untuk petugas. */
-function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, onMaju, onMundur, onHapus }) {
+function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, onMaju, onMundur, hapus }) {
   const { t, lang } = useLang();
   const box = useDialog(close);
   const judul = useId();
@@ -2385,7 +2566,14 @@ function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, on
             aksi — tombolnya pindah ke sini, tempat nilai yang sedang diubah
             statusnya juga terbaca. Logikanya tetap milik layar induk. */}
         <div className="md-ft">
-          {onHapus && <button className="btn danger" onClick={onHapus}>{t("Hapus")}</button>}
+          {/* Satu tombol, dua arti: admin menghapus, peran lain mengusulkan. */}
+          {hapus && (hapus.tunggu ? (
+            <span title={t("Permintaan hapus sedang menunggu putusan admin.")}>
+              <button className="btn" disabled>{t("Menunggu Putusan")}</button>
+            </span>
+          ) : (
+            <button className="btn danger" onClick={hapus.aksi}>{hapus.label}</button>
+          ))}
           <span className="ft-isi" />
           {onMundur && (
             <button className="btn" title={t("Kembalikan status satu langkah")} onClick={onMundur}>
@@ -2629,9 +2817,12 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
 }
 
 /* ============================ PEMBELIAN ============================ */
-function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById, gById, majuPO, mundurPO, say, can, minta, doDeletePembelian }) {
+function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById, gById, majuPO, mundurPO, say, can, minta, doDeletePembelian, hapusUsulan, ajukanHapus, putusanHapus }) {
   const { t, lang } = useLang();
   const [buka, setBuka] = useState(false);
+  const [usulHapus, setUsulHapus] = useState(null); // PO yang diusulkan dihapus
+  const [putusanH, setPutusanH] = useState(null);   // usulan hapus yang diputuskan
+  const tungguHapus = useMemo(() => menungguHapus(hapusUsulan, "pembelian"), [hapusUsulan]);
   const [dari, setDari] = useState("");
   const [sampai, setSampai] = useState("");
   const filterAktif = dari || sampai;
@@ -2688,6 +2879,8 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
             setBuka(true);
           }}>{t("+ Pembelian Baru")}</button>
       </SectionTitle>
+
+      <KartuUsulHapus jenis="pembelian" hapusUsulan={hapusUsulan} can={can} onPutuskan={setPutusanH} />
 
       <div className="grid3">
         {["casing", "bahan"].map((j) => {
@@ -2765,10 +2958,9 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
                       {p.status !== "lunas" ? (
                         <button className="btn sm" onClick={() => majuPO(p)}>→ {t(PO_LABEL[PO_FLOW[PO_FLOW.indexOf(p.status) + 1]].id)}</button>
                       ) : <span className="mut">{t("selesai")}</span>}
-                      {can("delete") && (
-                        <button className="btn sm danger" title={t("Hapus")}
-                          onClick={() => minta(t("Hapus pembelian {no}? Data & mutasi stoknya ikut terhapus.", { no: p.no }), () => doDeletePembelian(p))}>{t("Hapus")}</button>
-                      )}
+                      <TombolHapus can={can} tunggu={tungguHapus.has(p.id)}
+                        onHapus={() => minta(t("Hapus pembelian {no}? Data & mutasi stoknya ikut terhapus.", { no: p.no }), () => doDeletePembelian(p))}
+                        onUsul={() => setUsulHapus(p)} />
                     </div>
                   </td>
                 </tr>
@@ -2782,6 +2974,14 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
       {buka && (
         <FormPembelian close={() => setBuka(false)} pemasok={pemasok} produk={produk} say={say} submit={doCreatePembelian}
           nomor={(tgl) => nomorBaru("PO", pembelian, tgl)} />
+      )}
+      {usulHapus && (
+        <FormUsulHapus jenis="pembelian" sasaran={usulHapus.id} judul={usulHapus.no}
+          ket={`${usulHapus.tgl} · ${sById(usulHapus.pemasok).nama} · ${rp(tot(usulHapus))}`}
+          close={() => setUsulHapus(null)} say={say} submit={ajukanHapus} />
+      )}
+      {putusanH && (
+        <FormPutusanHapus u={putusanH} close={() => setPutusanH(null)} say={say} submit={putusanHapus} />
       )}
     </>
   );
@@ -2847,7 +3047,7 @@ function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
 }
 
 /* ============================ PELANGGAN ============================ */
-function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan, totalSO, piutang, gById, pById, cById, say, can, minta, doDeletePelanggan, online, reload }) {
+function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan, totalSO, piutang, gById, pById, cById, say, can, minta, doDeletePelanggan, online, reload, hapusUsulan, ajukanHapus, putusanHapus }) {
   const { t } = useLang();
   const [buka, setBuka] = useState(false);
   const [ubah, setUbah] = useState(null);       // pelanggan yang sedang diubah
@@ -2858,6 +3058,9 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
   const [usulan, setUsulan] = useState(null);
   const [usul, setUsul] = useState(null);       // pelanggan yang sedang diusulkan
   const [putusan, setPutusan] = useState(null); // usulan yang sedang diputuskan
+  const [usulHapus, setUsulHapus] = useState(null); // pelanggan yang diusulkan dihapus
+  const [putusanH, setPutusanH] = useState(null);   // usulan hapus yang diputuskan
+  const tungguHapus = useMemo(() => menungguHapus(hapusUsulan, "pelanggan"), [hapusUsulan]);
 
   const muatUsulan = async () => {
     if (!online) return setUsulan([]);
@@ -2958,6 +3161,8 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
         </Card>
       )}
 
+      <KartuUsulHapus jenis="pelanggan" hapusUsulan={hapusUsulan} can={can} onPutuskan={setPutusanH} />
+
       <Card>
         <Scroll>
           <table>
@@ -2995,10 +3200,9 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
                     <td className="r" onClick={(e) => e.stopPropagation()}>
                       <div className="aksi">
                         <button className="btn sm" onClick={() => setUsul(c)}>{t("Usul Limit")}</button>
-                        {can("delete") && (
-                          <button className="btn sm danger" title={t("Hapus")}
-                            onClick={() => minta(t("Hapus pelanggan {nama}?", { nama: c.nama }), () => doDeletePelanggan(c))}>{t("Hapus")}</button>
-                        )}
+                        <TombolHapus can={can} tunggu={tungguHapus.has(c.id)}
+                          onHapus={() => minta(t("Hapus pelanggan {nama}?", { nama: c.nama }), () => doDeletePelanggan(c))}
+                          onUsul={() => setUsulHapus(c)} />
                       </div>
                     </td>
                   </tr>
@@ -3016,6 +3220,14 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
       {ubah && <FormPelanggan c={ubah} close={() => setUbah(null)} say={say} submit={doUpdatePelanggan} />}
       {usul && <FormUsulLimit c={usul} close={() => setUsul(null)} say={say} submit={ajukan} />}
       {putusan && <FormPutusan u={putusan} close={() => setPutusan(null)} say={say} submit={putuskan} />}
+      {usulHapus && (
+        <FormUsulHapus jenis="pelanggan" sasaran={usulHapus.id} judul={usulHapus.nama}
+          ket={[usulHapus.kode, usulHapus.kota].filter(Boolean).join(" · ")}
+          close={() => setUsulHapus(null)} say={say} submit={ajukanHapus} />
+      )}
+      {putusanH && (
+        <FormPutusanHapus u={putusanH} close={() => setPutusanH(null)} say={say} submit={putusanHapus} />
+      )}
       {detail && (
         <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang}
           gById={gById} pById={pById} close={() => setDetail(null)}

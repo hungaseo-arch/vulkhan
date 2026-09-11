@@ -147,6 +147,29 @@ const KO = {
   "Usulan disetujui, limit kredit diperbarui.": "기안 승인 — 여신한도 변경 완료",
   "Usulan ditolak.": "기안 반려 완료",
 
+  /* ---------- usulan penghapusan data ---------- */
+  "Permintaan Hapus": "삭제 요청",
+  "Usul Hapus": "삭제 기안",
+  "Putusan Permintaan Hapus": "삭제 요청 결재",
+  "Setujui & Hapus": "승인 및 삭제",
+  "Menunggu Putusan": "결재 대기",
+  "Data|sasaran usulan hapus": "대상",
+  "Belum ada permintaan hapus.": "삭제 요청 없음",
+  "Diajukan oleh petugas, disahkan oleh admin. Data terhapus tepat saat usulan disetujui.":
+    "담당자 기안 → 관리자 확정. 승인하는 순간 데이터 삭제",
+  "Data belum terhapus. Penghapusan berjalan saat admin menyetujui usulan ini.":
+    "아직 삭제되지 않음 — 관리자가 승인할 때 실행됨",
+  "Menyetujui akan menghapus data ini beserta mutasi stoknya. Tidak bisa dibatalkan.":
+    "승인하면 이 데이터와 재고 이동 기록이 함께 삭제되며 되돌릴 수 없습니다.",
+  "Menyetujui akan menghapus data ini. Tidak bisa dibatalkan.":
+    "승인하면 이 데이터가 삭제되며 되돌릴 수 없습니다.",
+  "Permintaan hapus sedang menunggu putusan admin.": "삭제 요청 결재 대기 중",
+  "Alasan penghapusan wajib diisi.": "삭제 사유는 필수 입력",
+  "Usulan hapus hanya tersedia saat online.": "삭제 기안 — 온라인 상태에서만 가능",
+  "Putusan hapus hanya tersedia saat online.": "삭제 확정 — 온라인 상태에서만 가능",
+  "Usulan hapus dikirim, menunggu persetujuan admin.": "삭제 기안 접수 — 관리자 확정 대기",
+  "Usulan disetujui, data dihapus.": "기안 승인 — 데이터 삭제 완료",
+
   /* ---------- pengguna (admin) ---------- */
   "Pengguna & Hak Akses": "사용자 및 권한",
   "+ Pengguna Baru": "+ 새 사용자",

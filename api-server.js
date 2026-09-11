@@ -53,7 +53,7 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }));
 // Seed pengguna bawaan sekali (memoized) — berjalan di lokal & serverless.
 // Reset ke null bila gagal agar dicoba lagi pada request berikutnya.
 let ready;
-const ensureReady = () => (ready ||= Promise.all([ensureUsers(), ensureUsulan(), ensurePelanggan()])
+const ensureReady = () => (ready ||= Promise.all([ensureUsers(), ensureUsulan(), ensureHapus(), ensurePelanggan()])
   .catch((e) => { ready = null; throw e; }));
 app.use((req, res, next) => ensureReady().then(() => next()).catch(next));
 
@@ -186,6 +186,40 @@ async function ensureUsulan() {
   await sql`
     CREATE UNIQUE INDEX IF NOT EXISTS limit_usulan_menunggu
     ON limit_usulan (pelanggan) WHERE status = 'menunggu'`;
+}
+
+// Usulan penghapusan data. Menghapus penjualan/pembelian membuang juga mutasi
+// stoknya, jadi satu klik yang salah menggeser saldo gudang tanpa jejak — sejak
+// ada tabel ini, penghapusan langsung hanya untuk admin dan peran lain
+// mengajukannya lebih dulu.
+//
+// TIDAK ada foreign key ke baris sasaran, dan itu disengaja: menyetujui usulan
+// berarti menghapus baris itu. FK dengan ON DELETE CASCADE akan ikut menghapus
+// catatan persetujuannya — justru bukti yang paling perlu disimpan — sedangkan
+// FK biasa akan membuat penghapusannya gagal. Nomor dan keterangan sasaran
+// karena itu DISALIN saat usulan dibuat: setelah barisnya hilang, hanya salinan
+// ini yang masih bisa menjawab "apa yang dihapus".
+async function ensureHapus() {
+  await sql`
+    CREATE TABLE IF NOT EXISTS hapus_usulan (
+      id          TEXT PRIMARY KEY,
+      jenis       TEXT NOT NULL CHECK (jenis IN ('penjualan','pembelian','pelanggan')),
+      sasaran     TEXT NOT NULL,
+      sasaran_no  TEXT NOT NULL,
+      sasaran_ket TEXT NOT NULL DEFAULT '',
+      nilai       NUMERIC NOT NULL DEFAULT 0,
+      alasan      TEXT NOT NULL DEFAULT '',
+      status      TEXT NOT NULL DEFAULT 'menunggu' CHECK (status IN ('menunggu','disetujui','ditolak')),
+      pengusul    TEXT NOT NULL, pengusul_nama TEXT NOT NULL,
+      diusulkan   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      penentu     TEXT, penentu_nama TEXT, diputuskan TIMESTAMPTZ,
+      catatan     TEXT NOT NULL DEFAULT ''
+    )`;
+  // Satu usulan menunggu per baris sasaran — dua permintaan untuk transaksi yang
+  // sama hanya membuat admin memutuskan hal yang sama dua kali.
+  await sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS hapus_usulan_menunggu
+    ON hapus_usulan (jenis, sasaran) WHERE status = 'menunggu'`;
 }
 
 /* Tabel pelanggan sudah ada sejak awal, jadi kolom profil ditambahkan lewat
@@ -502,6 +536,154 @@ app.post("/api/limit-usulan/:id/putusan", requireRole("admin"), wrap(async (req,
   res.json(row);
 }));
 
+// ---------- usulan hapus (diajukan siapa pun, dieksekusi admin) ----------
+// Menghapus penjualan/pembelian membuang juga mutasi stoknya, jadi satu klik
+// yang salah menggeser saldo gudang tanpa meninggalkan jejak. Penghapusan
+// langsung karena itu hanya untuk admin; peran lain mengajukannya lebih dulu.
+
+// Keterangan sasaran dibaca DI SERVER, bukan diterima dari klien: yang disalin
+// ke baris usulan adalah satu-satunya keterangan yang tersisa setelah datanya
+// hilang, jadi tidak boleh berasal dari pihak yang meminta penghapusan.
+const SASARAN = {
+  penjualan: {
+    baca: (id) => sql`
+      SELECT p.no, p.tgl, COALESCE(c.nama, '-') AS pihak,
+             (SELECT COALESCE(SUM(i.qty * i.harga), 0) FROM penjualan_item i WHERE i.penjualan = p.id) AS nilai
+      FROM penjualan p LEFT JOIN pelanggan c ON c.id = p.pelanggan WHERE p.id = ${id}`,
+    ket: (r) => `${String(r.tgl).slice(0, 10)} · ${r.pihak}`,
+  },
+  pembelian: {
+    baca: (id) => sql`
+      SELECT p.no, p.tgl, COALESCE(s.nama, '-') AS pihak,
+             (SELECT COALESCE(SUM(i.qty * i.harga), 0) FROM pembelian_item i WHERE i.pembelian = p.id) AS nilai
+      FROM pembelian p LEFT JOIN pemasok s ON s.id = p.pemasok WHERE p.id = ${id}`,
+    ket: (r) => `${String(r.tgl).slice(0, 10)} · ${r.pihak}`,
+  },
+  pelanggan: {
+    baca: (id) => sql`SELECT kode AS no, nama, kota, 0 AS nilai FROM pelanggan WHERE id = ${id}`,
+    ket: (r) => [r.nama, r.kota].filter(Boolean).join(" · "),
+    // Diperiksa saat usulan dibuat DAN saat disetujui: penjualan bisa masuk di
+    // antara keduanya, dan usulan yang tak mungkin disetujui hanya menambah
+    // baris yang harus ditolak seseorang.
+    halangan: async (id) => {
+      const [ada] = await sql`SELECT 1 FROM penjualan WHERE pelanggan = ${id} LIMIT 1`;
+      return ada ? "Tidak bisa dihapus: pelanggan masih punya transaksi penjualan." : null;
+    },
+  },
+};
+
+app.get("/api/hapus-usulan", wrap(async (_req, res) => {
+  res.json(await sql`
+    SELECT * FROM hapus_usulan
+    ORDER BY (status = 'menunggu') DESC, diusulkan DESC
+    LIMIT 200`);
+}));
+
+app.post("/api/hapus-usulan", wrap(async (req, res) => {
+  const { jenis, sasaran, alasan } = req.body || {};
+  const def = SASARAN[jenis];
+  if (!def) return res.status(400).json({ error: "Jenis data tidak dikenal." });
+  const id = String(sasaran || "");
+  const [row] = await def.baca(id);
+  if (!row) return res.status(404).json({ error: "Data yang diminta tidak ditemukan." });
+  const halangan = def.halangan ? await def.halangan(id) : null;
+  if (halangan) return res.status(400).json({ error: halangan });
+
+  const [menunggu] = await sql`
+    SELECT 1 FROM hapus_usulan WHERE jenis = ${jenis} AND sasaran = ${id} AND status = 'menunggu'`;
+  if (menunggu)
+    return res.status(409).json({ error: "Sudah ada permintaan hapus yang menunggu keputusan untuk data ini." });
+
+  const [{ maks }] = await sql`
+    SELECT COALESCE(MAX(SUBSTRING(id FROM 3)::int), 0) AS maks
+    FROM hapus_usulan WHERE id ~ '^UH[0-9]+$'`;
+  const [u] = await sql`
+    INSERT INTO hapus_usulan (id, jenis, sasaran, sasaran_no, sasaran_ket, nilai, alasan, pengusul, pengusul_nama)
+    VALUES (${"UH" + (Number(maks) + 1)}, ${jenis}, ${id}, ${row.no}, ${def.ket(row)}, ${Number(row.nilai) || 0},
+            ${String(alasan || "").trim()}, ${req.user.id}, ${req.user.username})
+    RETURNING *`;
+  res.status(201).json(u);
+}));
+
+/* Urutan statement sengaja terbalik dari usulan limit: penghapusan dijalankan
+   LEBIH DULU, dan penandaan "disetujui" digantungkan pada hilangnya baris
+   sasaran. Usulan karena itu tidak akan pernah tercatat disetujui kalau
+   penghapusannya ternyata terhalang — persetujuan yang berbohong tentang apa
+   yang terjadi lebih buruk daripada kegagalan yang terlihat. Syarat
+   status='menunggu' tetap diulang di UPDATE supaya dua admin yang menekan
+   tombol bersamaan hanya satu yang berhasil. */
+const eksekusiHapus = (u, penentu, nama, catatan) => {
+  if (u.jenis === "penjualan")
+    return [
+      sql`DELETE FROM stok_mutasi WHERE ref = ${u.sasaran_no}`,
+      sql`DELETE FROM penjualan_item WHERE penjualan = ${u.sasaran}`,
+      sql`DELETE FROM penjualan WHERE id = ${u.sasaran}`,
+      sql`
+        UPDATE hapus_usulan
+        SET status = 'disetujui', penentu = ${penentu}, penentu_nama = ${nama},
+            diputuskan = now(), catatan = ${catatan}
+        WHERE id = ${u.id} AND status = 'menunggu'
+          AND NOT EXISTS (SELECT 1 FROM penjualan WHERE id = ${u.sasaran})
+        RETURNING *`,
+    ];
+  if (u.jenis === "pembelian")
+    return [
+      sql`DELETE FROM stok_mutasi WHERE ref = ${u.sasaran_no}`,
+      sql`DELETE FROM pembelian_item WHERE pembelian = ${u.sasaran}`,
+      sql`DELETE FROM pembelian WHERE id = ${u.sasaran}`,
+      sql`
+        UPDATE hapus_usulan
+        SET status = 'disetujui', penentu = ${penentu}, penentu_nama = ${nama},
+            diputuskan = now(), catatan = ${catatan}
+        WHERE id = ${u.id} AND status = 'menunggu'
+          AND NOT EXISTS (SELECT 1 FROM pembelian WHERE id = ${u.sasaran})
+        RETURNING *`,
+    ];
+  return [
+    sql`
+      DELETE FROM pelanggan WHERE id = ${u.sasaran}
+        AND NOT EXISTS (SELECT 1 FROM penjualan WHERE pelanggan = ${u.sasaran})`,
+    sql`
+      UPDATE hapus_usulan
+      SET status = 'disetujui', penentu = ${penentu}, penentu_nama = ${nama},
+          diputuskan = now(), catatan = ${catatan}
+      WHERE id = ${u.id} AND status = 'menunggu'
+        AND NOT EXISTS (SELECT 1 FROM pelanggan WHERE id = ${u.sasaran})
+      RETURNING *`,
+  ];
+};
+
+app.post("/api/hapus-usulan/:id/putusan", requireRole("admin"), wrap(async (req, res) => {
+  const { putusan, catatan } = req.body || {};
+  if (putusan !== "disetujui" && putusan !== "ditolak")
+    return res.status(400).json({ error: "Putusan harus 'disetujui' atau 'ditolak'." });
+
+  const [u] = await sql`SELECT * FROM hapus_usulan WHERE id = ${req.params.id}`;
+  if (!u) return res.status(404).json({ error: "Permintaan hapus tidak ditemukan." });
+  if (u.status !== "menunggu")
+    return res.status(400).json({ error: "Permintaan ini sudah diputuskan." });
+  const ket = String(catatan || "").trim();
+
+  if (putusan === "ditolak") {
+    const [row] = await sql`
+      UPDATE hapus_usulan
+      SET status = 'ditolak', penentu = ${req.user.id}, penentu_nama = ${req.user.username},
+          diputuskan = now(), catatan = ${ket}
+      WHERE id = ${u.id} AND status = 'menunggu'
+      RETURNING *`;
+    if (!row) return res.status(409).json({ error: "Permintaan ini baru saja diputuskan pengguna lain." });
+    return res.json(row);
+  }
+
+  const hasil = await sql.transaction(eksekusiHapus(u, req.user.id, req.user.username, ket));
+  const [row] = hasil[hasil.length - 1];
+  if (!row)
+    return res.status(409).json({
+      error: "Penghapusan tidak jadi dijalankan — datanya sudah berubah atau baru saja diputuskan pengguna lain.",
+    });
+  res.json(row);
+}));
+
 app.get("/api/pemasok", wrap(async (_req, res) => {
   res.json(await sql`SELECT * FROM pemasok ORDER BY kode`);
 }));
@@ -739,9 +921,10 @@ app.patch("/api/pembelian/:id/status", wrap(async (req, res) => {
   res.json(row);
 }));
 
-// ---------- hapus (manager ke atas) ----------
+// ---------- hapus langsung (admin saja) ----------
+// Peran lain memakai /api/hapus-usulan; lihat catatan di sana.
 // Penjualan/pembelian: buang juga baris item & mutasi stok yang dibuat (ref = no).
-app.delete("/api/penjualan/:id", requireRole("manager"), wrap(async (req, res) => {
+app.delete("/api/penjualan/:id", requireRole("admin"), wrap(async (req, res) => {
   const [row] = await sql`SELECT no FROM penjualan WHERE id = ${req.params.id}`;
   if (!row) return res.status(404).json({ error: "Data penjualan tidak ditemukan." });
   // Tiga DELETE dalam satu transaksi — mutasi, item, dan header hilang bersama.
@@ -753,7 +936,7 @@ app.delete("/api/penjualan/:id", requireRole("manager"), wrap(async (req, res) =
   res.status(204).end();
 }));
 
-app.delete("/api/pembelian/:id", requireRole("manager"), wrap(async (req, res) => {
+app.delete("/api/pembelian/:id", requireRole("admin"), wrap(async (req, res) => {
   const [row] = await sql`SELECT no FROM pembelian WHERE id = ${req.params.id}`;
   if (!row) return res.status(404).json({ error: "Data pembelian tidak ditemukan." });
   await sql.transaction([
@@ -764,7 +947,7 @@ app.delete("/api/pembelian/:id", requireRole("manager"), wrap(async (req, res) =
   res.status(204).end();
 }));
 
-app.delete("/api/pelanggan/:id", requireRole("manager"), wrap(async (req, res) => {
+app.delete("/api/pelanggan/:id", requireRole("admin"), wrap(async (req, res) => {
   const [ada] = await sql`SELECT 1 FROM penjualan WHERE pelanggan = ${req.params.id} LIMIT 1`;
   if (ada) return res.status(400).json({ error: "Tidak bisa dihapus: pelanggan masih punya transaksi penjualan." });
   await sql`DELETE FROM pelanggan WHERE id = ${req.params.id}`;

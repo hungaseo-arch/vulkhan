@@ -127,7 +127,8 @@ Noto Sans KR을 붙이는 방법이 있습니다.
 
 - 비밀번호: `scrypt` 해시, `salt:hash` 형식
 - 세션: `base64url(payload).HMAC-SHA256` 미니 JWT, 12시간 만료. 역할은 검증된 payload에서만 읽습니다
-- 역할 서열: `staff(1) < manager(2) < admin(3)`. 삭제는 manager 이상, 사용자 관리는 admin
+- 역할 서열: `staff(1) < manager(2) < admin(3)`. 삭제와 사용자 관리는 admin,
+  나머지 역할은 삭제를 `hapus_usulan`으로 기안
 - 프런트의 `can()`은 UI만 제어하고, 서버의 `requireRole()`이 실제 보호입니다
 
 ### 라우트
@@ -143,7 +144,7 @@ Noto Sans KR을 붙이는 방법이 있습니다.
 | POST `/api/mutasi/transfer` | 창고 이동 | 재고 확인 후 INSERT 2건 트랜잭션 |
 | POST `/api/mutasi/penyesuaian` | 실사 조정 | 차이분 1건 INSERT |
 | GET/POST `/api/mutasi/saldo-awal` | 기초재고 | 저장은 manager. `ref='AWAL'` 한 줄로 기록, 재저장 시 교체 |
-| GET/POST `/api/penjualan`, PATCH `/:id/status`, DELETE `/:id` | 판매 | 생성·삭제는 트랜잭션, 삭제는 manager |
+| GET/POST `/api/penjualan`, PATCH `/:id/status`, DELETE `/:id` | 판매 | 생성·삭제는 트랜잭션, 삭제는 admin |
 | GET/POST `/api/pembelian`, PATCH `/:id/status`, DELETE `/:id` | 구매 | 동일 |
 | POST `/api/pelanggan`, PUT/DELETE `/:id` | 고객 | 수정은 프로필만 — 한도·결제조건 제외. 판매 이력이 있으면 삭제 거부 |
 | GET/POST/PUT/DELETE `/api/pengguna` | 사용자 | admin. 본인 삭제·본인 역할 변경·마지막 admin 강등 불가 |
@@ -151,6 +152,8 @@ Noto Sans KR을 붙이는 방법이 있습니다.
 | POST `/api/ganti-sandi` | 비밀번호 변경 | 토큰의 id로만 |
 | GET/POST `/api/limit-usulan` | 여신한도·결제조건 기안 | 기안은 staff 이상. 대기 건 중복이면 409 |
 | POST `/api/limit-usulan/:id/putusan` | 여신한도 확정 | admin. 승인 시 한도·결제조건 반영까지 한 트랜잭션 |
+| GET/POST `/api/hapus-usulan` | 삭제 기안 | 기안은 staff 이상. 대기 건 중복이면 409 |
+| POST `/api/hapus-usulan/:id/putusan` | 삭제 확정 | admin. 승인 시 삭제까지 한 트랜잭션, 대상이 남아 있으면 409 |
 
 ### 트랜잭션
 

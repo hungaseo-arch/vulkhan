@@ -92,7 +92,8 @@ export const api = {
   createPembelian: (p) => j("/pembelian", { method: "POST", body: p }),
   statusPembelian: (id, status) => j(`/pembelian/${id}/status`, { method: "PATCH", body: { status } }),
 
-  // hapus (butuh peran manager ke atas — server memverifikasi via header)
+  // hapus langsung (admin saja — server memverifikasi via header). Peran lain
+  // memakai usulan penghapusan di bawah; persetujuannya yang menjalankan hapus.
   deletePenjualan: (id) => j(`/penjualan/${id}`, { method: "DELETE" }),
   deletePembelian: (id) => j(`/pembelian/${id}`, { method: "DELETE" }),
   deletePelanggan: (id) => j(`/pelanggan/${id}`, { method: "DELETE" }),
@@ -102,4 +103,11 @@ export const api = {
   createUsulan: (u) => j("/limit-usulan", { method: "POST", body: u }),
   putusanUsulan: (id, putusan, catatan) =>
     j(`/limit-usulan/${id}/putusan`, { method: "POST", body: { putusan, catatan } }),
+
+  // usulan penghapusan — diajukan siapa pun yang login, diputuskan admin.
+  // Menyetujui usulan BERARTI menghapus barisnya, jadi putusanHapus mengubah data.
+  listHapusUsulan: () => j("/hapus-usulan"),
+  createHapusUsulan: (u) => j("/hapus-usulan", { method: "POST", body: u }),
+  putusanHapusUsulan: (id, putusan, catatan) =>
+    j(`/hapus-usulan/${id}/putusan`, { method: "POST", body: { putusan, catatan } }),
 };
