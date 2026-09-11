@@ -1471,7 +1471,7 @@ function DetailProduk({ p, getStok, stokTotal, close }) {
 
 /* ============================ PENJUALAN ============================ */
 function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cById, gById, totalSO, majuSO, mundurSO, getStok, piutang, say, can, minta, doDeletePenjualan }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [buka, setBuka] = useState(false);
   const [dok, setDok] = useState(null);
   const [dari, setDari] = useState("");
@@ -1869,7 +1869,7 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
 
 /* ============================ PEMBELIAN ============================ */
 function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById, gById, majuPO, mundurPO, say, can, minta, doDeletePembelian }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [buka, setBuka] = useState(false);
   const [dari, setDari] = useState("");
   const [sampai, setSampai] = useState("");
