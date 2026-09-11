@@ -243,10 +243,10 @@ function LangSwitch() {
   const { lang, setLang, t } = useLang();
   return (
     <div className="lang" role="group" aria-label={t("Bahasa")}>
-      {LANGS.map(([k, kode, nama]) => (
+      {LANGS.map(([k, , nama, bendera]) => (
         <button key={k} type="button" className={"lang-b" + (lang === k ? " on" : "")}
-          title={nama} aria-pressed={lang === k} onClick={() => setLang(k)}>
-          {kode}
+          title={nama} aria-label={nama} aria-pressed={lang === k} onClick={() => setLang(k)}>
+          <span aria-hidden="true">{bendera}</span>
         </button>
       ))}
     </div>
@@ -3322,11 +3322,14 @@ function Style() {
 
 /* pemilih bahasa: kendali tersegmen ID / KO */
 .vk .lang{display:inline-flex; border:1px solid var(--asm-border); border-radius:var(--asm-radius-md); overflow:hidden; background:var(--asm-card)}
-.vk .lang-b{background:none; border:0; padding:4px 9px; cursor:pointer; font:inherit; font-size:11px; font-weight:500;
-  letter-spacing:.06em; color:var(--asm-fg-muted); transition:background .15s, color .15s}
+/* bendera, bukan kode huruf: bahasa terbaca sekilas tanpa harus dieja.
+   Yang tidak aktif diredam abu-abu — dua bendera berwarna bersebelahan tidak
+   menunjukkan mana yang sedang dipakai, dan latar saja terlalu samar. */
+.vk .lang-b{background:none; border:0; padding:3px 9px; cursor:pointer; font:inherit; font-size:15px;
+  line-height:1.3; filter:grayscale(1); opacity:.5; transition:background .15s, filter .15s, opacity .15s}
 .vk .lang-b + .lang-b{border-left:1px solid var(--asm-border)}
-.vk .lang-b:hover{background:var(--asm-primary-6); color:var(--asm-primary)}
-.vk .lang-b.on{background:var(--asm-primary); color:var(--asm-white)}
+.vk .lang-b:hover{background:var(--asm-primary-6); filter:none; opacity:.8}
+.vk .lang-b.on{background:var(--asm-primary-10); filter:none; opacity:1}
 .vk .lang-b:focus-visible{outline:2px solid var(--asm-primary); outline-offset:-2px}
 
 /* header: menu pengguna (identitas + aksi akun dalam satu tombol) */

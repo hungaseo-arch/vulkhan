@@ -12,9 +12,11 @@ import React, { createContext, useContext, useEffect, useState } from "react";
    Bagian setelah "|" tidak pernah ditampilkan.
    ============================================================ */
 
+/* [kode, label, nama, bendera] — bendera yang tampil, nama yang dibacakan
+   pembaca layar: emoji bendera tidak diucapkan seragam di semua peramban. */
 export const LANGS = [
-  ["id", "ID", "Bahasa Indonesia"],
-  ["ko", "KO", "한국어"],
+  ["id", "ID", "Bahasa Indonesia", "🇮🇩"],
+  ["ko", "KO", "한국어", "🇰🇷"],
 ];
 
 const KO = {
