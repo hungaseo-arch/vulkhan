@@ -53,6 +53,15 @@ const addDays = (s, days) => {
 /* selisih hari dari tanggal `from` ke `to` (positif bila `to` lebih belakangan) */
 const diffDays = (from, to) =>
   Math.round((new Date(String(to).slice(0, 10) + "T00:00:00") - new Date(String(from).slice(0, 10) + "T00:00:00")) / 86400000);
+const HARI = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+const HARI_KO = ["일", "월", "화", "수", "목", "금", "토"];
+/* Label hari di dalam akordeon bulan: tahun dan bulan sudah tertulis di kepala
+   bulan, jadi yang perlu tersisa hanya tanggal dan nama harinya. */
+const hariLabel = (s, lang) => {
+  const [y, m, d] = String(s).slice(0, 10).split("-");
+  const w = new Date(`${y}-${m}-${d}T00:00:00`).getDay();
+  return lang === "ko" ? `${Number(d)}일 (${HARI_KO[w]})` : `${HARI[w]}, ${Number(d)}`;
+};
 const bulanLabel = (ym, lang) => {
   const [y, m] = String(ym).split("-");
   return lang === "ko" ? `${y}년 ${Number(m)}월` : `${BULAN[Number(m) - 1]} ${y}`;
@@ -1485,7 +1494,11 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
   const [dari, setDari] = useState("");
   const [sampai, setSampai] = useState("");
   const [cust, setCust] = useState("");
-  const [terbuka, setTerbuka] = useState(() => new Set());
+  /* null = belum ada yang diklik. Bukan Set kosong: data penjualan baru tiba
+     setelah render pertama, jadi bulan bawaan tidak bisa dihitung sekali di
+     awal — yang terbuka adalah bulan terbaru pada tampilan saat ini. */
+  const [bulanBuka, setBulanBuka] = useState(null);
+  const [hariBuka, setHariBuka] = useState(() => new Set());
   const filterAktif = dari || sampai || cust.trim();
   const list = useMemo(() => {
     const q = cust.trim().toLowerCase();
@@ -1493,30 +1506,49 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
       (s) => (!dari || s.tgl >= dari) && (!sampai || s.tgl <= sampai) && (!q || cById(s.pelanggan).nama.toLowerCase().includes(q)),
     );
   }, [penjualan, dari, sampai, cust, cById]);
-  const grup = useMemo(() => {
-    const map = new Map();
+  /* Dua tingkat: bulan berisi hari, hari berisi transaksi. Satu daftar hari
+     yang datar jadi puluhan kartu begitu setahun data terkumpul; bulan membuat
+     layar tetap sependek jumlah bulannya. Keduanya diringkas dengan angka yang
+     sama supaya perbandingan antarbulan terbaca tanpa harus dibuka. */
+  const bulanan = useMemo(() => {
+    const perHari = new Map();
     for (const s of list) {
-      if (!map.has(s.tgl)) map.set(s.tgl, []);
-      map.get(s.tgl).push(s);
+      if (!perHari.has(s.tgl)) perHari.set(s.tgl, []);
+      perHari.get(s.tgl).push(s);
     }
-    return [...map.entries()]
-      .sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0))
-      .map(([tgl, rows]) => ({
+    const perBulan = new Map();
+    for (const [tgl, rows] of perHari) {
+      const hari = {
         tgl, rows,
         total: rows.reduce((a, s) => a + totalSO(s), 0),
         qty: rows.reduce((a, s) => a + s.items.reduce((b, i) => b + (Number(i.qty) || 0), 0), 0),
-      }));
+      };
+      const bulan = tgl.slice(0, 7);
+      if (!perBulan.has(bulan)) perBulan.set(bulan, { bulan, hari: [], n: 0, qty: 0, total: 0 });
+      const b = perBulan.get(bulan);
+      b.hari.push(hari); b.n += rows.length; b.qty += hari.qty; b.total += hari.total;
+    }
+    const baru = (a, b) => (a < b ? 1 : a > b ? -1 : 0);
+    for (const b of perBulan.values()) b.hari.sort((x, y) => baru(x.tgl, y.tgl));
+    return [...perBulan.values()].sort((x, y) => baru(x.bulan, y.bulan));
   }, [list, totalSO]);
-  const toggle = (tgl) => setTerbuka((s) => {
+  const bulanTerbaru = bulanan[0]?.bulan;
+  const bulanTerbuka = (b) => (bulanBuka ? bulanBuka.has(b) : b === bulanTerbaru);
+  const toggleBulan = (b) => setBulanBuka((s) => {
+    const n = new Set(s ?? (bulanTerbaru ? [bulanTerbaru] : []));
+    if (n.has(b)) n.delete(b); else n.add(b);
+    return n;
+  });
+  const toggleHari = (tgl) => setHariBuka((s) => {
     const n = new Set(s);
     if (n.has(tgl)) n.delete(tgl); else n.add(tgl);
     return n;
   });
   const ringkasan = useMemo(() => ({
     jumlah: list.length,
-    qty: grup.reduce((a, g) => a + g.qty, 0),
-    total: grup.reduce((a, g) => a + g.total, 0),
-  }), [list, grup]);
+    qty: bulanan.reduce((a, b) => a + b.qty, 0),
+    total: bulanan.reduce((a, b) => a + b.total, 0),
+  }), [list, bulanan]);
 
   const unduhExcel = () => {
     const aoa = [
@@ -1563,75 +1595,87 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
         </div>
       )}
 
-      {grup.length === 0 && (
+      {bulanan.length === 0 && (
         <Card><Empty id={filterAktif ? t("Tidak ada transaksi pada filter ini.") : t("Belum ada transaksi penjualan.")} /></Card>
       )}
 
-      {grup.map(({ tgl, rows, total, qty }) => {
-        const on = terbuka.has(tgl);
+      {bulanan.map((b) => {
+        const onB = bulanTerbuka(b.bulan);
         return (
-          <Card key={tgl}>
-            <button type="button" className="card-hd acc-hd" aria-expanded={on} onClick={() => toggle(tgl)}>
-              <span className="acc-chev">{on ? "▾" : "▸"}</span>
-              <span className="acc-tgl">{tglPanjang(tgl, lang)}</span>
-              <span className="acc-sub">{t("{n} transaksi · {q} pcs · {v}", { n: rows.length, q: fmt(qty), v: rp(total) })}</span>
+          <Card key={b.bulan}>
+            <button type="button" className="card-hd acc-hd" aria-expanded={onB} onClick={() => toggleBulan(b.bulan)}>
+              <span className="acc-chev">{onB ? "▾" : "▸"}</span>
+              <span className="acc-tgl">{bulanLabel(b.bulan, lang)}</span>
+              <span className="acc-sub">{t("{n} transaksi · {q} pcs · {v}", { n: b.n, q: fmt(b.qty), v: rp(b.total) })}</span>
             </button>
-            {on && (
-              <Scroll>
-                <table>
-                  <thead>
-                    <tr>
-                      <th scope="col">{t("No.")}</th>
-                      <th scope="col">{t("Pelanggan")}</th>
-                      <th scope="col">{t("Gudang")}</th>
-                      <th scope="col">{t("Rincian")}</th>
-                      <th scope="col" className="r">{t("Total")}</th>
-                      <th scope="col">{t("Status")}</th>
-                      <th scope="col" className="r">{t("Aksi")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((s) => (
-                      <tr key={s.id}>
-                        <td className="n strong">{s.no}</td>
-                        <td>{cById(s.pelanggan).nama}<em className="mut2">{t("Grade {g}", { g: cById(s.pelanggan).grade })}</em></td>
-                        <td><span className="chip">{gById(s.gudang).kode}</span></td>
-                        <td className="mut">
-                          {/* tombol, bukan sel yang bisa diklik: tetap terjangkau lewat keyboard */}
-                          <button type="button" className="namelink" title={t("Lihat rincian")} onClick={() => setRinci(s)}>
-                            {s.items.map((i, k) => (
-                              <div key={k}>{pById(i.produk).kode} × {fmt(i.qty)}</div>
-                            ))}
-                          </button>
-                        </td>
-                        <td className="r n strong">{rp(totalSO(s))}</td>
-                        <td><Status s={s.status} map={SO_LABEL} /></td>
-                        <td className="r">
-                          <div className="aksi">
-{/* mundur hanya setelah 'kirim' — membetulkan salah tandai pembayaran */}
-                            {SO_FLOW.indexOf(s.status) > SO_FLOW.indexOf("kirim") && (
-                              <button className="btn sm" title={t("Kembalikan status satu langkah")} onClick={() => mundurSO(s)}>
-                                ← {t(SO_LABEL[SO_FLOW[SO_FLOW.indexOf(s.status) - 1]].id)}
-                              </button>
-                            )}
-                            {s.status !== "lunas" ? (
-                              <button className="btn sm" onClick={() => majuSO(s)}>
-                                → {t(SO_LABEL[SO_FLOW[SO_FLOW.indexOf(s.status) + 1]].id)}
-                              </button>
-                            ) : <span className="mut">{t("selesai")}</span>}
-                            <button className="btn sm" title={t("Cetak dokumen")} onClick={() => setDok(s)}>{t("Cetak")}</button>
-                            {can("delete") && (
-                              <button className="btn sm danger" title={t("Hapus")}
-                                onClick={() => minta(t("Hapus penjualan {no}? Data & mutasi stoknya ikut terhapus.", { no: s.no }), () => doDeletePenjualan(s))}>{t("Hapus")}</button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </Scroll>
-            )}
+            {onB && b.hari.map(({ tgl, rows, total, qty }) => {
+              const onH = hariBuka.has(tgl);
+              return (
+                <div key={tgl} className="acc-hari">
+                  <button type="button" className="acc-hd sub" aria-expanded={onH} onClick={() => toggleHari(tgl)}>
+                    <span className="acc-chev">{onH ? "▾" : "▸"}</span>
+                    <span className="acc-tgl">{hariLabel(tgl, lang)}</span>
+                    <span className="acc-sub">{t("{n} transaksi · {q} pcs · {v}", { n: rows.length, q: fmt(qty), v: rp(total) })}</span>
+                  </button>
+                  {onH && (
+                    <Scroll>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th scope="col">{t("No.")}</th>
+                            <th scope="col">{t("Pelanggan")}</th>
+                            <th scope="col">{t("Gudang")}</th>
+                            <th scope="col">{t("Rincian")}</th>
+                            <th scope="col" className="r">{t("Total")}</th>
+                            <th scope="col">{t("Status")}</th>
+                            <th scope="col" className="r">{t("Aksi")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((s) => (
+                            <tr key={s.id}>
+                              <td className="n strong">{s.no}</td>
+                              <td>{cById(s.pelanggan).nama}<em className="mut2">{t("Grade {g}", { g: cById(s.pelanggan).grade })}</em></td>
+                              <td><span className="chip">{gById(s.gudang).kode}</span></td>
+                              <td className="mut">
+                                {/* tombol, bukan sel yang bisa diklik: tetap terjangkau lewat keyboard */}
+                                <button type="button" className="namelink" title={t("Lihat rincian")} onClick={() => setRinci(s)}>
+                                  {s.items.map((i, k) => (
+                                    <div key={k}>{pById(i.produk).kode} × {fmt(i.qty)}</div>
+                                  ))}
+                                </button>
+                              </td>
+                              <td className="r n strong">{rp(totalSO(s))}</td>
+                              <td><Status s={s.status} map={SO_LABEL} /></td>
+                              <td className="r">
+                                <div className="aksi">
+                                  {/* mundur hanya setelah 'kirim' — membetulkan salah tandai pembayaran */}
+                                  {SO_FLOW.indexOf(s.status) > SO_FLOW.indexOf("kirim") && (
+                                    <button className="btn sm" title={t("Kembalikan status satu langkah")} onClick={() => mundurSO(s)}>
+                                      ← {t(SO_LABEL[SO_FLOW[SO_FLOW.indexOf(s.status) - 1]].id)}
+                                    </button>
+                                  )}
+                                  {s.status !== "lunas" ? (
+                                    <button className="btn sm" onClick={() => majuSO(s)}>
+                                      → {t(SO_LABEL[SO_FLOW[SO_FLOW.indexOf(s.status) + 1]].id)}
+                                    </button>
+                                  ) : <span className="mut">{t("selesai")}</span>}
+                                  <button className="btn sm" title={t("Cetak dokumen")} onClick={() => setDok(s)}>{t("Cetak")}</button>
+                                  {can("delete") && (
+                                    <button className="btn sm danger" title={t("Hapus")}
+                                      onClick={() => minta(t("Hapus penjualan {no}? Data & mutasi stoknya ikut terhapus.", { no: s.no }), () => doDeletePenjualan(s))}>{t("Hapus")}</button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </Scroll>
+                  )}
+                </div>
+              );
+            })}
           </Card>
         );
       })}
@@ -3134,13 +3178,25 @@ function Style() {
    bawaan grid) — inilah penyebab halaman ikut scroll ke samping di layar kecil */
 .vk .grid2>*,.vk .grid3>*,.vk .kpis>*,.vk .card{min-width:0}
 
-/* accordion (Penjualan, dikelompokkan per tanggal) */
+/* accordion dua tingkat (Penjualan: bulan > hari > transaksi) */
 .vk .card-hd.acc-hd{display:flex; align-items:center; gap:10px; width:100%; background:none; border:0;
   border-bottom:1px solid var(--asm-border); cursor:pointer; text-align:left; font:inherit; color:inherit}
+/* tertutup berarti tidak ada isi di bawahnya — garisnya hanya akan berhimpit
+   dengan tepi kartu dan terbaca sebagai garis ganda */
+.vk .card-hd.acc-hd[aria-expanded="false"]{border-bottom:0}
 .vk .card-hd.acc-hd:hover{background:var(--asm-primary-6)}
 .vk .acc-chev{flex:none; width:12px; font-size:11px; color:var(--asm-fg-muted)}
 .vk .acc-tgl{flex:none; font-size:.875rem; font-weight:700}
 .vk .acc-sub{flex:1; font-size:12px; color:var(--asm-fg-muted)}
+/* tingkat kedua: menjorok dan tanpa kartu sendiri, supaya terbaca sebagai isi
+   bulan di atasnya dan bukan kelompok yang sejajar dengannya */
+.vk .acc-hari + .acc-hari{border-top:1px solid var(--asm-border)}
+.vk .acc-hd.sub{display:flex; align-items:center; gap:10px; width:100%; padding:9px 16px 9px 30px;
+  background:none; border:0; cursor:pointer; text-align:left; font:inherit; color:inherit}
+.vk .acc-hd.sub:hover{background:var(--asm-primary-6)}
+.vk .acc-hd.sub .acc-tgl{font-size:.8125rem}
+.vk .acc-hari>.scroll{border-top:1px solid var(--asm-border)}
+.vk .acc-hari:last-child>.scroll{border-radius:0 0 var(--asm-radius-lg) var(--asm-radius-lg)}
 
 /* table (Bab 11 STEP 3) */
 .vk .scroll{overflow:auto; max-width:100%;
