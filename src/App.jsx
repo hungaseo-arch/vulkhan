@@ -2305,11 +2305,7 @@ function GrafBulanan({ data, lang, pilih, onPilih }) {
   const aktif = tip == null ? null : data[tip];
 
   return (
-    <Card cls="graf-card">
-      <div className="graf-hd">
-        <h3>{t("Tren Bulanan")}</h3>
-        <p className="note">{t("Batang = nilai penjualan · garis = kuantitas")}</p>
-      </div>
+    <Card cls="graf-card" title={t("Tren Bulanan")} note={t("Batang = nilai penjualan · garis = kuantitas")}>
       <div className="graf-plot" style={{ height: GRAF_T }}>
         {maxQty > 0 && (
           <svg className="graf-garis" viewBox={`0 0 100 ${GRAF_T}`} preserveAspectRatio="none" aria-hidden="true">
@@ -3934,10 +3930,9 @@ function Style() {
 @media (max-width:1280px){.vk .jual-kpi{grid-template-columns:1fr 1fr}}
 
 /* grafik batang + garis kuantitas, digambar tanpa pustaka grafik */
-.vk .graf-card .card-bd{padding-top:4px}
-.vk .graf-hd{display:flex; align-items:baseline; gap:10px; margin:0 0 6px}
-.vk .graf-hd h3{font-size:13px; font-weight:500}
-.vk .graf-hd .note{font-size:11px; color:var(--asm-fg-muted)}
+/* kepala kartu dan jarak tepi mengikuti kartu lain (12px 16px) — kartu ini
+   tidak boleh terlihat sebagai jenis kotak yang berbeda */
+.vk .graf-card .card-bd{padding:12px 16px}
 .vk .graf-plot{position:relative; display:flex; align-items:flex-end; padding-right:56px}
 .vk .graf-kol{flex:1; min-width:0; display:flex; flex-direction:column; justify-content:flex-end; align-items:center;
   height:100%; background:none; border:0; padding:0; font:inherit; cursor:pointer}
