@@ -32,14 +32,31 @@
 ```bash
 npm install
 
-# 1) API 서버 (터미널 1)
-DATABASE_URL="postgres://..." AUTH_SECRET="긴-비밀문자열" node api-server.js
+# 1) .env.local 에 서버 변수를 넣습니다 (git에 올라가지 않음)
+#    값은 반드시 작은따옴표로 감쌉니다 — 아래 "따옴표 주의" 참고
+DATABASE_URL='postgresql://user:sandi@ep-xxx.aws.neon.tech/neondb?sslmode=require'
+AUTH_SECRET='긴-비밀문자열'
+
+# 2) API 서버 (터미널 1)
+npm run api
 #    → http://localhost:3001/api
 
-# 2) 프런트엔드 (터미널 2)
+# 3) 프런트엔드 (터미널 2)
 npm run dev
 #    → http://localhost:5173
 ```
+
+#### 따옴표 주의
+
+로컬 연결 실패의 대부분은 비밀번호가 조용히 변형되어 생깁니다.
+
+- zsh에서 `DATABASE_URL="...pa$$wd..."` 처럼 큰따옴표를 쓰면 `$$`가 셸 PID로 치환되어
+  `password authentication failed for user ...`가 납니다. 작은따옴표를 쓰세요.
+- `.env.local`에서도 따옴표 없이 적으면 Node의 `--env-file` 파서가 `#` 뒤를 주석으로
+  잘라냅니다. 값 전체를 작은따옴표로 감싸야 안전합니다.
+
+`npm run api`는 `node --env-file=.env.local api-server.js`입니다. 셸을 거치지 않으므로
+따옴표 사고를 피할 수 있습니다.
 
 개발 모드에서 프런트는 `http://localhost:3001/api`를 호출합니다. 다른 주소를 쓰려면
 `VITE_API_URL`을 설정하세요. 프로덕션 빌드는 같은 도메인의 `/api`를 호출합니다.
@@ -62,7 +79,7 @@ npm run dev
 아래 스크립트로 직접 만듭니다.
 
 ```bash
-export DATABASE_URL="postgres://..."
+export DATABASE_URL='postgresql://...'   # 작은따옴표
 npm run buat-admin -- <username>              # admin 생성 또는 비밀번호 리셋
 npm run buat-admin -- <username> --peran staff
 node scripts/buat-admin.mjs --list

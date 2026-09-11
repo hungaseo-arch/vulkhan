@@ -121,7 +121,7 @@ Noto Sans KR을 붙이는 방법이 있습니다.
 1. `cors` — `CORS_ORIGIN` 목록. Vercel에서는 same-origin이라 사실상 로컬 개발용
 2. `express.json`
 3. 인증 게이트 — `/api/login`, `/api/health`를 제외한 모든 경로에 `requireRole("staff")`
-4. `ensureReady` — 콜드스타트마다 1회 `pengguna` 테이블 보장 + 기본 계정 시드 + 관리자 복구
+4. `ensureReady` — 콜드스타트마다 1회 `pengguna`·`limit_usulan` 테이블 보장 + 기본 계정 시드 + 관리자 복구
 
 ### 인증
 
@@ -142,11 +142,15 @@ Noto Sans KR을 붙이는 방법이 있습니다.
 | GET `/api/mutasi` | 최근 500건, 오름차순 | 표시 전용 |
 | POST `/api/mutasi/transfer` | 창고 이동 | 재고 확인 후 INSERT 2건 트랜잭션 |
 | POST `/api/mutasi/penyesuaian` | 실사 조정 | 차이분 1건 INSERT |
+| GET/POST `/api/mutasi/saldo-awal` | 기초재고 | 저장은 manager. `ref='AWAL'` 한 줄로 기록, 재저장 시 교체 |
 | GET/POST `/api/penjualan`, PATCH `/:id/status`, DELETE `/:id` | 판매 | 생성·삭제는 트랜잭션, 삭제는 manager |
 | GET/POST `/api/pembelian`, PATCH `/:id/status`, DELETE `/:id` | 구매 | 동일 |
 | POST `/api/pelanggan`, DELETE `/:id` | 고객 | 판매 이력이 있으면 삭제 거부 |
-| GET/POST/DELETE `/api/pengguna` | 사용자 | admin. 본인 삭제 불가 |
+| GET/POST/PUT/DELETE `/api/pengguna` | 사용자 | admin. 본인 삭제·본인 역할 변경·마지막 admin 강등 불가 |
+| POST `/api/pengguna/:id/reset-sandi` | 비밀번호 초기화 | admin. `ascendo123`으로. 본인은 제외 |
 | POST `/api/ganti-sandi` | 비밀번호 변경 | 토큰의 id로만 |
+| GET/POST `/api/limit-usulan` | 여신한도 기안 | 기안은 staff 이상. 대기 건 중복이면 409 |
+| POST `/api/limit-usulan/:id/putusan` | 여신한도 확정 | admin. 승인 시 한도 반영까지 한 트랜잭션 |
 
 ### 트랜잭션
 
@@ -161,9 +165,10 @@ HTTP 요청에 실어 원자적으로 실행합니다. 비대화형이라 중간
 | 테이블 | 요지 |
 |---|---|
 | `gudang`, `produk`, `pelanggan`, `pemasok`, `pengguna` | 마스터. id는 텍스트(`G1`, `P12`, `C3`, `U1`) |
-| `stok_mutasi` | 재고 원장. `tipe ∈ {masuk, keluar, transfer, penyesuaian}`, `qty` 부호 포함, `ref`에 전표 번호 |
+| `stok_mutasi` | 재고 원장. `tipe ∈ {masuk, keluar, transfer, penyesuaian}`, `qty` 부호 포함, `ref`에 전표 번호. `ref='AWAL'`은 기초재고(창고·품목당 1행, 재저장 시 교체) |
 | `penjualan` + `penjualan_item` | SO 헤더/항목 |
 | `pembelian` + `pembelian_item` | PO 헤더/항목 |
+| `limit_usulan` | 여신한도 기안. 대기 건은 고객당 하나(부분 유니크 인덱스). 기안자/확정자는 FK가 아니라 이름 스냅샷 |
 
 | 뷰 · 트리거 | 역할 |
 |---|---|

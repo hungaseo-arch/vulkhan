@@ -175,6 +175,9 @@ const PO_LABEL = {
 
 /* ---------- hak akses (RBAC 3 tingkat) ---------- */
 const RANK = { staff: 1, manager: 2, admin: 3 };
+// Status usulan limit kredit — harus sama dengan CHECK di tabel limit_usulan.
+const USULAN_LABEL = { menunggu: "Menunggu", disetujui: "Disetujui", ditolak: "Ditolak" };
+
 const ROLE_LABEL = {
   admin:   { id: "Admin", desc: "Akses penuh" },
   manager: { id: "Manajer", desc: "+ Hapus" },
@@ -271,7 +274,7 @@ function Aplikasi() {
     try { return JSON.parse(localStorage.getItem("vk_user")) || null; } catch { return null; }
   });
   const [konfirmasi, setKonfirmasi] = useState(null); // { msg, onYes }
-  const minta = (msg, onYes) => setKonfirmasi({ msg, onYes });
+  const minta = (msg, onYes, opsi) => setKonfirmasi({ msg, onYes, ...opsi });
   const [gantiSandi, setGantiSandi] = useState(false); // modal ganti kata sandi
 
   useEffect(() => { api.setToken(user?.token || null); }, [user]);
@@ -285,7 +288,7 @@ function Aplikasi() {
   const can = (perm) => {
     if (!user) return false;
     if (perm === "delete") return RANK[user.peran] >= RANK.manager;
-    if (perm === "users") return user.peran === "admin";
+    if (perm === "users" || perm === "putusan") return user.peran === "admin";
     return true; // input & ubah: semua peran yang login
   };
 
@@ -405,6 +408,24 @@ function Aplikasi() {
     } catch (e) { say(e.message, true); }
   }
 
+  // Mundur satu langkah untuk membetulkan salah tandai pembayaran
+  // (lunas → tagihan). Server hanya mengizinkan mundur setelah 'kirim',
+  // jadi mutasi stok yang sudah tercatat tidak pernah ikut berubah.
+  async function mundurSO(so) {
+    const i = SO_FLOW.indexOf(so.status);
+    if (i <= SO_FLOW.indexOf("kirim")) return;
+    const prev = SO_FLOW[i - 1];
+    try {
+      if (online) {
+        await api.statusPenjualan(so.id, prev);
+        await reload();
+      } else {
+        setPenjualan((list) => list.map((x) => (x.id === so.id ? { ...x, status: prev } : x)));
+      }
+      say(`${so.no} → ${t(SO_LABEL[prev].id)}`);
+    } catch (e) { say(e.message, true); }
+  }
+
   async function majuPO(po) {
     const i = PO_FLOW.indexOf(po.status);
     if (i >= PO_FLOW.length - 1) return;
@@ -419,6 +440,21 @@ function Aplikasi() {
         setPembelian((list) => list.map((x) => (x.id === po.id ? { ...x, status: next } : x)));
       }
       say(`${po.no} → ${t(PO_LABEL[next].id)}`);
+    } catch (e) { say(e.message, true); }
+  }
+
+  async function mundurPO(po) {
+    const i = PO_FLOW.indexOf(po.status);
+    if (i <= PO_FLOW.indexOf("diterima")) return;
+    const prev = PO_FLOW[i - 1];
+    try {
+      if (online) {
+        await api.statusPembelian(po.id, prev);
+        await reload();
+      } else {
+        setPembelian((list) => list.map((x) => (x.id === po.id ? { ...x, status: prev } : x)));
+      }
+      say(`${po.no} → ${t(PO_LABEL[prev].id)}`);
     } catch (e) { say(e.message, true); }
   }
 
@@ -437,6 +473,15 @@ function Aplikasi() {
     else addMutasi([{ tgl: today(), gudang: p.gudang, produk: p.produk, tipe: "penyesuaian", qty: p.selisih, ref: "ADJ", catatan: p.catatan || "Hasil stok opname" }]);
     if (online) await reload();
     say(t("Penyesuaian tercatat."));
+  }
+
+  // Saldo awal hanya online: angka yang disimpan MENGGANTI baris AWAL lama,
+  // jadi klien harus tahu keadaan server — tidak bisa diantre offline.
+  async function doSaldoAwal(p) {
+    if (!online) { say(t("Saldo awal hanya tersedia saat online."), true); return; }
+    const r = await api.simpanSaldoAwal(p);
+    await reload();
+    say(t("Saldo awal {n} barang tersimpan.", { n: r.ditulis }));
   }
 
   async function doCreatePenjualan(so) {
@@ -479,9 +524,9 @@ function Aplikasi() {
   const ctx = {
     produk, pelanggan, pemasok, mutasi, mutasiLimit, penjualan, pembelian,
     getStok, stokTotal, pById, cById, gById, sById, totalSO,
-    piutang, piutangTotal, majuSO, majuPO, say, online,
-    doTransfer, doAdjust, doCreatePenjualan, doCreatePembelian, doCreatePelanggan,
-    user, can, minta, doDeletePenjualan, doDeletePembelian, doDeletePelanggan,
+    piutang, piutangTotal, majuSO, mundurSO, majuPO, mundurPO, say, online,
+    doTransfer, doAdjust, doSaldoAwal, doCreatePenjualan, doCreatePembelian, doCreatePelanggan,
+    user, can, minta, doDeletePenjualan, doDeletePembelian, doDeletePelanggan, reload,
   };
 
   const TABS = [
@@ -640,8 +685,8 @@ function useDialog(close) {
   return box;
 }
 
-/* konfirmasi hapus */
-function Konfirmasi({ msg, onYes, close, say }) {
+/* konfirmasi tindakan — bawaannya hapus; tajuk & label bisa diganti lewat minta() */
+function Konfirmasi({ msg, onYes, close, say, tajuk, labelAksi }) {
   const { t } = useLang();
   const [busy, setBusy] = useState(false);
   const box = useDialog(close);
@@ -657,13 +702,13 @@ function Konfirmasi({ msg, onYes, close, say }) {
       <div className="md" style={{ maxWidth: 380 }} ref={box} role="dialog" aria-modal="true" aria-labelledby={judul}
         onClick={(e) => e.stopPropagation()}>
         <div className="md-hd">
-          <h3 id={judul}>{t("Konfirmasi Hapus")}</h3>
+          <h3 id={judul}>{tajuk || t("Konfirmasi Hapus")}</h3>
           <button className="x" onClick={close} aria-label={t("Tutup dialog")}>×</button>
         </div>
         <div className="md-bd">{msg}</div>
         <div className="md-ft">
           <button className="btn" onClick={close}>{t("Batal")}</button>
-          <button className="btn danger" onClick={ya} disabled={busy}>{busy ? "…" : t("Hapus")}</button>
+          <button className="btn danger" onClick={ya} disabled={busy}>{busy ? "…" : labelAksi || t("Hapus")}</button>
         </div>
       </div>
     </div>
@@ -699,10 +744,16 @@ function GantiSandi({ close, say, online }) {
 }
 
 /* ============================ PENGGUNA (admin) ============================ */
+// Sandi yang dipasang server saat admin mereset akun. Ditampilkan di layar
+// supaya admin bisa menyampaikannya ke pengguna. Digandakan dari SANDI_AWAL di
+// api-server.js — kalau diubah, ubah keduanya bersamaan.
+const SANDI_AWAL = "ascendo123";
+
 function PenggunaAdmin({ online, say, user, minta }) {
   const { t } = useLang();
   const [users, setUsers] = useState(null);
   const [buka, setBuka] = useState(false);
+  const [ubah, setUbah] = useState(null); // pengguna yang sedang diubah
   const load = async () => {
     if (online) { try { setUsers(await api.listPengguna()); } catch (e) { setUsers([]); say(e.message, true); } }
     else setUsers([]);
@@ -712,6 +763,23 @@ function PenggunaAdmin({ online, say, user, minta }) {
     if (!online) return say(t("Tambah pengguna hanya tersedia saat online."), true);
     await api.createPengguna(u); await load();
     say(t("Pengguna {u} ditambahkan.", { u: u.username }));
+  };
+  const simpanUbah = async (u) => {
+    if (!online) return say(t("Ubah pengguna hanya tersedia saat online."), true);
+    await api.updatePengguna(u.id, { nama: u.nama, peran: u.peran }); await load();
+    say(t("Pengguna {u} diperbarui.", { u: u.username }));
+  };
+  // Reset tidak mengubah kolom yang ditampilkan, jadi tidak perlu load() ulang.
+  const reset = (u) => {
+    if (!online) return say(t("Reset kata sandi hanya tersedia saat online."), true);
+    minta(
+      t('Reset kata sandi "{u}" menjadi {s}? Pengguna harus menggantinya setelah masuk.', { u: u.username, s: SANDI_AWAL }),
+      async () => {
+        const r = await api.resetSandi(u.id);
+        say(t("Kata sandi {u} direset menjadi {s}.", { u: u.username, s: r.sandi }));
+      },
+      { tajuk: t("Konfirmasi Reset Kata Sandi"), labelAksi: t("Reset") },
+    );
   };
   const hapus = (u) => {
     if (!online) return say(t("Hapus pengguna hanya tersedia saat online."), true);
@@ -731,7 +799,11 @@ function PenggunaAdmin({ online, say, user, minta }) {
         ))}
       </div>
       <Card title={t("Daftar Pengguna")}
-        note={t("admin: akses penuh · manager: + hapus · staff: input & ubah")}>
+        note={<>
+          {t("admin: akses penuh · manager: + hapus · staff: input & ubah")}<br />
+          {t("Klik baris untuk mengubah nama dan peran.")}<br />
+          {t("Kata sandi awal setelah reset: {s}", { s: SANDI_AWAL })}
+        </>}>
         <Scroll>
           <table>
             <thead>
@@ -744,14 +816,23 @@ function PenggunaAdmin({ online, say, user, minta }) {
             </thead>
             <tbody>
               {(users || []).map((u) => (
-                <tr key={u.id}>
-                  <td className="n strong">{u.username}</td>
+                /* Seluruh baris membuka dialog ubah. Tombol di kolom Aksi punya
+                   aksinya sendiri, jadi kliknya tidak boleh menembus ke baris. */
+                <tr key={u.id} className="klik" onClick={() => setUbah(u)}>
+                  <td className="n strong">
+                    <button type="button" className="namelink">{u.username}</button>
+                  </td>
                   <td>{u.nama}</td>
                   <td><span className={"role r-" + u.peran}>{t(ROLE_LABEL[u.peran].id)}</span></td>
-                  <td className="r">
-                    {u.id === user?.id
-                      ? <span className="mut2">{t("Akun Anda")}</span>
-                      : <button className="btn danger sm" onClick={() => hapus(u)}>{t("Hapus")}</button>}
+                  <td className="r" onClick={(e) => e.stopPropagation()}>
+                    <div className="aksi">
+                      {u.id === user?.id
+                        ? <span className="mut2">{t("Akun Anda")}</span>
+                        : <>
+                            <button className="btn sm" onClick={() => reset(u)}>{t("Reset Sandi")}</button>
+                            <button className="btn danger sm" onClick={() => hapus(u)}>{t("Hapus")}</button>
+                          </>}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -762,28 +843,40 @@ function PenggunaAdmin({ online, say, user, minta }) {
         </Scroll>
       </Card>
       {buka && <FormPengguna close={() => setBuka(false)} say={say} submit={tambah} />}
+      {ubah && <FormPengguna close={() => setUbah(null)} say={say} submit={simpanUbah} awal={ubah} sendiri={ubah.id === user?.id} />}
     </>
   );
 }
 
-function FormPengguna({ close, say, submit }) {
+// Dipakai untuk dua hal: membuat akun baru, dan mengubah akun yang ada bila
+// `awal` diisi. Saat mengubah, username dikunci (jadi acuan login & riwayat)
+// dan kolom sandi disembunyikan — sandi diganti lewat Reset Sandi / Ganti Kata
+// Sandi. `sendiri` mengunci peran, mencerminkan penjagaan yang sama di server.
+function FormPengguna({ close, say, submit, awal, sendiri }) {
   const { t } = useLang();
-  const [f, setF] = useState({ username: "", nama: "", peran: "staff", sandi: "" });
+  const edit = !!awal;
+  const [f, setF] = useState({
+    username: awal?.username || "", nama: awal?.nama || "", peran: awal?.peran || "staff", sandi: "",
+  });
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
   const kirim = async () => {
-    if (!f.username.trim() || !f.nama.trim() || !f.sandi) return say(t("Lengkapi semua kolom."), true);
+    if (!f.username.trim() || !f.nama.trim() || (!edit && !f.sandi)) return say(t("Lengkapi semua kolom."), true);
     try {
-      await submit({ id: uid("U"), username: f.username.trim(), nama: f.nama.trim(), peran: f.peran, sandi: f.sandi });
+      await submit(edit
+        ? { id: awal.id, username: awal.username, nama: f.nama.trim(), peran: f.peran }
+        : { id: uid("U"), username: f.username.trim(), nama: f.nama.trim(), peran: f.peran, sandi: f.sandi });
       close();
     } catch (e) { say(e.message, true); }
   };
   return (
-    <Modal title={t("Pengguna Baru")} close={close} onSave={kirim} saveLabel={t("Simpan")}>
-      <Inp label={t("Username")} value={f.username} onChange={set("username")} />
+    <Modal title={edit ? t("Ubah Pengguna") : t("Pengguna Baru")} close={close} onSave={kirim} saveLabel={t("Simpan")}>
+      <Inp label={t("Username")} value={f.username} onChange={set("username")} disabled={edit}
+        hint={edit ? t("Username tidak bisa diubah.") : undefined} />
       <Inp label={t("Nama Lengkap")} value={f.nama} onChange={set("nama")} />
-      <Sel label={t("Peran")} value={f.peran} onChange={set("peran")}
+      <Sel label={t("Peran")} value={f.peran} onChange={set("peran")} disabled={sendiri}
+        hint={sendiri ? t("Peran akun sendiri tidak bisa diubah.") : undefined}
         opts={[["staff", t("Staf — input & ubah")], ["manager", t("Manajer — + hapus")], ["admin", t("Admin — akses penuh")]]} />
-      <Inp label={t("Kata Sandi")} type="password" value={f.sandi} onChange={set("sandi")} />
+      {!edit && <Inp label={t("Kata Sandi")} type="password" value={f.sandi} onChange={set("sandi")} />}
     </Modal>
   );
 }
@@ -975,7 +1068,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
 /* ============================ STOK ============================ */
 const MUTASI_PAGE = 50;
 
-function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, doTransfer, doAdjust, say }) {
+function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, doTransfer, doAdjust, doSaldoAwal, online, say }) {
   const { t } = useLang();
   const [g, setG] = useState("ALL");
   const [kat, setKat] = useState("ALL");
@@ -1021,6 +1114,7 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
         <button className="btn" onClick={unduhExcel}>↓ Excel</button>
         <button className="btn" onClick={() => setModal("transfer")}>{t("Transfer Antar Gudang")}</button>
         <button className="btn" onClick={() => setModal("adjust")}>{t("Penyesuaian Stok")}</button>
+        <button className="btn" onClick={() => setModal("awal")}>{t("Saldo Awal")}</button>
       </SectionTitle>
 
       <Card>
@@ -1094,7 +1188,7 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
                   <td className="n">{m.tgl}</td>
                   <td><span className="chip">{gById(m.gudang).kode}</span></td>
                   <td>{pById(m.produk).nama}</td>
-                  <td><Tag t={m.tipe} /></td>
+                  <td><Tag t={m.ref === "AWAL" ? "awal" : m.tipe} /></td>
                   <td className={"r n " + (m.qty < 0 ? "bad" : "ok")}>{m.qty > 0 ? "+" : ""}{fmt(m.qty)}</td>
                   <td className="mut">{m.ref}{m.catatan ? " — " + m.catatan : ""}</td>
                 </tr>
@@ -1118,6 +1212,7 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
 
       {modal === "transfer" && <FormTransfer produk={produk} getStok={getStok} submit={doTransfer} say={say} close={() => setModal(null)} />}
       {modal === "adjust" && <FormAdjust produk={produk} getStok={getStok} submit={doAdjust} say={say} close={() => setModal(null)} />}
+      {modal === "awal" && <FormSaldoAwal produk={produk} getStok={getStok} submit={doSaldoAwal} online={online} say={say} close={() => setModal(null)} />}
       {detail && <DetailProduk p={detail} getStok={getStok} stokTotal={stokTotal} close={() => setDetail(null)} />}
     </>
   );
@@ -1173,6 +1268,142 @@ function FormAdjust({ produk, getStok, submit, say, close }) {
         {t("Selisih")} <b className={selisih < 0 ? "bad" : selisih > 0 ? "ok" : ""}>{selisih > 0 ? "+" : ""}{fmt(selisih)}</b>
       </div>
       <Inp label={t("Catatan")} value={f.catatan} onChange={set("catatan")} />
+    </Modal>
+  );
+}
+
+/* Saldo awal (기초재고) — stok pembukaan sebelum sistem ini dipakai.
+   Diisi sekaligus untuk satu gudang: angka yang dimasukkan adalah saldo
+   PEMBUKAAN, bukan stok sekarang. Stok berjalan = saldo awal + seluruh
+   masuk/keluar sesudahnya, jadi transaksi yang sudah tercatat tidak hilang
+   ketika angka pembukaan akhirnya diisi.
+
+   Menyimpan ulang mengganti baris AWAL yang lama (lihat api-server.js), jadi
+   salah ketik cukup diperbaiki dengan menyimpan lagi. */
+function FormSaldoAwal({ produk, getStok, submit, online, say, close }) {
+  const { t } = useLang();
+  const [gudang, setGudang] = useState("");
+  const [tgl, setTgl] = useState(today());
+  const [cari, setCari] = useState("");
+  const [awal, setAwal] = useState(null);   // { [produk]: qty } dari server
+  const [isi, setIsi] = useState({});       // yang sedang diketik
+  const [catatan, setCatatan] = useState("");
+
+  // Baris AWAL yang sudah ada dibaca ulang tiap ganti gudang supaya kolom
+  // menampilkan angka pembukaan yang benar-benar tersimpan, bukan stok berjalan.
+  useEffect(() => {
+    if (!gudang || !online) { setAwal(null); setIsi({}); return; }
+    let batal = false;
+    setAwal(null);
+    api.saldoAwal(gudang)
+      .then((rows) => {
+        if (batal) return;
+        const peta = {};
+        for (const r of rows) peta[r.produk] = Number(r.qty);
+        setAwal(peta);
+        setIsi({});
+      })
+      .catch((e) => { if (!batal) { setAwal({}); say(e.message, true); } });
+    return () => { batal = true; };
+  }, [gudang, online]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const q = cari.trim().toLowerCase();
+  const list = produk.filter((p) =>
+    !q || [p.kode, p.nama, p.ukuran].some((v) => String(v ?? "").toLowerCase().includes(q)));
+
+  const nilai = (id) => (isi[id] !== undefined ? isi[id] : awal?.[id] != null ? String(awal[id]) : "");
+  // Hanya barang yang angkanya berubah yang dikirim — menghemat baris mutasi
+  // dan membuat "simpan" tidak menyentuh barang yang tidak disunting.
+  const berubah = Object.entries(isi).filter(([id, v]) => {
+    if (v === "") return false;
+    const lama = awal?.[id] ?? 0;
+    return Number(v) !== Number(lama);
+  });
+
+  // Menolkan stok berjalan: stok = saldo awal + seluruh mutasi sesudahnya, jadi
+  // saldo awal yang membuat stok jadi 0 adalah (saldo lama − stok berjalan).
+  // Nilainya boleh negatif — itu yang menghapus stok yang terlanjur positif,
+  // sebagaimana nilai positif menutup stok yang terlanjur minus.
+  const nolkan = () => {
+    const isiBaru = {};
+    for (const p of produk) {
+      const lama = awal?.[p.id] ?? 0;
+      const target = lama - getStok(gudang, p.id);
+      if (target !== lama) isiBaru[p.id] = String(target);
+    }
+    setIsi((x) => ({ ...x, ...isiBaru }));
+    setCari(""); // tampilkan semua baris supaya hasilnya bisa diperiksa dulu
+  };
+
+  const simpan = async () => {
+    if (!online) return say(t("Saldo awal hanya tersedia saat online."), true);
+    if (!gudang) return say(t("Pilih gudang terlebih dahulu."), true);
+    if (!berubah.length) return say(t("Tidak ada saldo awal yang diubah."), true);
+    const salah = berubah.find(([, v]) => !Number.isFinite(Number(v)));
+    if (salah) return say(t("Saldo awal harus berupa angka."), true);
+    try {
+      await submit({
+        gudang, tgl, catatan,
+        items: berubah.map(([produk, qty]) => ({ produk, qty: Number(qty) })),
+      });
+      close();
+    } catch (e) { say(e.message, true); }
+  };
+
+  return (
+    <Modal title={t("Saldo Awal")} close={close} onSave={simpan} wide>
+      <p className="mut2">{t("Angka yang diisi adalah stok PEMBUKAAN. Masuk dan keluar yang sudah tercatat tetap dihitung di atasnya.")}</p>
+      <Combo label={t("Gudang")} value={gudang} onChange={setGudang} placeholder={t("-- Pilih Gudang --")}
+        opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+      <label className="fld">
+        <span className="lbl">{t("Tanggal")}</span>
+        <Tgl value={tgl} onChange={setTgl} />
+      </label>
+      <label className="fld cari">
+        <span className="lbl">{t("Cari")}</span>
+        <input type="search" value={cari} onChange={(e) => setCari(e.target.value)} placeholder={t("Kode / nama / ukuran")} />
+      </label>
+
+      {gudang && awal !== null && (
+        <div className="aksi awal-aksi">
+          <button type="button" className="btn sm" onClick={nolkan}>{t("Jadikan stok berjalan 0")}</button>
+          <span className="mut2">{t("Hanya gudang yang dipilih. Periksa kolom Saldo Awal sebelum menyimpan.")}</span>
+        </div>
+      )}
+
+      {!gudang && <Empty id={t("Pilih gudang terlebih dahulu.")} />}
+      {gudang && awal === null && <Empty id={t("Memuat…")} />}
+      {gudang && awal !== null && (
+        <Scroll max={320}>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">{t("Kode")}</th>
+                <th scope="col">{t("Nama Barang")}</th>
+                <th scope="col" className="r">{t("Stok Berjalan")}</th>
+                <th scope="col" className="r">{t("Saldo Awal")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((p) => (
+                <tr key={p.id}>
+                  <td><span className="chip">{p.kode}</span></td>
+                  <td>{p.nama}</td>
+                  <td className="r n mut">{fmt(getStok(gudang, p.id))}</td>
+                  <td className="r">
+                    <input className="qty" type="number" inputMode="numeric" value={nilai(p.id)}
+                      aria-label={t("Saldo awal {nama}", { nama: p.nama })}
+                      onChange={(e) => setIsi((x) => ({ ...x, [p.id]: e.target.value }))} />
+                  </td>
+                </tr>
+              ))}
+              {list.length === 0 && <tr><td colSpan={4}><Empty id={t("Tidak ditemukan")} /></td></tr>}
+            </tbody>
+          </table>
+        </Scroll>
+      )}
+      <Inp label={t("Catatan")} value={catatan} onChange={setCatatan} />
+      <div className="delta">{t("{n} barang akan disimpan", { n: berubah.length })}</div>
     </Modal>
   );
 }
@@ -1239,8 +1470,8 @@ function DetailProduk({ p, getStok, stokTotal, close }) {
 }
 
 /* ============================ PENJUALAN ============================ */
-function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cById, gById, totalSO, majuSO, getStok, piutang, say, can, minta, doDeletePenjualan }) {
-  const { t, lang } = useLang();
+function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cById, gById, totalSO, majuSO, mundurSO, getStok, piutang, say, can, minta, doDeletePenjualan }) {
+  const { t } = useLang();
   const [buka, setBuka] = useState(false);
   const [dok, setDok] = useState(null);
   const [dari, setDari] = useState("");
@@ -1299,11 +1530,11 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
           <div className="filters">
             <label className="fld">
               <span className="lbl">{t("Dari")}</span>
-              <input type="date" lang={lang === "ko" ? "ko-KR" : "id-ID"} value={dari} onChange={(e) => setDari(e.target.value)} max={sampai || undefined} />
+              <Tgl value={dari} onChange={setDari} max={sampai || undefined} />
             </label>
             <label className="fld">
               <span className="lbl">{t("Sampai")}</span>
-              <input type="date" lang={lang === "ko" ? "ko-KR" : "id-ID"} value={sampai} onChange={(e) => setSampai(e.target.value)} min={dari || undefined} />
+              <Tgl value={sampai} onChange={setSampai} min={dari || undefined} />
             </label>
             <label className="fld cari">
               <span className="lbl">{t("Pelanggan")}</span>
@@ -1366,6 +1597,12 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
                         <td><Status s={s.status} map={SO_LABEL} /></td>
                         <td className="r">
                           <div className="aksi">
+{/* mundur hanya setelah 'kirim' — membetulkan salah tandai pembayaran */}
+                            {SO_FLOW.indexOf(s.status) > SO_FLOW.indexOf("kirim") && (
+                              <button className="btn sm" title={t("Kembalikan status satu langkah")} onClick={() => mundurSO(s)}>
+                                ← {t(SO_LABEL[SO_FLOW[SO_FLOW.indexOf(s.status) - 1]].id)}
+                              </button>
+                            )}
                             {s.status !== "lunas" ? (
                               <button className="btn sm" onClick={() => majuSO(s)}>
                                 → {t(SO_LABEL[SO_FLOW[SO_FLOW.indexOf(s.status) + 1]].id)}
@@ -1631,8 +1868,8 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
 }
 
 /* ============================ PEMBELIAN ============================ */
-function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById, gById, majuPO, say, can, minta, doDeletePembelian }) {
-  const { t, lang } = useLang();
+function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById, gById, majuPO, mundurPO, say, can, minta, doDeletePembelian }) {
+  const { t } = useLang();
   const [buka, setBuka] = useState(false);
   const [dari, setDari] = useState("");
   const [sampai, setSampai] = useState("");
@@ -1673,11 +1910,11 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
           <div className="filters">
             <label className="fld">
               <span className="lbl">{t("Dari")}</span>
-              <input type="date" lang={lang === "ko" ? "ko-KR" : "id-ID"} value={dari} onChange={(e) => setDari(e.target.value)} max={sampai || undefined} />
+              <Tgl value={dari} onChange={setDari} max={sampai || undefined} />
             </label>
             <label className="fld">
               <span className="lbl">{t("Sampai")}</span>
-              <input type="date" lang={lang === "ko" ? "ko-KR" : "id-ID"} value={sampai} onChange={(e) => setSampai(e.target.value)} min={dari || undefined} />
+              <Tgl value={sampai} onChange={setSampai} min={dari || undefined} />
             </label>
             {filterAktif && <button className="btn sm" onClick={() => { setDari(""); setSampai(""); }}>{t("Reset Filter")}</button>}
           </div>
@@ -1758,6 +1995,12 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
                   <td><Status s={p.status} map={PO_LABEL} /></td>
                   <td className="r">
                     <div className="aksi">
+{/* mundur hanya setelah 'diterima' — membetulkan salah tandai pembayaran */}
+                      {PO_FLOW.indexOf(p.status) > PO_FLOW.indexOf("diterima") && (
+                        <button className="btn sm" title={t("Kembalikan status satu langkah")} onClick={() => mundurPO(p)}>
+                          ← {t(PO_LABEL[PO_FLOW[PO_FLOW.indexOf(p.status) - 1]].id)}
+                        </button>
+                      )}
                       {p.status !== "lunas" ? (
                         <button className="btn sm" onClick={() => majuPO(p)}>→ {t(PO_LABEL[PO_FLOW[PO_FLOW.indexOf(p.status) + 1]].id)}</button>
                       ) : <span className="mut">{t("selesai")}</span>}
@@ -1843,11 +2086,35 @@ function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
 }
 
 /* ============================ PELANGGAN ============================ */
-function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, gById, pById, say, can, minta, doDeletePelanggan }) {
+function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, gById, pById, say, can, minta, doDeletePelanggan, online, reload }) {
   const { t } = useLang();
   const [buka, setBuka] = useState(false);
   const [detail, setDetail] = useState(null);
   const [cari, setCari] = useState("");
+  // Usulan limit dimuat terpisah dari /bootstrap: hanya layar ini yang memakainya.
+  const [usulan, setUsulan] = useState(null);
+  const [usul, setUsul] = useState(null);       // pelanggan yang sedang diusulkan
+  const [putusan, setPutusan] = useState(null); // usulan yang sedang diputuskan
+
+  const muatUsulan = async () => {
+    if (!online) return setUsulan([]);
+    try { setUsulan(await api.listUsulan()); } catch (e) { setUsulan([]); say(e.message, true); }
+  };
+  useEffect(() => { muatUsulan(); }, [online]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const ajukan = async (u) => {
+    if (!online) return say(t("Usulan limit hanya tersedia saat online."), true);
+    await api.createUsulan(u); await muatUsulan();
+    say(t("Usulan limit dikirim, menunggu persetujuan admin."));
+  };
+  // Persetujuan mengubah limit di tabel pelanggan, jadi data utama ikut dimuat ulang.
+  const putuskan = async (id, hasil, catatan) => {
+    if (!online) return say(t("Putusan usulan hanya tersedia saat online."), true);
+    await api.putusanUsulan(id, hasil, catatan);
+    await Promise.all([muatUsulan(), reload()]);
+    say(hasil === "disetujui" ? t("Usulan disetujui, limit kredit diperbarui.") : t("Usulan ditolak."));
+  };
+  const menunggu = (usulan || []).filter((u) => u.status === "menunggu");
   const omzet = (cid) => penjualan.filter((s) => s.pelanggan === cid && s.status !== "penawaran").reduce((a, s) => a + totalSO(s), 0);
   const list = useMemo(() => {
     const q = cari.trim().toLowerCase();
@@ -1880,6 +2147,45 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
         <button className="btn pri" onClick={() => setBuka(true)}>{t("+ Pelanggan Baru")}</button>
       </SectionTitle>
 
+      {usulan !== null && (menunggu.length > 0 || can("putusan")) && (
+        <Card title={t("Usulan Limit Kredit")}
+          note={t("Diajukan oleh petugas, disahkan oleh admin. Limit berubah hanya setelah disetujui.")}>
+          <Scroll max={260}>
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">{t("Pelanggan")}</th>
+                  <th scope="col" className="r">{t("Limit Sekarang")}</th>
+                  <th scope="col" className="r">{t("Usulan")}</th>
+                  <th scope="col">{t("Alasan")}</th>
+                  <th scope="col">{t("Pengaju")}</th>
+                  <th scope="col">{t("Status")}</th>
+                  <th scope="col" className="r">{t("Aksi")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(usulan || []).map((u) => (
+                  <tr key={u.id}>
+                    <td><span className="chip">{u.pelanggan_kode}</span> {u.pelanggan_nama}</td>
+                    <td className="r n mut">{rp(Number(u.limit_lama))}</td>
+                    <td className="r n strong">{rp(Number(u.limit_baru))}</td>
+                    <td className="mut">{u.alasan || "—"}</td>
+                    <td className="mut">{u.pengusul_nama}<em className="mut2">{String(u.diusulkan).slice(0, 10)}</em></td>
+                    <td><span className={"role u-" + u.status}>{t(USULAN_LABEL[u.status])}</span></td>
+                    <td className="r">
+                      {u.status === "menunggu" && can("putusan")
+                        ? <button className="btn sm pri" onClick={() => setPutusan(u)}>{t("Putuskan")}</button>
+                        : <span className="mut2">{u.penentu_nama || "—"}</span>}
+                    </td>
+                  </tr>
+                ))}
+                {(usulan || []).length === 0 && <tr><td colSpan={7}><Empty id={t("Belum ada usulan limit.")} /></td></tr>}
+              </tbody>
+            </table>
+          </Scroll>
+        </Card>
+      )}
+
       <Card>
         <Scroll>
           <table>
@@ -1893,7 +2199,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
                 <th scope="col" className="r">{t("Piutang")}</th>
                 <th scope="col" className="r">{t("Limit Kredit")}</th>
                 <th scope="col" className="r">{t("Omzet")}</th>
-                {can("delete") && <th scope="col" className="r">{t("Aksi")}</th>}
+                <th scope="col" className="r">{t("Aksi")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1913,12 +2219,15 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
                     <td className={"r n strong " + (lewat ? "bad" : "")}>{rp(p)}</td>
                     <td className="r n">{rp(c.limit)}</td>
                     <td className="r n">{rp(omzet(c.id))}</td>
-                    {can("delete") && (
-                      <td className="r">
-                        <button className="btn sm danger" title={t("Hapus")}
-                          onClick={() => minta(t("Hapus pelanggan {nama}?", { nama: c.nama }), () => doDeletePelanggan(c))}>{t("Hapus")}</button>
-                      </td>
-                    )}
+                    <td className="r">
+                      <div className="aksi">
+                        <button className="btn sm" onClick={() => setUsul(c)}>{t("Usul Limit")}</button>
+                        {can("delete") && (
+                          <button className="btn sm danger" title={t("Hapus")}
+                            onClick={() => minta(t("Hapus pelanggan {nama}?", { nama: c.nama }), () => doDeletePelanggan(c))}>{t("Hapus")}</button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -1931,6 +2240,8 @@ function Pelanggan({ pelanggan, doCreatePelanggan, penjualan, totalSO, piutang, 
       {buka && (
         <FormPelanggan close={() => setBuka(false)} say={say} submit={doCreatePelanggan} />
       )}
+      {usul && <FormUsulLimit c={usul} close={() => setUsul(null)} say={say} submit={ajukan} />}
+      {putusan && <FormPutusan u={putusan} close={() => setPutusan(null)} say={say} submit={putuskan} />}
       {detail && (
         <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang}
           gById={gById} pById={pById} close={() => setDetail(null)} />
@@ -2040,6 +2351,57 @@ function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close }
         </div>
       </div>
     </div>
+  );
+}
+
+/* Pengajuan limit: siapa pun yang login boleh mengusulkan angkanya; yang
+   berlaku tetap limit lama sampai admin memutuskan. */
+function FormUsulLimit({ c, close, say, submit }) {
+  const { t } = useLang();
+  const [f, setF] = useState({ limit: String(c.limit ?? 0), alasan: "" });
+  const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
+  const kirim = async () => {
+    const n = Number(f.limit);
+    if (!Number.isFinite(n) || n < 0) return say(t("Limit kredit harus angka nol atau lebih."), true);
+    if (n === Number(c.limit)) return say(t("Limit yang diusulkan sama dengan limit sekarang."), true);
+    try {
+      await submit({ pelanggan: c.id, limit: n, alasan: f.alasan.trim() });
+      close();
+    } catch (e) { say(e.message, true); }
+  };
+  return (
+    <Modal title={t("Usul Limit Kredit")} close={close} onSave={kirim} saveLabel={t("Ajukan")}>
+      <p className="note">{c.kode} · {c.nama}</p>
+      <Inp label={t("Limit Kredit Baru (Rp)")} type="number" value={f.limit} onChange={set("limit")}
+        hint={t("Limit sekarang: {n}", { n: rp(c.limit) })} />
+      <Inp label={t("Alasan")} value={f.alasan} onChange={set("alasan")} hint={t("Dibaca admin saat memutuskan.")} />
+    </Modal>
+  );
+}
+
+/* Pengesahan oleh admin — menyetujui sekaligus memasang limit barunya. */
+function FormPutusan({ u, close, say, submit }) {
+  const { t } = useLang();
+  const [f, setF] = useState({ putusan: "disetujui", catatan: "" });
+  const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
+  const kirim = async () => {
+    try {
+      await submit(u.id, f.putusan, f.catatan.trim());
+      close();
+    } catch (e) { say(e.message, true); }
+  };
+  return (
+    <Modal title={t("Putusan Limit Kredit")} close={close} onSave={kirim}>
+      <p className="note">{u.pelanggan_kode} · {u.pelanggan_nama}</p>
+      <p className="note">
+        {rp(Number(u.limit_lama))} → <b>{rp(Number(u.limit_baru))}</b>
+        {" · "}{t("Diajukan oleh {u}", { u: u.pengusul_nama })}
+      </p>
+      {u.alasan && <p className="note">{t("Alasan")}: {u.alasan}</p>}
+      <Sel label={t("Putusan")} value={f.putusan} onChange={set("putusan")}
+        opts={[["disetujui", t("Setujui")], ["ditolak", t("Tolak")]]} />
+      <Inp label={t("Catatan")} value={f.catatan} onChange={set("catatan")} />
+    </Modal>
   );
 }
 
@@ -2246,7 +2608,9 @@ const Scroll = ({ children, max }) => <div className="scroll" style={max ? { max
 const Empty = ({ id }) => <div className="empty">{id}</div>;
 
 /* "Keluar|mutasi" diberi konteks karena "Keluar" di header berarti logout */
-const TIPE_LABEL = { masuk: "Masuk", keluar: "Keluar|mutasi", transfer: "Transfer", penyesuaian: "Penyesuaian" };
+/* "awal" bukan nilai kolom tipe — baris ref='AWAL' ditampilkan tersendiri
+   supaya stok pembukaan tidak terbaca sebagai hasil stok opname. */
+const TIPE_LABEL = { masuk: "Masuk", keluar: "Keluar|mutasi", transfer: "Transfer", penyesuaian: "Penyesuaian", awal: "Saldo Awal" };
 const Tag = ({ t: tipe }) => {
   const { t } = useLang();
   return <span className={"tag t-" + tipe}>{tipe ? t(TIPE_LABEL[tipe] || tipe) : "—"}</span>;
@@ -2257,21 +2621,39 @@ const Status = ({ s, map }) => {
   return <span className={"st s-" + s}>{map[s]?.id ? t(map[s].id) : s || "—"}</span>;
 };
 
-const Inp = ({ label, value, onChange, type = "text", hint }) => (
+/* Kolom tanggal. Peramban mengambil teks penuntun kolom KOSONG ("hh/bb/tttt")
+   dari bahasa antarmukanya sendiri, bukan dari atribut lang — jadi di Chrome
+   berbahasa Korea layar Indonesia pun menampilkan "연도. 월. 일.". Atribut lang
+   tetap dipasang karena itu yang menentukan urutan hh/bb/tttt setelah terisi;
+   penuntun bawaannya disembunyikan saat kosong dan digantikan penuntun kita
+   sendiri yang mengikuti bahasa aplikasi. */
+const Tgl = ({ value, onChange, min, max }) => {
+  const { lang, t } = useLang();
+  return (
+    <span className={"tgl" + (value ? "" : " kosong")}>
+      <input type="date" lang={lang === "ko" ? "ko-KR" : "id-ID"} value={value}
+        onChange={(e) => onChange(e.target.value)} min={min} max={max} />
+      {!value && <span className="tgl-ph" aria-hidden="true">{t("hh/bb/tttt")}</span>}
+    </span>
+  );
+};
+
+const Inp = ({ label, value, onChange, type = "text", hint, disabled }) => (
   <label className="fld">
     <span className="lbl">{label}</span>
-    <input type={type} value={value} onChange={(e) => onChange(e.target.value)} />
+    <input type={type} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} />
     {hint && <span className="hint">{hint}</span>}
   </label>
 );
 
-const Sel = ({ label, value, onChange, opts, placeholder }) => (
+const Sel = ({ label, value, onChange, opts, placeholder, hint, disabled }) => (
   <label className="fld">
     <span className="lbl">{label}</span>
-    <select value={value} onChange={(e) => onChange(e.target.value)}>
+    <select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled}>
       {placeholder && <option value="" disabled>{placeholder}</option>}
       {opts.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
     </select>
+    {hint && <span className="hint">{hint}</span>}
   </label>
 );
 
@@ -2523,6 +2905,7 @@ function Style() {
 .vk thead th em{font-size:11px; color:var(--asm-fg-muted); font-weight:400}
 .vk tbody td{height:38px; padding:9px 12px; border-bottom:1px solid var(--asm-border-50); vertical-align:middle}
 .vk tbody tr:hover{background:var(--asm-primary-6)}
+.vk tbody tr.klik{cursor:pointer}
 .vk tbody td .mut2{font-size:12px}
 .vk tfoot td{padding:9px 12px; border-top:2px solid var(--asm-primary)}
 .vk tfoot tr.tf-total td{background:var(--asm-primary-10); color:var(--asm-primary); font-weight:700}
@@ -2557,6 +2940,11 @@ function Style() {
 
 /* filters */
 .vk .filters{display:flex; gap:10px; margin-bottom:12px; flex-wrap:wrap}
+/* kolom tanggal: penuntun bawaan peramban disembunyikan, penuntun sendiri di atasnya */
+.vk .tgl{position:relative; display:block; flex:1; min-width:0}
+.vk .tgl.kosong input::-webkit-datetime-edit{opacity:0}
+.vk .tgl-ph{position:absolute; left:.75rem; top:50%; transform:translateY(-50%);
+  pointer-events:none; color:var(--asm-fg-muted); font-size:.875rem}
 .vk .filters .fld{min-width:210px}
 .vk .filters .cari input{min-width:190px}
 
@@ -2579,6 +2967,8 @@ function Style() {
 .vk input:focus,.vk select:focus{outline:none; border-color:var(--asm-primary); box-shadow:0 0 0 3px var(--asm-primary-40)}
 .vk input:disabled,.vk select:disabled{background:var(--asm-secondary); opacity:.6}
 .vk input.err{border-color:var(--asm-danger); background:var(--asm-danger-soft)}
+.vk input.qty{width:7rem; text-align:right}
+.vk .awal-aksi{display:flex; justify-content:flex-start; gap:.75rem; margin:.5rem 0}
 .vk .hint{display:block; font-size:11px; color:var(--asm-fg-muted); margin-top:3px}
 .vk .row2{display:grid; grid-template-columns:1fr 1fr; gap:12px}
 @media (max-width:560px){.vk .row2{grid-template-columns:1fr}}
@@ -2665,7 +3055,8 @@ function Style() {
 .vk .login-brand{display:flex; gap:12px; align-items:flex-start; padding:22px 20px 16px}
 .vk .login-brand .lang{margin-left:auto; margin-top:2px}
 .vk .login-id{display:flex; flex-direction:column; gap:7px; min-width:0}
-.vk .login-brand h1{font-size:14px; font-weight:500; letter-spacing:.2em; text-transform:uppercase; color:var(--asm-fg-muted)}
+.vk .login-brand h1{font-size:14px; font-weight:500; letter-spacing:.2em; text-transform:uppercase; color:var(--asm-fg-muted);
+  text-align:center; padding-left:.2em}
 .vk .login-brand p{margin:1px 0 0; font-size:11.5px; color:var(--asm-fg-muted)}
 .vk .login-brand p em{display:block; font-size:10.5px}
 .vk .login-bd{padding:20px}
@@ -2714,6 +3105,9 @@ function Style() {
 .vk .r-admin{background:var(--asm-danger-soft); color:var(--asm-danger); border-color:var(--asm-danger-border)}
 .vk .r-manager{background:var(--asm-info-soft); color:var(--asm-info); border-color:var(--asm-info-border)}
 .vk .r-staff{background:var(--asm-neutral-soft); color:var(--asm-neutral); border-color:var(--asm-neutral-border)}
+.vk .u-menunggu{background:var(--asm-warning-soft); color:var(--asm-warning); border-color:var(--asm-warning-border)}
+.vk .u-disetujui{background:var(--asm-success-soft); color:var(--asm-success); border-color:var(--asm-success-border)}
+.vk .u-ditolak{background:var(--asm-danger-soft); color:var(--asm-danger); border-color:var(--asm-danger-border)}
 
 /* danger buttons & action cell */
 .vk .aksi{display:inline-flex; gap:6px; justify-content:flex-end; align-items:center; flex-wrap:wrap}

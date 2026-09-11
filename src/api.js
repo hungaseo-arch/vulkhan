@@ -56,7 +56,9 @@ export const api = {
   gantiSandi: (lama, baru) => j("/ganti-sandi", { method: "POST", body: { lama, baru } }),
   listPengguna: () => j("/pengguna"),
   createPengguna: (u) => j("/pengguna", { method: "POST", body: u }),
+  updatePengguna: (id, u) => j(`/pengguna/${id}`, { method: "PUT", body: u }),
   deletePengguna: (id) => j(`/pengguna/${id}`, { method: "DELETE" }),
+  resetSandi: (id) => j(`/pengguna/${id}/reset-sandi`, { method: "POST" }),
 
   // muat semua koleksi sekaligus — SATU permintaan ke /bootstrap
   // (sebelumnya 7 permintaan paralel = sampai 7 invokasi serverless).
@@ -81,6 +83,9 @@ export const api = {
   createPelanggan: (c) => j("/pelanggan", { method: "POST", body: c }),
   transfer: (b) => j("/mutasi/transfer", { method: "POST", body: b }),
   penyesuaian: (b) => j("/mutasi/penyesuaian", { method: "POST", body: b }),
+  // saldo awal (기초재고) — baca per gudang, simpan sekaligus banyak barang
+  saldoAwal: (gudang) => j(`/mutasi/saldo-awal?gudang=${encodeURIComponent(gudang)}`),
+  simpanSaldoAwal: (b) => j("/mutasi/saldo-awal", { method: "POST", body: b }),
   createPenjualan: (s) => j("/penjualan", { method: "POST", body: s }),
   statusPenjualan: (id, status) => j(`/penjualan/${id}/status`, { method: "PATCH", body: { status } }),
   createPembelian: (p) => j("/pembelian", { method: "POST", body: p }),
@@ -90,4 +95,10 @@ export const api = {
   deletePenjualan: (id) => j(`/penjualan/${id}`, { method: "DELETE" }),
   deletePembelian: (id) => j(`/pembelian/${id}`, { method: "DELETE" }),
   deletePelanggan: (id) => j(`/pelanggan/${id}`, { method: "DELETE" }),
+
+  // usulan limit kredit — diajukan siapa pun yang login, diputuskan admin
+  listUsulan: () => j("/limit-usulan"),
+  createUsulan: (u) => j("/limit-usulan", { method: "POST", body: u }),
+  putusanUsulan: (id, putusan, catatan) =>
+    j(`/limit-usulan/${id}/putusan`, { method: "POST", body: { putusan, catatan } }),
 };

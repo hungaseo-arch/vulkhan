@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "api": "node --env-file=.env.local api-server.js",
     "buat-admin": "node scripts/buat-admin.mjs",
     "deploy": "npm run lint && npm run build && vercel --prod"
   },
