@@ -1188,6 +1188,18 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
     !q || [p.kode, p.nama, p.ukuran, p.pola, p.merek].some((v) => String(v ?? "").toLowerCase().includes(q));
   const list = produk.filter((p) => (kat === "ALL" || p.kategori === kat) && cocok(p));
 
+  /* KPI mengikuti penyaring yang sama dengan tabel (gudang, kategori, kata
+     kunci): angkanya adalah ringkasan dari baris yang sedang terlihat, bukan
+     seluruh gudang — supaya "nilai stok" di kartu dan jumlah kolom di bawahnya
+     tidak saling bertentangan. */
+  const stokDi = (p) => (g === "ALL" ? stokTotal(p.id) : getStok(g, p.id));
+  const ring = list.reduce((a, p) => {
+    const sisa = stokDi(p);
+    a.nilai += sisa * p.hpp; a.qty += sisa;
+    if (sisa < 0) a.negatif += 1; else if (sisa < p.min) a.rendah += 1;
+    return a;
+  }, { nilai: 0, qty: 0, rendah: 0, negatif: 0 });
+
   const unduhExcel = () => {
     const aoa = [
       [t("Kode"), t("Nama Barang"), t("Kategori"), t("Ukuran"), t("Pola"), t("Grade"), t("Harga Beli"), t("Harga Agen"), t("Harga User"), ...GUDANG.map((x) => x.kode), t("Total"), t("Min"), t("Satuan")],
@@ -1220,6 +1232,15 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
         <button className="btn" onClick={() => setModal("adjust")}>{t("Penyesuaian Stok")}</button>
         <button className="btn" onClick={() => setModal("awal")}>{t("Saldo Awal")}</button>
       </SectionTitle>
+
+      <div className="kpis">
+        <Kpi label={t("Nilai Stok")} val={rp(ring.nilai)} sub={t("harga pokok")} tone={ring.nilai < 0 ? "alert" : ""} />
+        <Kpi label={t("Total Stok")} val={`${fmt(ring.qty)} pcs`} sub={t("{n} produk", { n: fmt(list.length) })} />
+        <Kpi label={t("Di Bawah Minimum")} val={t("{n} produk", { n: fmt(ring.rendah) })}
+          sub={ring.rendah ? t("stok di bawah batas minimum") : t("semua di atas minimum")} tone={ring.rendah ? "warn" : ""} />
+        <Kpi label={t("Stok Negatif")} val={t("{n} produk", { n: fmt(ring.negatif) })}
+          sub={ring.negatif ? t("periksa Buku Mutasi Stok") : t("tidak ada stok negatif")} tone={ring.negatif ? "alert" : ""} />
+      </div>
 
       <Card>
         <Scroll>
