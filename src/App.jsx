@@ -897,7 +897,7 @@ function PenggunaAdmin({ online, say, user, minta }) {
       <SectionTitle id={t("Pengguna & Hak Akses")}>
         <button className="btn pri" onClick={() => setBuka(true)}>{t("+ Pengguna Baru")}</button>
       </SectionTitle>
-      <div className="grid3">
+      <div className="kpis">
         {Object.entries(ROLE_LABEL).map(([k, v]) => (
           <Kpi key={k} label={t(v.id)} val={users === null ? "…" : t("{n} akun", { n: users.filter((u) => u.peran === k).length })} sub={t(v.desc)} />
         ))}
@@ -2826,7 +2826,7 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
 
       <KartuUsulHapus jenis="pembelian" hapusUsulan={hapusUsulan} can={can} onPutuskan={setPutusanH} />
 
-      <div className="grid3">
+      <div className="kpis">
         {["casing", "bahan"].map((j) => {
           const n = list.filter((p) => p.items.some((i) => (pById(i.produk).kategori) === j));
           return (
@@ -3970,7 +3970,6 @@ function Style() {
 
 /* kpi */
 .vk .kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:16px}
-.vk .grid3{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin-bottom:16px}
 .vk .kpi{background:var(--asm-card); border:1px solid var(--asm-border); border-left:3px solid var(--asm-primary);
   border-radius:var(--asm-radius-lg); padding:12px 14px; container-type:inline-size}
 .vk .kpi.warn{border-left-color:var(--asm-warning)}
@@ -3993,7 +3992,7 @@ function Style() {
 @media (max-width:860px){.vk .grid2{grid-template-columns:1fr}}
 /* item grid tidak boleh melebar mengikuti tabel di dalamnya (min-width:auto
    bawaan grid) — inilah penyebab halaman ikut scroll ke samping di layar kecil */
-.vk .grid2>*,.vk .grid3>*,.vk .kpis>*,.vk .card{min-width:0}
+.vk .grid2>*,.vk .kpis>*,.vk .card{min-width:0}
 
 /* ---------- layar penjualan: penyaring tanggal, KPI tren, grafik, tabel drill ----------
    Palet layar ini mengikuti panduan terpisah (VLK-UI-2026-001 §7.1): latar
@@ -4433,7 +4432,7 @@ function Style() {
   .vk .filters,.vk .sect-l .flow{width:100%}
   .vk .step{min-width:92px; padding:7px 9px}
   .vk .step b{font-size:15px}
-  .vk .kpis,.vk .grid3{grid-template-columns:1fr 1fr}
+  .vk .kpis{grid-template-columns:1fr 1fr}
   .vk .ft{padding:6px 12px 24px}
   .vk .ov{padding:10px}
   .vk .md,.vk .doc-modal{max-height:94vh}
@@ -4445,7 +4444,7 @@ function Style() {
   .vk .doc-sign{gap:18px}
 }
 @media (max-width:520px){
-  .vk .kpis,.vk .grid3{grid-template-columns:1fr}
+  .vk .kpis{grid-template-columns:1fr}
   .vk .filters .fld,.vk .sect-l .filters .fld{flex:1 1 100%; min-width:0}
   .vk .filters .cari input{min-width:0}
   /* label + kontrol ditumpuk agar tidak saling menekan */
