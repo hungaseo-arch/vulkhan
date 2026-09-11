@@ -2576,6 +2576,7 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById }) {
   const [cari, setCari] = useState("");
   const [detail, setDetail] = useState(null); // pelanggan yang dibuka dari nama
   const [rinci, setRinci] = useState(null);   // penjualan yang dibuka dari nomor
+  const [umur, setUmur] = useState(null);     // kelompok umur yang dibuka
   const { piutangRows, piutangF, agingRows, piutang90, rasio90, topPelanggan } = useMemo(
     () => hitungPiutang(penjualan, cById, totalSO),
     [penjualan, cById, totalSO],
@@ -2624,8 +2625,13 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById }) {
             </thead>
             <tbody>
               {agingRows.map((r) => (
-                <tr key={r.k}>
-                  <td className={r.k === "90180" || r.k === "180" ? "bad strong" : r.k === "3060" || r.k === "6090" ? "warn" : ""}>{t(r.label)}</td>
+                /* kelompok kosong tidak bisa dibuka: dialog tanpa isi hanya menipu */
+                <tr key={r.k} className={r.n ? "klik" : ""} onClick={r.n ? () => setUmur(r) : undefined}>
+                  <td className={r.k === "90180" || r.k === "180" ? "bad strong" : r.k === "3060" || r.k === "6090" ? "warn" : ""}>
+                    {r.n
+                      ? <button type="button" className="namelink" title={t("Lihat rincian")}>{t(r.label)}</button>
+                      : t(r.label)}
+                  </td>
                   <td className="r n">{fmt(r.n)}</td>
                   <td className="r n">{rp(r.nilai)}</td>
                   <td className="r n">{piutangF ? fmt((r.nilai / piutangF) * 100) : 0}%</td>
@@ -2723,11 +2729,77 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById }) {
         <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang}
           gById={gById} pById={pById} close={() => setDetail(null)} />
       )}
+      {umur && (
+        <DaftarUmur label={t(umur.label)} rows={piutangRows.filter((r) => r.bucket === umur.k)}
+          close={() => setUmur(null)} onPilih={(so) => { setRinci(so); setUmur(null); }} />
+      )}
       {rinci && (
         <RincianPenjualan so={rinci} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
           close={() => setRinci(null)} />
       )}
     </>
+  );
+}
+
+/* Daftar invoice satu kelompok umur. Tabel aging hanya memberi jumlah dan
+   nilai; pertanyaan berikutnya selalu "invoice mana", dan tanpa ini jawabannya
+   harus dicari sendiri di tabel rincian di bawahnya. */
+function DaftarUmur({ label, rows, close, onPilih }) {
+  const { t } = useLang();
+  const box = useDialog(close);
+  const judul = useId();
+  const total = rows.reduce((a, r) => a + r.nilai, 0);
+
+  return (
+    <div className="ov" onClick={close}>
+      <div className="md wide" ref={box} role="dialog" aria-modal="true" aria-labelledby={judul} onClick={(e) => e.stopPropagation()}>
+        <div className="md-hd">
+          <h3 id={judul}>{t("Rincian Invoice")} <em>{label}</em></h3>
+          <button className="x" onClick={close} aria-label={t("Tutup dialog")}>×</button>
+        </div>
+        <div className="md-bd">
+          <Scroll max={340}>
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">{t("No.")}</th>
+                  <th scope="col">{t("Pelanggan")}</th>
+                  <th scope="col">{t("Tanggal")}</th>
+                  <th scope="col">{t("Jatuh Tempo")}</th>
+                  <th scope="col" className="r">{t("Telat")}</th>
+                  <th scope="col" className="r">{t("Nilai")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.so.id} className="klik" onClick={() => onPilih(r.so)}>
+                    <td className="n strong">
+                      <button type="button" className="namelink" title={t("Lihat rincian")}>{r.so.no}</button>
+                    </td>
+                    <td>{r.c.nama}<em className="mut2">{t("Grade {g}", { g: r.c.grade })}</em></td>
+                    <td className="n">{r.so.tgl}</td>
+                    <td className="n">{r.tempo}</td>
+                    <td className={"r n " + (r.telat > 90 ? "bad" : r.telat > 30 ? "warn" : "")}>
+                      {r.telat > 0 ? t("{n} hr", { n: fmt(r.telat) }) : "—"}
+                    </td>
+                    <td className="r n strong">{rp(r.nilai)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="tf-total">
+                  <td colSpan={5}><b>{t("Total")}</b></td>
+                  <td className="r n strong">{rp(total)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </Scroll>
+        </div>
+        <div className="md-ft">
+          <button className="btn pri" onClick={close}>{t("Tutup")}</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
