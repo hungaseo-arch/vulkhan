@@ -285,6 +285,7 @@ const KO = {
   "Tidak ada transaksi pada filter ini.": "현재 필터에 해당 거래 없음",
   "Belum ada transaksi penjualan.": "판매 거래 없음",
   "{n} transaksi · {q} pcs · {v}": "{n}건 · {q} pcs · {v}",
+  "Kuartal {k}": "{k}분기",
   "No.": "번호",
   "Rincian": "내역",
   "Status": "상태",
