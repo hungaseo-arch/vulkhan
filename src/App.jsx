@@ -1994,7 +1994,19 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
      satu bulan. "Porsi" dihitung terhadap total baris yang ditampilkan, bukan
      terhadap total rentang: di kartu bulan, porsi seorang pelanggan atas
      setahun tidak menjawab "siapa yang besar bulan ini". */
-  const tabelPelanggan = (rows, total) => (
+  /* Baris total dihitung dari seluruh peringkat, bukan hanya 10 teratas yang
+     tampak — "Tampilkan Semua" mengubah apa yang terlihat, bukan jumlahnya. */
+  const jumlahPeringkat = (rows) => {
+    const j = { n: 0, jadi: 0, jasa: 0, qty: 0, total: 0, piutang: 0 };
+    for (const b of rows) {
+      j.n += b.n; j.jadi += b.jadi; j.jasa += b.jasa; j.qty += b.qty; j.total += b.total;
+      j.piutang += tagihanCust.get(b.id)?.nilai || 0;
+    }
+    return { ...j, harga: hargaRata(j.total, j.qty) };
+  };
+  const tabelPelanggan = (rows, total) => {
+    const j = jumlahPeringkat(rows);
+    return (
     <>
       <table className="drill rank">
         <thead>
@@ -2050,6 +2062,22 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
           })}
           {rows.length === 0 && <tr><td colSpan={10}><Empty id={t("Tidak ada transaksi pada filter ini.")} /></td></tr>}
         </tbody>
+        {rows.length > 0 && (
+          <tfoot>
+            <tr className="tf-total">
+              <td className="no" />
+              <td className="rank-total"><b>{t("Total")}</b><em className="mut2">{t("{n} pelanggan", { n: fmt(rows.length) })}</em></td>
+              <td className="r n strong">{fmt(j.n)}</td>
+              <td className="r n strong">{j.jadi ? fmt(j.jadi) : "—"}</td>
+              <td className="r n strong">{j.jasa ? fmt(j.jasa) : "—"}</td>
+              <td className="r n strong">{fmt(j.qty)}</td>
+              <td className="r n strong">{satuan(j.total)}</td>
+              <td className="r n strong">{j.harga == null ? "—" : satuan(j.harga)}</td>
+              <td className="r n strong">{total ? `${fmt((j.total / total) * 100)}%` : "—"}</td>
+              <td className="r n strong">{j.piutang ? satuan(j.piutang) : "—"}</td>
+            </tr>
+          </tfoot>
+        )}
       </table>
       {rows.length > PERINGKAT_N && (
         <div className="rank-ft">
@@ -2059,7 +2087,8 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
         </div>
       )}
     </>
-  );
+    );
+  };
 
   const puncak = (rows) => (semua ? rows : rows.slice(0, PERINGKAT_N));
 
@@ -4067,6 +4096,10 @@ function Style() {
 /* bilah porsi digambar di belakang angkanya: satu kolom untuk dua keterangan,
    supaya tabel peringkat tidak melebar */
 .vk .porsi-th{min-width:92px}
+/* kolom ke-2 di baris peringkat berpadding 0 (sel nama mengatur sendiri);
+   sel label total harus mengembalikan padding tfoot yang tertimpa itu */
+.vk table.drill.rank tfoot td.rank-total{padding:9px 12px 9px 16px}
+.vk table.drill.rank tfoot td.rank-total em{margin-left:8px; font-weight:400}
 .vk .porsi{position:relative; display:block; min-width:80px; height:16px}
 .vk .porsi-b{position:absolute; left:0; top:2px; height:12px; background:var(--pl-utama);
   border-radius:2px; min-width:1px}
