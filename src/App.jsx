@@ -1082,7 +1082,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
 
       <SectionTitle id={t("Ringkasan Bulanan")} />
       <Card title={t("Penjualan per Bulan")} note={t("tidak termasuk penawaran")}>
-        <Scroll max={280}>
+        <Scroll>
           <table>
             <thead>
               <tr>
@@ -1274,7 +1274,7 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
       </Card>
 
       <Card title={t("Buku Mutasi Stok")} note={t("Stok dihitung dari buku ini, bukan diedit langsung.")}>
-        <Scroll max={320}>
+        <Scroll>
           <table>
             <thead>
               <tr>
@@ -1581,12 +1581,13 @@ function DetailProduk({ p, getStok, stokTotal, close }) {
    kartu kosong memakan tinggi layar untuk mengatakan "tidak ada apa-apa". */
 function KartuUsulHapus({ jenis, hapusUsulan, can, onPutuskan }) {
   const { t } = useLang();
+  const [semua, setSemua] = useState(false);
   const rows = (hapusUsulan || []).filter((u) => u.jenis === jenis);
   if (!rows.length) return null;
   return (
     <Card title={t("Permintaan Hapus")}
       note={t("Diajukan oleh petugas, disahkan oleh admin. Data terhapus tepat saat usulan disetujui.")}>
-      <Scroll max={260}>
+      <Scroll>
         <table>
           <thead>
             <tr>
@@ -1599,7 +1600,7 @@ function KartuUsulHapus({ jenis, hapusUsulan, can, onPutuskan }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((u) => (
+            {(semua ? rows : rows.slice(0, PERINGKAT_N)).map((u) => (
               <tr key={u.id}>
                 <td><span className="chip">{u.sasaran_no}</span><em className="mut2">{u.sasaran_ket}</em></td>
                 {/* pelanggan tidak punya nilai transaksi — nol berarti "tidak berlaku" */}
@@ -1617,6 +1618,7 @@ function KartuUsulHapus({ jenis, hapusUsulan, can, onPutuskan }) {
           </tbody>
         </table>
       </Scroll>
+      <KakiSemua total={rows.length} semua={semua} onToggle={() => setSemua((v) => !v)} />
     </Card>
   );
 }
@@ -1713,6 +1715,21 @@ const SUMBU = [["waktu", "Per Periode"], ["pelanggan", "Per Pelanggan"], ["produ
    penanda teknis yang tersedia, dan keduanya yang dipakai di sini. */
 const KELOMPOK = [["produk", "Produk"], ["ukuran", "Ukuran"], ["pola", "Pola"]];
 const PERINGKAT_N = 10;
+
+/* Kaki tabel "tampilkan semua / 10 teratas". Dipakai di setiap tabel halaman
+   yang bisa panjang: halaman hanya boleh punya satu gulir (dokumen), jadi
+   tabel tidak diberi max-height — yang dibatasi jumlah barisnya. */
+function KakiSemua({ total, semua, onToggle }) {
+  const { t } = useLang();
+  if (total <= PERINGKAT_N) return null;
+  return (
+    <div className="rank-ft">
+      <button type="button" className="btn" onClick={onToggle}>
+        {semua ? t("Tampilkan 10 Teratas") : t("Tampilkan Semua ({n})", { n: fmt(total) })}
+      </button>
+    </div>
+  );
+}
 
 /* Keadaan penyaring dibaca dari URL supaya memuat ulang halaman atau
    membagikan tautannya memberi layar yang sama. */
@@ -2079,13 +2096,7 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
           </tfoot>
         )}
       </table>
-      {rows.length > PERINGKAT_N && (
-        <div className="rank-ft">
-          <button type="button" className="btn" onClick={() => setSemua((v) => !v)}>
-            {semua ? t("Tampilkan 10 Teratas") : t("Tampilkan Semua ({n})", { n: fmt(rows.length) })}
-          </button>
-        </div>
-      )}
+      <KakiSemua total={rows.length} semua={semua} onToggle={() => setSemua((v) => !v)} />
     </>
     );
   };
@@ -2230,13 +2241,7 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
               {perProduk.length === 0 && <tr><td colSpan={7}><Empty id={t("Tidak ada transaksi pada filter ini.")} /></td></tr>}
             </tbody>
           </table>
-          {perProduk.length > PERINGKAT_N && (
-            <div className="rank-ft">
-              <button type="button" className="btn" onClick={() => setSemua((v) => !v)}>
-                {semua ? t("Tampilkan 10 Teratas") : t("Tampilkan Semua ({n})", { n: fmt(perProduk.length) })}
-              </button>
-            </div>
-          )}
+          <KakiSemua total={perProduk.length} semua={semua} onToggle={() => setSemua((v) => !v)} />
         </Card>
       )}
 
@@ -2306,10 +2311,12 @@ const Porsi = ({ v }) => (
    terakhir, jadi kolomnya disuntikkan, bukan disalin menjadi dua komponen. */
 function DaftarGerak({ rows, kepala, kolom, kosong, takJelas, onPilih }) {
   const { t } = useLang();
+  const [semua, setSemua] = useState(false);
   if (takJelas) return <Empty id={t("Pilih tanggal awal dan akhir untuk membandingkan.")} />;
   if (!rows.length) return <Empty id={kosong} />;
   return (
-    <Scroll max={260}>
+    <>
+    <Scroll>
       <table>
         <thead>
           <tr>
@@ -2318,7 +2325,7 @@ function DaftarGerak({ rows, kepala, kolom, kosong, takJelas, onPilih }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {(semua ? rows : rows.slice(0, PERINGKAT_N)).map((r) => (
             <tr key={r.id} className="klik" onClick={() => onPilih(r.c)}>
               <td>
                 <button type="button" className="namelink" title={t("Lihat rincian")}>{r.c.nama}</button>
@@ -2330,6 +2337,8 @@ function DaftarGerak({ rows, kepala, kolom, kosong, takJelas, onPilih }) {
         </tbody>
       </table>
     </Scroll>
+    <KakiSemua total={rows.length} semua={semua} onToggle={() => setSemua((v) => !v)} />
+    </>
   );
 }
 
@@ -2832,7 +2841,7 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
       </div>
 
       <Card title={t("Pembelian per Bulan")}>
-        <Scroll max={220}>
+        <Scroll>
           <table>
             <thead>
               <tr>
@@ -2991,6 +3000,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
   const [cari, setCari] = useState("");
   // Usulan limit dimuat terpisah dari /bootstrap: hanya layar ini yang memakainya.
   const [usulan, setUsulan] = useState(null);
+  const [usulanSemua, setUsulanSemua] = useState(false);
   const [usul, setUsul] = useState(null);       // pelanggan yang sedang diusulkan
   const [putusan, setPutusan] = useState(null); // usulan yang sedang diputuskan
   const [usulHapus, setUsulHapus] = useState(null); // pelanggan yang diusulkan dihapus
@@ -3056,7 +3066,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
       {usulan !== null && usulan.length > 0 && (
         <Card title={t("Usulan Limit Kredit")}
           note={t("Diajukan oleh petugas, disahkan oleh admin. Limit berubah hanya setelah disetujui.")}>
-          <Scroll max={260}>
+          <Scroll>
             <table>
               <thead>
                 <tr>
@@ -3071,7 +3081,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
                 </tr>
               </thead>
               <tbody>
-                {(usulan || []).map((u) => (
+                {(usulanSemua ? usulan : usulan.slice(0, PERINGKAT_N)).map((u) => (
                   <tr key={u.id}>
                     <td><span className="chip">{u.pelanggan_kode}</span> {u.pelanggan_nama}</td>
                     <td className="r n mut">{rp(Number(u.limit_lama))}</td>
@@ -3094,6 +3104,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
               </tbody>
             </table>
           </Scroll>
+          <KakiSemua total={usulan.length} semua={usulanSemua} onToggle={() => setUsulanSemua((v) => !v)} />
         </Card>
       )}
 
