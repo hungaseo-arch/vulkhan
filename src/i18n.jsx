@@ -301,15 +301,7 @@ const KO = {
   "+ Penjualan Baru": "+ 새 판매",
   "Tidak ada transaksi pada filter ini.": "현재 필터에 해당 거래 없음",
   "Belum ada transaksi penjualan.": "판매 거래 없음",
-  "Kuartal {k}": "{k}분기",
-  /* chip periode: "Kuartal|periode" dipisahkan dari "Kuartal {k}" karena yang
-     satu nama tombol dan yang lain label satu kuartal tertentu */
   "Periode": "기간",
-  "Bulan Ini": "이번 달",
-  "Bulan Lalu": "지난달",
-  "Kuartal|periode": "분기",
-  "Tahun Ini": "올해",
-  "Pilih Tanggal": "직접 입력",
   "Nilai Penjualan": "매출액",
   "Kuantitas": "판매수량",
   "Harga Rata-rata": "평균단가",

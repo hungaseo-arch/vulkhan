@@ -101,25 +101,12 @@ const bulanLabel = (ym, lang) => {
   return lang === "ko" ? `${y}년 ${Number(m)}월` : `${BULAN[Number(m) - 1]} ${y}`;
 };
 /* ---------- rentang periode ---------- */
-/* Chip periode menggantikan dua kotak tanggal yang semula kosong: pertanyaan
-   sehari-hari ("bulan ini berapa?") tidak seharusnya menuntut enam klik
-   kalender, dan layar tanpa rentang bawaan tidak menjawab apa pun saat dibuka.
-   Batasnya dihitung sebagai teks YYYY-MM-DD, bukan objek Date — seluruh
-   penyaringan di layar ini membandingkan teks. */
-const PERIODE = [
-  ["bulan", "Bulan Ini"], ["bulan-lalu", "Bulan Lalu"],
-  ["kuartal", "Kuartal|periode"], ["ytd", "Tahun Ini"], ["custom", "Pilih Tanggal"],
-];
-const awalBulan = (y, m) => `${y}-${String(m).padStart(2, "0")}-01`;
-const akhirBulan = (y, m) => `${y}-${String(m).padStart(2, "0")}-${new Date(y, m, 0).getDate()}`;
-const rentangPeriode = (kode, acuan, k) => {
-  const y = Number(acuan.slice(0, 4)), m = Number(acuan.slice(5, 7));
-  if (kode === "bulan") return [awalBulan(y, m), akhirBulan(y, m)];
-  if (kode === "bulan-lalu") return m === 1 ? [awalBulan(y - 1, 12), akhirBulan(y - 1, 12)] : [awalBulan(y, m - 1), akhirBulan(y, m - 1)];
-  if (kode === "kuartal") { const q = k || Math.ceil(m / 3); return [awalBulan(y, q * 3 - 2), akhirBulan(y, q * 3)]; }
-  if (kode === "ytd") return [`${y}-01-01`, `${y}-12-31`];
-  return ["", ""];
-};
+/* Dua kotak tanggal, bawaannya 1 Januari tahun berjalan sampai hari ini.
+   Bawaannya berhenti di hari ini, bukan di akhir tahun: bulan yang belum tiba
+   hanya menambah kolom dan baris kosong pada grafik dan tabel. Batasnya
+   dihitung sebagai teks YYYY-MM-DD, bukan objek Date — seluruh penyaringan di
+   layar ini membandingkan teks. */
+const rentangBawaan = (acuan) => [`${acuan.slice(0, 4)}-01-01`, acuan];
 /* Periode yang sama setahun sebelumnya. Cukup menukar empat angka pertama:
    29 Februari pada tahun kabisat menjadi batas yang tanggalnya tidak ada, dan
    sebagai batas perbandingan teks itu tetap sah — tidak ada yang hilang. */
@@ -1746,17 +1733,17 @@ const PERINGKAT_N = 10;
    membagikan tautannya memberi layar yang sama. */
 const bacaPeriodeUrl = () => {
   const q = new URLSearchParams(window.location.search);
-  const p = q.get("period");
   const s = q.get("sumbu");
   const g = q.get("grup");
-  const k = Number(q.get("q"));
+  /* URL yang menyebut salah satu batas dianggap sengaja — batas yang kosong
+     di situ berarti "tanpa batas", bukan diisi bawaan */
+  const adaTgl = q.has("dari") || q.has("sampai");
+  const [dari, sampai] = rentangBawaan(today());
   return {
-    periode: PERIODE.some(([kode]) => kode === p) ? p : "ytd",
-    kuartal: k >= 1 && k <= 4 ? k : Math.ceil(Number(today().slice(5, 7)) / 3),
     sumbu: SUMBU.some(([kode]) => kode === s) ? s : "waktu",
     kelompok: KELOMPOK.some(([kode]) => kode === g) ? g : "produk",
-    dari: q.get("dari") || "",
-    sampai: q.get("sampai") || "",
+    dari: adaTgl ? q.get("dari") || "" : dari,
+    sampai: adaTgl ? q.get("sampai") || "" : sampai,
     cust: q.get("cari") || "",
   };
 };
@@ -1772,22 +1759,21 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
   const [putusanH, setPutusanH] = useState(null);     // usulan hapus yang diputuskan
   const tungguHapus = useMemo(() => menungguHapus(hapusUsulan, "penjualan"), [hapusUsulan]);
   const [f, setF] = useState(bacaPeriodeUrl);
-  const { periode, kuartal, sumbu, kelompok, dari, sampai, cust } = f;
+  const { sumbu, kelompok, dari, sampai, cust } = f;
   const ubah = (b) => setF((s) => ({ ...s, ...b }));
   const daftarCust = useId();
   const hariIni = today();
-  const [d0, d1] = periode === "custom" ? [dari, sampai] : rentangPeriode(periode, hariIni, kuartal);
+  const d0 = dari, d1 = sampai;
 
   useEffect(() => {
     const q = new URLSearchParams();
-    q.set("period", periode);
-    if (periode === "kuartal") q.set("q", String(kuartal));
-    if (periode === "custom") { if (dari) q.set("dari", dari); if (sampai) q.set("sampai", sampai); }
+    if (dari) q.set("dari", dari);
+    if (sampai) q.set("sampai", sampai);
     if (sumbu !== "waktu") q.set("sumbu", sumbu);
     if (sumbu === "produk" && kelompok !== "produk") q.set("grup", kelompok);
     if (cust.trim()) q.set("cari", cust.trim());
     window.history.replaceState(null, "", `${window.location.pathname}?${q}`);
-  }, [periode, kuartal, sumbu, kelompok, dari, sampai, cust]);
+  }, [sumbu, kelompok, dari, sampai, cust]);
 
   /* Dua lapis penyaring. Nama pelanggan disaring lebih dulu karena pembanding
      "vs bulan lalu" dan "vs tahun lalu" justru mengambil baris DI LUAR rentang
@@ -1928,7 +1914,7 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
 
   /* Bawaan: bulan berjalan terbuka. Penyaring berganti berarti susunan bulannya
      berganti pula, jadi keadaan buka/tutup yang lama tidak lagi berarti apa-apa. */
-  const kunci = `${periode}|${kuartal}|${d0}|${d1}|${cust.trim()}`;
+  const kunci = `${d0}|${d1}|${cust.trim()}`;
   const [bukaBulan, setBukaBulan] = useState(() => new Set([hariIni.slice(0, 7)]));
   const [bukaHari, setBukaHari] = useState(() => new Set());
   const [bukaCust, setBukaCust] = useState(() => new Set());
@@ -2030,32 +2016,14 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
       <SectionTitle id={t("Penjualan")}
         mid={
           <div className="filters jual-filter">
-            <div className="chips" role="group" aria-label={t("Periode")}>
-              {PERIODE.map(([k, label]) => (
-                <button key={k} type="button" className={"chip-b" + (periode === k ? " on" : "")}
-                  aria-pressed={periode === k} onClick={() => ubah({ periode: k })}>{t(label)}</button>
-              ))}
-            </div>
-            {periode === "kuartal" && (
-              <div className="chips" role="group" aria-label={t("Kuartal|periode")}>
-                {[1, 2, 3, 4].map((k) => (
-                  <button key={k} type="button" className={"chip-b" + (kuartal === k ? " on" : "")}
-                    aria-pressed={kuartal === k} onClick={() => ubah({ kuartal: k })}>{t("Kuartal {k}", { k })}</button>
-                ))}
-              </div>
-            )}
-            {periode === "custom" && (
-              <>
-                <label className="fld">
-                  <span className="lbl">{t("Dari")}</span>
-                  <Tgl value={dari} onChange={(v) => ubah({ dari: v })} max={sampai || undefined} />
-                </label>
-                <label className="fld">
-                  <span className="lbl">{t("Sampai")}</span>
-                  <Tgl value={sampai} onChange={(v) => ubah({ sampai: v })} min={dari || undefined} />
-                </label>
-              </>
-            )}
+            <label className="fld">
+              <span className="lbl">{t("Dari")}</span>
+              <Tgl value={dari} onChange={(v) => ubah({ dari: v })} max={sampai || undefined} />
+            </label>
+            <label className="fld">
+              <span className="lbl">{t("Sampai")}</span>
+              <Tgl value={sampai} onChange={(v) => ubah({ sampai: v })} min={dari || undefined} />
+            </label>
             <label className="fld cari">
               <span className="lbl">{t("Pelanggan")}</span>
               <input type="search" list={daftarCust} value={cust} placeholder={t("Cari nama pelanggan")}
@@ -2114,7 +2082,9 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
                       {angka({ ...y, harga: hargaRata(y.total, y.qty) })}
                     </tr>
                   )}
-                  {y.bulan.map((b) => {
+                  {/* bulan yang belum tiba tetap ada di sumbu grafik (labelnya
+                      dipudarkan), tetapi tidak diberi baris: isinya selalu "—" */}
+                  {y.bulan.filter((b) => !b.datang).map((b) => {
                     const onB = bukaBulan.has(b.ym);
                     return (
                       <React.Fragment key={b.ym}>
@@ -2396,7 +2366,7 @@ function DaftarGerak({ rows, kepala, kolom, kosong, takJelas, onPilih }) {
   );
 }
 
-/* Grafik batang bulanan dengan garis harga rata-rata. Digambar langsung sebagai
+/* Grafik batang bulanan dengan garis kuantitas. Digambar langsung sebagai
    HTML + satu polyline SVG, tanpa pustaka grafik: dua belas batang dan satu
    garis tidak sepadan dengan ~150 kB tambahan di bundel.
    Tinggi batang dihitung dalam piksel, bukan persen, supaya garis SVG yang
@@ -4013,7 +3983,7 @@ function Style() {
    bawaan grid) — inilah penyebab halaman ikut scroll ke samping di layar kecil */
 .vk .grid2>*,.vk .grid3>*,.vk .kpis>*,.vk .card{min-width:0}
 
-/* ---------- layar penjualan: chip periode, KPI tren, grafik, tabel drill ----------
+/* ---------- layar penjualan: penyaring tanggal, KPI tren, grafik, tabel drill ----------
    Palet layar ini mengikuti panduan terpisah (VLK-UI-2026-001 §7.1): latar
    abu terang, biru & abu-biru pastel untuk bidang, hijau sage untuk penegasan,
    dan SATU warna teks/garis. Pastelnya hanya untuk isian — dipakai sebagai
@@ -4023,7 +3993,7 @@ function Style() {
   --pl-tegas:#E8F5E9; --pl-tinta:#546E7A;
 }
 
-/* chip periode: rentang bawaan menggantikan dua kotak tanggal kosong */
+/* chip pilihan (sumbu analisis) */
 .vk .chips{display:flex; gap:4px; flex-wrap:wrap; align-items:center}
 .vk .chip-b{font:inherit; font-size:12px; font-weight:400; line-height:1; padding:7px 11px;
   background:transparent; color:var(--pl-tinta); border:.5px solid var(--pl-tinta);
@@ -4043,7 +4013,7 @@ function Style() {
 .vk .delta.datar{color:var(--asm-fg-muted)}
 @media (max-width:1280px){.vk .jual-kpi{grid-template-columns:1fr 1fr}}
 
-/* grafik batang + garis harga rata-rata, digambar tanpa pustaka grafik */
+/* grafik batang + garis kuantitas, digambar tanpa pustaka grafik */
 .vk .graf-card .card-bd{padding-top:4px}
 .vk .graf-hd{display:flex; align-items:baseline; gap:10px; margin:0 0 6px}
 .vk .graf-hd h3{font-size:13px; font-weight:500}
@@ -4061,7 +4031,10 @@ function Style() {
 .vk .graf-kol.datang .graf-bar{display:none}
 .vk .graf-x{height:16px; line-height:16px; font-size:11px; color:var(--asm-fg-muted)}
 .vk .graf-kol.datang .graf-x{opacity:.45}
-.vk .graf-garis{position:absolute; inset:0 56px 0 0; width:auto; height:100%; overflow:visible; pointer-events:none}
+/* lebar SVG harus eksplisit: elemen pengganti dengan width:auto mengambil
+   lebar dari rasio viewBox-nya (100:200), bukan dari left/right, sehingga
+   garisnya terjepit di 100px di sisi kiri */
+.vk .graf-garis{position:absolute; left:0; top:0; width:calc(100% - 56px); height:100%; overflow:visible; pointer-events:none}
 .vk .graf-garis polyline{fill:none; stroke:var(--asm-success); stroke-width:1.5; stroke-linejoin:round}
 .vk .graf-y{position:absolute; right:0; width:52px; text-align:right; font-size:11px; color:var(--asm-fg-muted)}
 .vk .graf-y.atas{top:28px}
