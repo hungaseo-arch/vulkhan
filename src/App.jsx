@@ -1599,86 +1599,88 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
         <Card><Empty id={filterAktif ? t("Tidak ada transaksi pada filter ini.") : t("Belum ada transaksi penjualan.")} /></Card>
       )}
 
-      {bulanan.map((b) => {
-        const onB = bulanTerbuka(b.bulan);
-        return (
-          <Card key={b.bulan}>
-            <button type="button" className="card-hd acc-hd" aria-expanded={onB} onClick={() => toggleBulan(b.bulan)}>
-              <span className="acc-chev">{onB ? "▾" : "▸"}</span>
-              <span className="acc-tgl">{bulanLabel(b.bulan, lang)}</span>
-              <span className="acc-sub">{t("{n} transaksi · {q} pcs · {v}", { n: b.n, q: fmt(b.qty), v: rp(b.total) })}</span>
-            </button>
-            {onB && b.hari.map(({ tgl, rows, total, qty }) => {
-              const onH = hariBuka.has(tgl);
-              return (
-                <div key={tgl} className="acc-hari">
-                  <button type="button" className="acc-hd sub" aria-expanded={onH} onClick={() => toggleHari(tgl)}>
-                    <span className="acc-chev">{onH ? "▾" : "▸"}</span>
-                    <span className="acc-tgl">{hariLabel(tgl, lang)}</span>
-                    <span className="acc-sub">{t("{n} transaksi · {q} pcs · {v}", { n: rows.length, q: fmt(qty), v: rp(total) })}</span>
-                  </button>
-                  {onH && (
-                    <Scroll>
-                      <table>
-                        <thead>
-                          <tr>
-                            <th scope="col">{t("No.")}</th>
-                            <th scope="col">{t("Pelanggan")}</th>
-                            <th scope="col">{t("Gudang")}</th>
-                            <th scope="col">{t("Rincian")}</th>
-                            <th scope="col" className="r">{t("Total")}</th>
-                            <th scope="col">{t("Status")}</th>
-                            <th scope="col" className="r">{t("Aksi")}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rows.map((s) => (
-                            <tr key={s.id}>
-                              <td className="n strong">{s.no}</td>
-                              <td>{cById(s.pelanggan).nama}<em className="mut2">{t("Grade {g}", { g: cById(s.pelanggan).grade })}</em></td>
-                              <td><span className="chip">{gById(s.gudang).kode}</span></td>
-                              <td className="mut">
-                                {/* tombol, bukan sel yang bisa diklik: tetap terjangkau lewat keyboard */}
-                                <button type="button" className="namelink" title={t("Lihat rincian")} onClick={() => setRinci(s)}>
-                                  {s.items.map((i, k) => (
-                                    <div key={k}>{pById(i.produk).kode} × {fmt(i.qty)}</div>
-                                  ))}
-                                </button>
-                              </td>
-                              <td className="r n strong">{rp(totalSO(s))}</td>
-                              <td><Status s={s.status} map={SO_LABEL} /></td>
-                              <td className="r">
-                                <div className="aksi">
-                                  {/* mundur hanya setelah 'kirim' — membetulkan salah tandai pembayaran */}
-                                  {SO_FLOW.indexOf(s.status) > SO_FLOW.indexOf("kirim") && (
-                                    <button className="btn sm" title={t("Kembalikan status satu langkah")} onClick={() => mundurSO(s)}>
-                                      ← {t(SO_LABEL[SO_FLOW[SO_FLOW.indexOf(s.status) - 1]].id)}
-                                    </button>
-                                  )}
-                                  {s.status !== "lunas" ? (
-                                    <button className="btn sm" onClick={() => majuSO(s)}>
-                                      → {t(SO_LABEL[SO_FLOW[SO_FLOW.indexOf(s.status) + 1]].id)}
-                                    </button>
-                                  ) : <span className="mut">{t("selesai")}</span>}
-                                  <button className="btn sm" title={t("Cetak dokumen")} onClick={() => setDok(s)}>{t("Cetak")}</button>
-                                  {can("delete") && (
-                                    <button className="btn sm danger" title={t("Hapus")}
-                                      onClick={() => minta(t("Hapus penjualan {no}? Data & mutasi stoknya ikut terhapus.", { no: s.no }), () => doDeletePenjualan(s))}>{t("Hapus")}</button>
-                                  )}
-                                </div>
-                              </td>
+      <div className="bulan-grid">
+        {bulanan.map((b) => {
+          const onB = bulanTerbuka(b.bulan);
+          return (
+            <Card key={b.bulan} cls={onB ? "luas" : ""}>
+              <button type="button" className="card-hd acc-hd" aria-expanded={onB} onClick={() => toggleBulan(b.bulan)}>
+                <span className="acc-chev">{onB ? "▾" : "▸"}</span>
+                <span className="acc-tgl">{bulanLabel(b.bulan, lang)}</span>
+                <span className="acc-sub">{t("{n} transaksi · {q} pcs · {v}", { n: b.n, q: fmt(b.qty), v: rp(b.total) })}</span>
+              </button>
+              {onB && b.hari.map(({ tgl, rows, total, qty }) => {
+                const onH = hariBuka.has(tgl);
+                return (
+                  <div key={tgl} className="acc-hari">
+                    <button type="button" className="acc-hd sub" aria-expanded={onH} onClick={() => toggleHari(tgl)}>
+                      <span className="acc-chev">{onH ? "▾" : "▸"}</span>
+                      <span className="acc-tgl">{hariLabel(tgl, lang)}</span>
+                      <span className="acc-sub">{t("{n} transaksi · {q} pcs · {v}", { n: rows.length, q: fmt(qty), v: rp(total) })}</span>
+                    </button>
+                    {onH && (
+                      <Scroll>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th scope="col">{t("No.")}</th>
+                              <th scope="col">{t("Pelanggan")}</th>
+                              <th scope="col">{t("Gudang")}</th>
+                              <th scope="col">{t("Rincian")}</th>
+                              <th scope="col" className="r">{t("Total")}</th>
+                              <th scope="col">{t("Status")}</th>
+                              <th scope="col" className="r">{t("Aksi")}</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </Scroll>
-                  )}
-                </div>
-              );
-            })}
-          </Card>
-        );
-      })}
+                          </thead>
+                          <tbody>
+                            {rows.map((s) => (
+                              <tr key={s.id}>
+                                <td className="n strong">{s.no}</td>
+                                <td>{cById(s.pelanggan).nama}<em className="mut2">{t("Grade {g}", { g: cById(s.pelanggan).grade })}</em></td>
+                                <td><span className="chip">{gById(s.gudang).kode}</span></td>
+                                <td className="mut">
+                                  {/* tombol, bukan sel yang bisa diklik: tetap terjangkau lewat keyboard */}
+                                  <button type="button" className="namelink" title={t("Lihat rincian")} onClick={() => setRinci(s)}>
+                                    {s.items.map((i, k) => (
+                                      <div key={k}>{pById(i.produk).kode} × {fmt(i.qty)}</div>
+                                    ))}
+                                  </button>
+                                </td>
+                                <td className="r n strong">{rp(totalSO(s))}</td>
+                                <td><Status s={s.status} map={SO_LABEL} /></td>
+                                <td className="r">
+                                  <div className="aksi">
+                                    {/* mundur hanya setelah 'kirim' — membetulkan salah tandai pembayaran */}
+                                    {SO_FLOW.indexOf(s.status) > SO_FLOW.indexOf("kirim") && (
+                                      <button className="btn sm" title={t("Kembalikan status satu langkah")} onClick={() => mundurSO(s)}>
+                                        ← {t(SO_LABEL[SO_FLOW[SO_FLOW.indexOf(s.status) - 1]].id)}
+                                      </button>
+                                    )}
+                                    {s.status !== "lunas" ? (
+                                      <button className="btn sm" onClick={() => majuSO(s)}>
+                                        → {t(SO_LABEL[SO_FLOW[SO_FLOW.indexOf(s.status) + 1]].id)}
+                                      </button>
+                                    ) : <span className="mut">{t("selesai")}</span>}
+                                    <button className="btn sm" title={t("Cetak dokumen")} onClick={() => setDok(s)}>{t("Cetak")}</button>
+                                    {can("delete") && (
+                                      <button className="btn sm danger" title={t("Hapus")}
+                                        onClick={() => minta(t("Hapus penjualan {no}? Data & mutasi stoknya ikut terhapus.", { no: s.no }), () => doDeletePenjualan(s))}>{t("Hapus")}</button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </Scroll>
+                    )}
+                  </div>
+                );
+              })}
+            </Card>
+          );
+        })}
+      </div>
 
       {buka && (
         <FormPenjualan
@@ -2883,8 +2885,8 @@ const SectionTitle = ({ id, mid, children }) => (
   </div>
 );
 
-const Card = ({ title, note, children }) => (
-  <section className="card">
+const Card = ({ title, note, cls, children }) => (
+  <section className={"card" + (cls ? " " + cls : "")}>
     {title && (
       <div className="card-hd">
         <h3>{title}</h3>
@@ -3197,6 +3199,15 @@ function Style() {
 .vk .acc-hd.sub .acc-tgl{font-size:.8125rem}
 .vk .acc-hari>.scroll{border-top:1px solid var(--asm-border)}
 .vk .acc-hari:last-child>.scroll{border-radius:0 0 var(--asm-radius-lg) var(--asm-radius-lg)}
+/* Bulan yang tertutup hanya satu baris ringkasan — satu kartu per baris
+   membuang lebar layar. Yang terbuka memuat tabel transaksi, jadi ia memakai
+   seluruh baris: tabel selebar sepertiga layar tidak terbaca.
+   align-items:start supaya kartu tertutup tidak ikut setinggi tetangganya. */
+.vk .bulan-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:16px; align-items:start; margin-bottom:16px}
+.vk .bulan-grid>.card{margin-bottom:0; min-width:0}
+.vk .bulan-grid>.card.luas{grid-column:1 / -1}
+@media (max-width:1080px){.vk .bulan-grid{grid-template-columns:1fr 1fr}}
+@media (max-width:720px){.vk .bulan-grid{grid-template-columns:1fr}}
 
 /* table (Bab 11 STEP 3) */
 .vk .scroll{overflow:auto; max-width:100%;
