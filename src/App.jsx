@@ -2571,9 +2571,11 @@ function FormPutusan({ u, close, say, submit }) {
 }
 
 /* ============================ PIUTANG ============================ */
-function Piutang({ penjualan, cById, totalSO }) {
+function Piutang({ penjualan, cById, totalSO, piutang, gById, pById }) {
   const { t } = useLang();
   const [cari, setCari] = useState("");
+  const [detail, setDetail] = useState(null); // pelanggan yang dibuka dari nama
+  const [rinci, setRinci] = useState(null);   // penjualan yang dibuka dari nomor
   const { piutangRows, piutangF, agingRows, piutang90, rasio90, topPelanggan } = useMemo(
     () => hitungPiutang(penjualan, cById, totalSO),
     [penjualan, cById, totalSO],
@@ -2664,7 +2666,9 @@ function Piutang({ penjualan, cById, totalSO }) {
                   const [label, tone] = gradePiutang(x);
                   return (
                     <tr key={x.c.id}>
-                      <td>{x.c.nama}</td>
+                      <td>
+                        <button type="button" className="namelink" onClick={() => setDetail(x.c)}>{x.c.nama}</button>
+                      </td>
                       <td className="r n">{rp(x.nilai)}</td>
                       <td className={"r n " + (x.telat > 90 ? "bad" : x.telat > 30 ? "warn" : "")}>{x.telat > 0 ? t("{n} hr", { n: fmt(x.telat) }) : "—"}</td>
                       <td className="r n">{x.c.limit ? `${fmt(x.pakai)}%` : "—"}</td>
@@ -2695,8 +2699,13 @@ function Piutang({ penjualan, cById, totalSO }) {
             <tbody>
               {rincian.map((r) => (
                 <tr key={r.so.id}>
-                  <td className="n strong">{r.so.no}</td>
-                  <td>{r.c.nama}<em className="mut2">{t("Grade {g}", { g: r.c.grade })}</em></td>
+                  <td className="n strong">
+                    <button type="button" className="namelink" title={t("Lihat rincian")} onClick={() => setRinci(r.so)}>{r.so.no}</button>
+                  </td>
+                  <td>
+                    <button type="button" className="namelink" onClick={() => setDetail(r.c)}>{r.c.nama}</button>
+                    <em className="mut2">{t("Grade {g}", { g: r.c.grade })}</em>
+                  </td>
                   <td className="n">{r.so.tgl}</td>
                   <td className="n">{r.tempo}</td>
                   <td className={"r n " + (r.telat > 90 ? "bad" : r.telat > 30 ? "warn" : "")}>{r.telat > 0 ? t("{n} hr", { n: fmt(r.telat) }) : "—"}</td>
@@ -2708,6 +2717,16 @@ function Piutang({ penjualan, cById, totalSO }) {
           </table>
         </Scroll>
       </Card>
+
+      {/* tanpa onUsul/onUbah: pengajuan limit tetap di layar pelanggan */}
+      {detail && (
+        <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang}
+          gById={gById} pById={pById} close={() => setDetail(null)} />
+      )}
+      {rinci && (
+        <RincianPenjualan so={rinci} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
+          close={() => setRinci(null)} />
+      )}
     </>
   );
 }
