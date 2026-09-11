@@ -1837,6 +1837,9 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
       .sort((a, z) => z.total - a.total);
   }, [cById, totalSO]);
   const perPelanggan = useMemo(() => peringkatPelanggan(list), [list, peringkatPelanggan]);
+  /* Pembagi rata-rata bulanan = bulan di dalam rentang, bukan dua belas bulan
+     sumbu grafik: Oktober yang belum tiba tidak boleh menurunkan rata-rata. */
+  const bulanTerpakai = bulanRentang(d0, d1).length || graf.filter((g) => !g.datang).length;
 
   /* Bulan yang diklik di grafik. Bawaannya bulan terakhir yang berisi
      penjualan, supaya layar sudah menjawab sesuatu sebelum diklik. */
@@ -2078,7 +2081,7 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
           val={hargaRata(kini.total, kini.qty) == null ? "—" : `${rpRingkas(hargaRata(kini.total, kini.qty))}/pcs`}
           delta={lalu ? naikTurun(hargaRata(kini.total, kini.qty), hargaRata(lalu.total, lalu.qty)) : null} />
         <KpiTren label={t("Jumlah Transaksi")} val={t("{n} transaksi", { n: fmt(kini.n) })}
-          sub={t("rata-rata {n}/bulan", { n: fmt(graf.length ? kini.n / graf.length : 0) })} />
+          sub={t("rata-rata {n}/bulan", { n: fmt(bulanTerpakai ? kini.n / bulanTerpakai : 0) })} />
       </div>
 
       {/* Sumbu analisis. Diletakkan di bawah KPI, bukan di deret penyaring:
@@ -3927,7 +3930,10 @@ function Style() {
 .vk .delta.naik{color:var(--asm-success)}
 .vk .delta.turun{color:var(--asm-danger)}
 .vk .delta.datar{color:var(--asm-fg-muted)}
-@media (max-width:1280px){.vk .jual-kpi{grid-template-columns:1fr 1fr}}
+/* empat KPI selalu satu baris: dua baris membuat pembacanya mengira ada dua
+   kelompok angka. Baru dilipat jadi 2×2 pada lebar ponsel. */
+.vk .jual-kpi{grid-template-columns:repeat(4,1fr)}
+@media (max-width:720px){.vk .jual-kpi{grid-template-columns:1fr 1fr}}
 
 /* grafik batang + garis kuantitas, digambar tanpa pustaka grafik */
 /* kepala kartu dan jarak tepi mengikuti kartu lain (12px 16px) — kartu ini
