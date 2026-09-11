@@ -3015,7 +3015,6 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
     await Promise.all([muatUsulan(), reload()]);
     say(hasil === "disetujui" ? t("Usulan disetujui, limit kredit diperbarui.") : t("Usulan ditolak."));
   };
-  const menunggu = (usulan || []).filter((u) => u.status === "menunggu");
   const omzet = (cid) => penjualan.filter((s) => s.pelanggan === cid && s.status !== "penawaran").reduce((a, s) => a + totalSO(s), 0);
   const list = useMemo(() => {
     const q = cari.trim().toLowerCase();
@@ -3051,7 +3050,10 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
         <button className="btn pri" onClick={() => setBuka(true)}>{t("+ Pelanggan Baru")}</button>
       </SectionTitle>
 
-      {usulan !== null && (menunggu.length > 0 || can("putusan")) && (
+      {/* Kartu muncul hanya bila ada usulan — sama seperti kartu permintaan
+          hapus. Tabel kosong dengan delapan kepala kolom hanya memakan tempat
+          di atas daftar pelanggan yang sebenarnya dicari. */}
+      {usulan !== null && usulan.length > 0 && (
         <Card title={t("Usulan Limit Kredit")}
           note={t("Diajukan oleh petugas, disahkan oleh admin. Limit berubah hanya setelah disetujui.")}>
           <Scroll max={260}>
@@ -3089,7 +3091,6 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
                     </td>
                   </tr>
                 ))}
-                {(usulan || []).length === 0 && <tr><td colSpan={8}><Empty id={t("Belum ada usulan limit.")} /></td></tr>}
               </tbody>
             </table>
           </Scroll>

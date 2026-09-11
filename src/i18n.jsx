@@ -135,7 +135,6 @@ const KO = {
   "Termin sekarang: {n} hari": "현재 결제조건: {n}일",
   "Dibaca admin saat memutuskan.": "관리자 확정 시 참고",
   "Diajukan oleh {u}": "기안자 {u}",
-  "Belum ada usulan limit.": "여신한도 기안 없음",
   "Diajukan oleh petugas, disahkan oleh admin. Limit berubah hanya setelah disetujui.":
     "담당자 기안 → 관리자 확정. 승인 후에만 한도 변경",
   "Limit kredit harus angka nol atau lebih.": "여신한도는 0 이상 숫자만 입력",
