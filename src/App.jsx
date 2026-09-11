@@ -1678,7 +1678,9 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
                               <tbody>
                                 {rows.map((s) => (
                                   <tr key={s.id}>
-                                    <td className="n strong">{s.no}</td>
+                                    <td className="n strong">
+                                      <button type="button" className="namelink" title={t("Lihat rincian")} onClick={() => setRinci(s)}>{s.no}</button>
+                                    </td>
                                     <td>{cById(s.pelanggan).nama}<em className="mut2">{t("Grade {g}", { g: cById(s.pelanggan).grade })}</em></td>
                                     <td><span className="chip">{gById(s.gudang).kode}</span></td>
                                     <td className="mut">
@@ -2264,11 +2266,12 @@ function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
 }
 
 /* ============================ PELANGGAN ============================ */
-function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan, totalSO, piutang, gById, pById, say, can, minta, doDeletePelanggan, online, reload }) {
+function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan, totalSO, piutang, gById, pById, cById, say, can, minta, doDeletePelanggan, online, reload }) {
   const { t } = useLang();
   const [buka, setBuka] = useState(false);
   const [ubah, setUbah] = useState(null);       // pelanggan yang sedang diubah
   const [detail, setDetail] = useState(null);
+  const [rinci, setRinci] = useState(null);    // SO yang dibuka dari riwayat pelanggan
   const [cari, setCari] = useState("");
   // Usulan limit dimuat terpisah dari /bootstrap: hanya layar ini yang memakainya.
   const [usulan, setUsulan] = useState(null);
@@ -2436,7 +2439,12 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
         <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang}
           gById={gById} pById={pById} close={() => setDetail(null)}
           onUsul={() => { setUsul(detail); setDetail(null); }}
-          onUbah={() => { setUbah(detail); setDetail(null); }} />
+          onUbah={() => { setUbah(detail); setDetail(null); }}
+          onPilihSO={(s) => { setRinci(s); setDetail(null); }} />
+      )}
+      {rinci && (
+        <RincianPenjualan so={rinci} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
+          close={() => setRinci(null)} />
       )}
     </>
   );
@@ -2508,7 +2516,7 @@ function FormPelanggan({ c, close, say, submit }) {
   );
 }
 
-function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close, onUsul, onUbah }) {
+function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close, onUsul, onUbah, onPilihSO }) {
   const { t } = useLang();
   const box = useDialog(close);
   const judul = useId();
@@ -2570,7 +2578,11 @@ function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close, 
               <tbody>
                 {riwayat.map((s) => (
                   <tr key={s.id}>
-                    <td className="n strong">{s.no}</td>
+                    <td className="n strong">
+                      {onPilihSO
+                        ? <button type="button" className="namelink" title={t("Lihat rincian")} onClick={() => onPilihSO(s)}>{s.no}</button>
+                        : s.no}
+                    </td>
                     <td className="n mut">{s.tgl}</td>
                     <td><span className="chip">{gById(s.gudang).kode}</span></td>
                     <td className="mut">
@@ -2818,7 +2830,8 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById }) {
       {/* tanpa onUsul/onUbah: pengajuan limit tetap di layar pelanggan */}
       {detail && (
         <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang}
-          gById={gById} pById={pById} close={() => setDetail(null)} />
+          gById={gById} pById={pById} close={() => setDetail(null)}
+          onPilihSO={(s) => { setRinci(s); setDetail(null); }} />
       )}
       {umur && (
         <DaftarUmur label={t(umur.label)} rows={piutangRows.filter((r) => r.bucket === umur.k)}
