@@ -301,7 +301,6 @@ const KO = {
   "+ Penjualan Baru": "+ 새 판매",
   "Tidak ada transaksi pada filter ini.": "현재 필터에 해당 거래 없음",
   "Belum ada transaksi penjualan.": "판매 거래 없음",
-  "Periode": "기간",
   "Nilai Penjualan": "매출액",
   "Kuantitas": "판매수량",
   "Harga Rata-rata": "평균단가",
@@ -311,7 +310,9 @@ const KO = {
   "tidak ada data tahun lalu": "전년 데이터 없음",
   "rata-rata {n}/bulan": "월평균 {n}건",
   "Tren Bulanan": "월별 추이",
-  "Batang = nilai (juta) · garis = kuantitas (pcs)": "막대 = 매출액 (juta) · 선 = 판매수량 (pcs)",
+  "Batang = nilai penjualan · garis = kuantitas": "막대 = 매출액 · 선 = 판매수량",
+  "Pelanggan pada {bulan}": "{bulan} 고객별 매출",
+  "klik bulan lain pada grafik untuk berganti": "차트에서 다른 달을 클릭하면 바뀝니다",
 
   /* sumbu analisis penjualan (VLK-UI-2026-001 tahap 4) */
   "Sumbu Analisis": "분석 기준",
