@@ -56,6 +56,9 @@ let ready;
 const ensureReady = () => (ready ||= ensureUsers()
   // ensurePenjualan() punya FK ke pengguna, jadi tabel itu harus ada lebih dulu.
   .then(() => Promise.all([ensureUsulan(), ensureHapus(), ensurePelanggan(), ensurePenjualan()]))
+  // ensureWaktu() membuat wib_today(), lalu memakainya di DEFAULT kolom dan di
+  // badan trigger — jadi ia harus jalan sesudah tabel-tabelnya ada.
+  .then(() => ensureWaktu())
   .catch((e) => { ready = null; throw e; }));
 app.use((req, res, next) => ensureReady().then(() => next()).catch(next));
 
@@ -261,6 +264,63 @@ async function ensurePenjualan() {
       FROM penjualan p
       LEFT JOIN penjualan_item i ON i.penjualan = p.id
       GROUP BY p.id`;
+}
+
+/* Satu jam untuk seluruh sistem: WIB (Asia/Jakarta).
+
+   Basis datanya berjalan di UTC — `current_setting('TimeZone')` = GMT. Tujuh
+   jam di belakang Jakarta, jadi setiap hari antara pukul 00:00 dan 07:00 WIB
+   CURRENT_DATE masih menunjuk hari kemarin. Akibatnya nyata, bukan teori:
+
+   - Setiap tanggal 1 pagi, dokumen yang baru saja dibuat ditolak sebagai
+     "di luar bulan berjalan" karena basis data masih di bulan lalu.
+   - Pengiriman yang dicatat pagi hari masuk buku mutasi dengan tanggal
+     kemarin, dan rekap harian gudang ikut meleset.
+
+   wib_today() menggantikan CURRENT_DATE di mana pun tanggal itu menentukan
+   hari kerja, bukan sekadar stempel waktu. Dibuat lewat CREATE OR REPLACE dan
+   dipasang ulang di setiap cold start, seperti ensure* yang lain: tidak ada
+   migrasi manual yang harus diingat orang.
+
+   'Asia/Jakarta' ditulis apa adanya, bukan interval +7, supaya yang terbaca
+   adalah maksudnya. WIB memang tidak pernah punya daylight saving, tapi
+   nama zona tetap lebih jujur daripada angka. */
+async function ensureWaktu() {
+  await sql`
+    CREATE OR REPLACE FUNCTION wib_today() RETURNS date
+      LANGUAGE sql STABLE
+      AS $wib$ SELECT (now() AT TIME ZONE 'Asia/Jakarta')::date $wib$`;
+
+  // Tanggal bawaan tiga buku utama. Klien hampir selalu mengirim tanggalnya
+  // sendiri, tapi yang tidak mengirim pun harus dapat hari yang benar.
+  await sql`ALTER TABLE penjualan   ALTER COLUMN tgl SET DEFAULT wib_today()`;
+  await sql`ALTER TABLE pembelian   ALTER COLUMN tgl SET DEFAULT wib_today()`;
+  await sql`ALTER TABLE stok_mutasi ALTER COLUMN tgl SET DEFAULT wib_today()`;
+
+  // Kedua trigger mencatat tanggal mutasi sendiri — di sinilah CURRENT_DATE
+  // paling sering salah, karena pengiriman pagi hari adalah hal biasa.
+  await sql`
+    CREATE OR REPLACE FUNCTION trg_penjualan_kirim() RETURNS TRIGGER AS $wib$
+    BEGIN
+      IF NEW.status = 'kirim' AND OLD.status IS DISTINCT FROM 'kirim' THEN
+        INSERT INTO stok_mutasi (tgl, gudang, produk, tipe, qty, ref, catatan)
+        SELECT wib_today(), NEW.gudang, i.produk, 'keluar', -i.qty, NEW.no, 'Pengiriman penjualan'
+        FROM penjualan_item i WHERE i.penjualan = NEW.id;
+      END IF;
+      RETURN NEW;
+    END;
+    $wib$ LANGUAGE plpgsql`;
+  await sql`
+    CREATE OR REPLACE FUNCTION trg_pembelian_terima() RETURNS TRIGGER AS $wib$
+    BEGIN
+      IF NEW.status = 'diterima' AND OLD.status IS DISTINCT FROM 'diterima' THEN
+        INSERT INTO stok_mutasi (tgl, gudang, produk, tipe, qty, ref, catatan)
+        SELECT wib_today(), NEW.gudang, i.produk, 'masuk', i.qty, NEW.no, 'Penerimaan pembelian'
+        FROM pembelian_item i WHERE i.pembelian = NEW.id;
+      END IF;
+      RETURN NEW;
+    END;
+    $wib$ LANGUAGE plpgsql`;
 }
 
 async function ensureUsers() {
@@ -825,7 +885,7 @@ app.post("/api/mutasi/saldo-awal", requireRole("manager"), wrap(async (req, res)
     sql`DELETE FROM stok_mutasi
         WHERE ref = ${REF_AWAL} AND gudang = ${gudang} AND produk = ANY(${ids}::text[])`,
     sql`INSERT INTO stok_mutasi (tgl, gudang, produk, tipe, qty, ref, catatan)
-        SELECT COALESCE(${tgl || null}::date, CURRENT_DATE), ${gudang}, t.p, 'penyesuaian',
+        SELECT COALESCE(${tgl || null}::date, wib_today()), ${gudang}, t.p, 'penyesuaian',
                t.q, ${REF_AWAL}, ${String(catatan || "").trim() || "Saldo awal"}
         FROM unnest(${ids}::text[], ${qtys}::numeric[]) AS t(p, q)
         WHERE t.q <> 0
@@ -899,7 +959,7 @@ async function tolakUbahSO(user, so) {
   if (so.dibuat_oleh !== user.id)
     return "Hanya pembuat dokumen ini yang bisa mengubah atau menghapusnya.";
   const [{ ok }] = await sql`
-    SELECT date_trunc('month', ${so.tgl}::date) = date_trunc('month', CURRENT_DATE) AS ok`;
+    SELECT date_trunc('month', ${so.tgl}::date) = date_trunc('month', wib_today()) AS ok`;
   if (!ok) return "Dokumen di luar bulan berjalan — ubah/hapus harus lewat persetujuan admin.";
   return null;
 }
@@ -938,7 +998,7 @@ app.put("/api/penjualan/:id", wrap(async (req, res) => {
   // sekaligus keluar dari angka bulan yang mungkin sudah dilaporkan.
   if (req.user.peran !== "admin") {
     const [{ ok }] = await sql`
-      SELECT date_trunc('month', ${tgl}::date) = date_trunc('month', CURRENT_DATE) AS ok`;
+      SELECT date_trunc('month', ${tgl}::date) = date_trunc('month', wib_today()) AS ok`;
     if (!ok) return res.status(400).json({ error: "Tanggal harus tetap di dalam bulan berjalan." });
   }
 

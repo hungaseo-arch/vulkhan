@@ -46,12 +46,19 @@ const hargaRata = (total, qty) => (qty ? Number(total) / qty : null);
    ±0.5% dianggap mendatar — derau bulanan bukan tren. */
 const arah = (n) => (n == null ? "" : n > 0.5 ? "naik" : n < -0.5 ? "turun" : "datar");
 const uid = (p) => p + "-" + Math.random().toString(36).slice(2, 8).toUpperCase();
-/* tanggal hari ini (zona waktu lokal) sebagai YYYY-MM-DD — dihitung saat dipakai,
-   bukan konstanta, agar formulir & nama berkas selalu memakai tanggal berjalan */
-const today = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
+/* Tanggal berjalan menurut WIB sebagai YYYY-MM-DD — dihitung saat dipakai,
+   bukan konstanta, agar formulir & nama berkas selalu memakai tanggal berjalan.
+
+   Sengaja BUKAN jam peramban. Perusahaannya di Jakarta, tapi yang membuka
+   layar ini belum tentu: dari Seoul (UTC+9) jam peramban sudah berganti hari
+   dua jam sebelum pabriknya, dan transaksi hari itu akan lahir dengan tanggal
+   besok. Basis datanya sendiri berjalan di UTC, tujuh jam di belakang — jadi
+   tanpa satu acuan tetap ada tiga jam yang berbeda dalam satu aplikasi.
+
+   WIB tidak mengenal daylight saving, jadi geser +7 jam lalu baca tanggal
+   UTC-nya sudah tepat sepanjang tahun. */
+const WIB_OFFSET = 7 * 60 * 60 * 1000;
+const today = () => new Date(Date.now() + WIB_OFFSET).toISOString().slice(0, 10);
 
 /* Nomor dokumen berurutan: PREFIX-YYMM-### berdasarkan nomor tertinggi yang
    sudah ada pada bulan yang sama — menghindari tabrakan nomor acak. */
@@ -1027,7 +1034,7 @@ const AGING_DEF = [
    SO berstatus "kirim"/"tagihan" = sudah dikirim tapi belum lunas.
    Jatuh tempo = tanggal SO + termin pelanggan (default 30 hari bila kosong). */
 const hitungPiutang = (penjualan, cById, totalSO) => {
-  const hariIni = new Date().toISOString().slice(0, 10);
+  const hariIni = today(); // WIB — umur piutang ikut acuan yang sama
   const piutangRows = penjualan
     .filter((s) => ["kirim", "tagihan"].includes(s.status))
     .map((s) => {
