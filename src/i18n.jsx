@@ -372,7 +372,9 @@ const KO = {
 
   /* ---------- formulir penjualan ---------- */
   "Penjualan Baru": "새 판매",
+  "Ubah Penjualan {no}": "판매 {no} 수정",
   "Simpan Penawaran": "견적 저장",
+  "Simpan Perubahan": "수정 저장",
   "Gudang Pengirim": "출고 창고",
   "Rincian Barang": "품목 내역",
   "Harga": "단가",
@@ -450,6 +452,7 @@ const KO = {
   "Catatan internal, tidak dicetak.": "내부 메모 — 인쇄 제외",
   "Hanya berubah lewat usulan yang disetujui admin.": "관리자 승인 기안으로만 변경 가능",
   "{nama} diperbarui.": "{nama} 수정 완료",
+  "{no} diperbarui.": "{no} 수정 완료",
   "Nama pelanggan wajib diisi.": "고객명 필수",
   "Hapus pelanggan {nama}?": "고객 {nama} 삭제 — 진행?",
   "Tidak ada pelanggan yang cocok.": "일치 고객 없음",

@@ -53,7 +53,9 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }));
 // Seed pengguna bawaan sekali (memoized) — berjalan di lokal & serverless.
 // Reset ke null bila gagal agar dicoba lagi pada request berikutnya.
 let ready;
-const ensureReady = () => (ready ||= Promise.all([ensureUsers(), ensureUsulan(), ensureHapus(), ensurePelanggan()])
+const ensureReady = () => (ready ||= ensureUsers()
+  // ensurePenjualan() punya FK ke pengguna, jadi tabel itu harus ada lebih dulu.
+  .then(() => Promise.all([ensureUsulan(), ensureHapus(), ensurePelanggan(), ensurePenjualan()]))
   .catch((e) => { ready = null; throw e; }));
 app.use((req, res, next) => ensureReady().then(() => next()).catch(next));
 
@@ -233,6 +235,32 @@ async function ensurePelanggan() {
   await sql`ALTER TABLE pelanggan ADD COLUMN IF NOT EXISTS npwp    TEXT NOT NULL DEFAULT ''`;
   await sql`ALTER TABLE pelanggan ADD COLUMN IF NOT EXISTS sales   TEXT NOT NULL DEFAULT ''`;
   await sql`ALTER TABLE pelanggan ADD COLUMN IF NOT EXISTS catatan TEXT NOT NULL DEFAULT ''`;
+}
+
+/* Kolom pemilik dokumen penjualan. Dipakai aturan "boleh ubah/hapus sendiri
+   selama masih bulan berjalan" — lihat tolakUbahSO() di bawah. Boleh NULL:
+   348 baris hasil import historis tidak punya pembuat, jadi hanya admin yang
+   bisa menyentuhnya, dan itu memang yang diinginkan.
+
+   ON DELETE SET NULL, bukan penolakan: menghapus pengguna tidak boleh gagal
+   hanya karena ia pernah membuat transaksi. Dokumennya tetap ada, pemiliknya
+   kosong, dan haknya jatuh kembali ke admin — sama seperti baris import.
+
+   v_penjualan menyebut kolomnya satu per satu, jadi ALTER saja tidak membuat
+   kolom ini muncul di /bootstrap — view-nya harus dibuat ulang. CREATE OR
+   REPLACE VIEW hanya boleh MENAMBAH kolom di URUTAN PALING BELAKANG, jadi
+   dibuat_oleh ditaruh sesudah total, bukan mengikuti urutan tabelnya. */
+async function ensurePenjualan() {
+  await sql`ALTER TABLE penjualan ADD COLUMN IF NOT EXISTS dibuat_oleh TEXT
+    REFERENCES pengguna(id) ON DELETE SET NULL`;
+  await sql`
+    CREATE OR REPLACE VIEW v_penjualan AS
+      SELECT p.id, p.no, p.tgl, p.pelanggan, p.gudang, p.status,
+             COALESCE(SUM(i.qty * i.harga),0) AS total,
+             p.dibuat_oleh
+      FROM penjualan p
+      LEFT JOIN penjualan_item i ON i.penjualan = p.id
+      GROUP BY p.id`;
 }
 
 async function ensureUsers() {
@@ -844,14 +872,103 @@ app.post("/api/penjualan", wrap(async (req, res) => {
   // Header + semua item dalam satu transaksi & satu perjalanan HTTP ke Neon:
   // tidak ada SO tanpa item bila salah satu insert gagal.
   const [[row]] = await sql.transaction([
-    sql`INSERT INTO penjualan (id, no, tgl, pelanggan, gudang, status)
-        VALUES (${s.id}, ${s.no}, ${s.tgl}, ${s.pelanggan}, ${s.gudang}, 'penawaran')
+    sql`INSERT INTO penjualan (id, no, tgl, pelanggan, gudang, status, dibuat_oleh)
+        VALUES (${s.id}, ${s.no}, ${s.tgl}, ${s.pelanggan}, ${s.gudang}, 'penawaran', ${req.user.id})
         RETURNING *`,
     ...s.items.map((it) => sql`
         INSERT INTO penjualan_item (penjualan, produk, qty, harga)
         VALUES (${s.id}, ${it.produk}, ${it.qty}, ${it.harga})`),
   ]);
   res.status(201).json(row);
+}));
+
+/* "Dokumen bulan berjalan boleh diperbaiki sendiri."
+
+   Aturannya: admin bebas; selain itu hanya PEMBUAT dokumen, dan hanya selama
+   tanggal dokumen masih di bulan berjalan. Dokumen bulan lalu tetap lewat
+   usulan penghapusan seperti sebelumnya. Baris hasil import historis tidak
+   punya dibuat_oleh, jadi otomatis jatuh ke admin saja.
+
+   Perbandingan bulannya dikerjakan Postgres, bukan Node: kalau server dan
+   klien masing-masing punya "bulan berjalan" sendiri, tombolnya bisa muncul
+   di hari yang servernya sudah menolak. Satu jam saja yang dipercaya. */
+async function tolakUbahSO(user, so) {
+  if (user.peran === "admin") return null;
+  if (!so.dibuat_oleh)
+    return "Dokumen lama tanpa pembuat — hanya admin yang bisa mengubah atau menghapusnya.";
+  if (so.dibuat_oleh !== user.id)
+    return "Hanya pembuat dokumen ini yang bisa mengubah atau menghapusnya.";
+  const [{ ok }] = await sql`
+    SELECT date_trunc('month', ${so.tgl}::date) = date_trunc('month', CURRENT_DATE) AS ok`;
+  if (!ok) return "Dokumen di luar bulan berjalan — ubah/hapus harus lewat persetujuan admin.";
+  return null;
+}
+
+/* Ubah isi SO. Nomor dan status TIDAK ikut berubah: nomor adalah kunci yang
+   menautkan buku mutasi (stok_mutasi.ref), dan status punya jalurnya sendiri
+   di PATCH .../status yang memeriksa stok serta memicu trigger.
+
+   Trigger t_penjualan_kirim hanya menyala saat status BERPINDAH, jadi pada
+   penyuntingan biasa ia diam saja dan mutasi lamanya akan menggantung dengan
+   qty/gudang yang sudah tidak cocok. Karena itu mutasinya disusun ulang di
+   sini — tapi HANYA bila dokumen ini memang sudah punya jejak mutasi. Kalau
+   bukunya pernah dikosongkan dengan sengaja, penyuntingan tidak boleh
+   menghidupkannya kembali satu per satu.
+
+   Stok sengaja TIDAK diperiksa di sini (berbeda dari perpindahan ke 'kirim'):
+   pemeriksaan itu perlu mengembalikan dulu qty yang dipesan dokumen ini
+   sendiri, dan kalau bukunya tidak dipelihara, setiap koreksi bulan berjalan
+   akan tertolak justru saat paling dibutuhkan. */
+app.put("/api/penjualan/:id", wrap(async (req, res) => {
+  const [so] = await sql`SELECT * FROM penjualan WHERE id = ${req.params.id}`;
+  if (!so) return res.status(404).json({ error: "Data penjualan tidak ditemukan." });
+  const tolak = await tolakUbahSO(req.user, so);
+  if (tolak) return res.status(403).json({ error: tolak });
+
+  const s = req.body || {};
+  if (!Array.isArray(s.items) || !s.items.length)
+    return res.status(400).json({ error: "Minimal satu baris barang." });
+
+  const tgl = s.tgl || so.tgl;
+  const pelanggan = s.pelanggan || so.pelanggan;
+  const gudang = s.gudang || so.gudang;
+
+  // Tanggal baru harus tetap di bulan berjalan. Tanpa ini satu penyuntingan
+  // bisa memindahkan dokumen ke bulan lalu — keluar dari jangkauan aturan ini
+  // sekaligus keluar dari angka bulan yang mungkin sudah dilaporkan.
+  if (req.user.peran !== "admin") {
+    const [{ ok }] = await sql`
+      SELECT date_trunc('month', ${tgl}::date) = date_trunc('month', CURRENT_DATE) AS ok`;
+    if (!ok) return res.status(400).json({ error: "Tanggal harus tetap di dalam bulan berjalan." });
+  }
+
+  const [jejak] = await sql`
+    SELECT tgl, catatan FROM stok_mutasi WHERE ref = ${so.no} ORDER BY id LIMIT 1`;
+
+  // Satu transaksi: header, item, lalu mutasi. INSERT ... SELECT mutasi harus
+  // paling belakang karena ia membaca penjualan_item yang baru ditulis di atas.
+  const perintah = [
+    sql`UPDATE penjualan SET tgl = ${tgl}, pelanggan = ${pelanggan}, gudang = ${gudang}
+        WHERE id = ${so.id}`,
+    sql`DELETE FROM penjualan_item WHERE penjualan = ${so.id}`,
+    ...s.items.map((it) => sql`
+        INSERT INTO penjualan_item (penjualan, produk, qty, harga)
+        VALUES (${so.id}, ${it.produk}, ${it.qty}, ${it.harga})`),
+  ];
+  if (jejak) {
+    perintah.push(sql`DELETE FROM stok_mutasi WHERE ref = ${so.no}`);
+    // tgl & catatan mutasi lama dipertahankan: yang berubah isinya, bukan
+    // kapan barangnya keluar.
+    perintah.push(sql`
+        INSERT INTO stok_mutasi (tgl, gudang, produk, tipe, qty, ref, catatan)
+        SELECT ${jejak.tgl}, ${gudang}, i.produk, 'keluar', -i.qty, ${so.no}, ${jejak.catatan}
+        FROM penjualan_item i WHERE i.penjualan = ${so.id}`);
+  }
+  await sql.transaction(perintah);
+
+  const [row] = await sql`SELECT * FROM v_penjualan WHERE id = ${so.id}`;
+  const items = await sql`SELECT * FROM penjualan_item WHERE penjualan = ${so.id}`;
+  res.json({ ...row, items });
 }));
 
 // pindah status (trigger DB otomatis membuat mutasi keluar saat 'kirim').
@@ -921,12 +1038,17 @@ app.patch("/api/pembelian/:id/status", wrap(async (req, res) => {
   res.json(row);
 }));
 
-// ---------- hapus langsung (admin saja) ----------
+// ---------- hapus langsung (admin; penjualan juga oleh pembuatnya) ----------
 // Peran lain memakai /api/hapus-usulan; lihat catatan di sana.
 // Penjualan/pembelian: buang juga baris item & mutasi stok yang dibuat (ref = no).
-app.delete("/api/penjualan/:id", requireRole("admin"), wrap(async (req, res) => {
-  const [row] = await sql`SELECT no FROM penjualan WHERE id = ${req.params.id}`;
+// Penjualan adalah satu-satunya yang longgar: pembuatnya boleh menghapus
+// dokumen bulan berjalan tanpa persetujuan (lihat tolakUbahSO). Sisanya —
+// bulan lalu, dokumen orang lain, import lama — tetap admin atau usulan hapus.
+app.delete("/api/penjualan/:id", wrap(async (req, res) => {
+  const [row] = await sql`SELECT no, tgl, dibuat_oleh FROM penjualan WHERE id = ${req.params.id}`;
   if (!row) return res.status(404).json({ error: "Data penjualan tidak ditemukan." });
+  const tolak = await tolakUbahSO(req.user, row);
+  if (tolak) return res.status(403).json({ error: tolak });
   // Tiga DELETE dalam satu transaksi — mutasi, item, dan header hilang bersama.
   await sql.transaction([
     sql`DELETE FROM stok_mutasi WHERE ref = ${row.no}`,

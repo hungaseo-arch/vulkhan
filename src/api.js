@@ -88,12 +88,18 @@ export const api = {
   saldoAwal: (gudang) => j(`/mutasi/saldo-awal?gudang=${encodeURIComponent(gudang)}`),
   simpanSaldoAwal: (b) => j("/mutasi/saldo-awal", { method: "POST", body: b }),
   createPenjualan: (s) => j("/penjualan", { method: "POST", body: s }),
+  // ubah isi SO. Nomor & status tidak ikut dikirim: keduanya tidak boleh
+  // berubah lewat jalur ini (nomor menaut buku mutasi, status punya endpoint
+  // sendiri). Server menolak bila bukan admin / bukan pembuat / bukan bulan ini.
+  updatePenjualan: (id, s) => j(`/penjualan/${id}`, { method: "PUT", body: s }),
   statusPenjualan: (id, status) => j(`/penjualan/${id}/status`, { method: "PATCH", body: { status } }),
   createPembelian: (p) => j("/pembelian", { method: "POST", body: p }),
   statusPembelian: (id, status) => j(`/pembelian/${id}/status`, { method: "PATCH", body: { status } }),
 
-  // hapus langsung (admin saja — server memverifikasi via header). Peran lain
-  // memakai usulan penghapusan di bawah; persetujuannya yang menjalankan hapus.
+  // hapus langsung (server memverifikasi via token, bukan lewat UI). Admin
+  // bebas; untuk penjualan, pembuat dokumen juga boleh menghapus miliknya
+  // selama masih bulan berjalan. Selebihnya memakai usulan penghapusan di
+  // bawah; persetujuannya yang menjalankan hapus.
   deletePenjualan: (id) => j(`/penjualan/${id}`, { method: "DELETE" }),
   deletePembelian: (id) => j(`/pembelian/${id}`, { method: "DELETE" }),
   deletePelanggan: (id) => j(`/pelanggan/${id}`, { method: "DELETE" }),

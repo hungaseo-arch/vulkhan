@@ -568,6 +568,15 @@ function Aplikasi() {
     say(t("{no} dibuat sebagai Penawaran.", { no: so.no }));
   }
 
+  /* Ubah isi SO yang sudah ada. Nomor & status tidak ikut: nomor menaut buku
+     mutasi, status punya jalur majuSO/mundurSO sendiri. Server yang memutuskan
+     boleh atau tidak — lihat bisaUbahSO / tolakUbahSO. */
+  async function doUpdatePenjualan(so) {
+    if (online) { await api.updatePenjualan(so.id, so); await reload(); }
+    else setPenjualan((l) => l.map((x) => (x.id === so.id ? { ...x, ...so } : x)));
+    say(t("{no} diperbarui.", { no: so.no }));
+  }
+
   async function doCreatePembelian(po) {
     if (online) { await api.createPembelian(po); await reload(); }
     else setPembelian((l) => [...l, po]);
@@ -635,7 +644,7 @@ function Aplikasi() {
     produk, pelanggan, pemasok, mutasi, mutasiLimit, penjualan, pembelian,
     getStok, stokTotal, pById, cById, gById, sById, totalSO,
     piutang, piutangTotal, majuSO, mundurSO, majuPO, mundurPO, say, online,
-    doTransfer, doAdjust, doSaldoAwal, doCreatePenjualan, doCreatePembelian, doCreatePelanggan,
+    doTransfer, doAdjust, doSaldoAwal, doCreatePenjualan, doUpdatePenjualan, doCreatePembelian, doCreatePelanggan,
     doUpdatePelanggan, user, can, minta, doDeletePenjualan, doDeletePembelian, doDeletePelanggan, reload,
     hapusUsulan, ajukanHapus, putusanHapus,
   };
@@ -1778,13 +1787,30 @@ const bacaPeriodeUrl = () => {
   };
 };
 
-function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cById, gById, totalSO, majuSO, mundurSO, getStok, piutang, say, can, minta, doDeletePenjualan, hapusUsulan, ajukanHapus, putusanHapus }) {
+/* "Dokumen bulan berjalan boleh diperbaiki pembuatnya sendiri."
+
+   Admin bebas. Selain itu: harus pembuat dokumen (penjualan.dibuat_oleh) DAN
+   tanggalnya masih di bulan berjalan. Dokumen bulan lalu tetap lewat usulan
+   hapus seperti sebelumnya, dan baris hasil import historis tidak punya
+   dibuat_oleh sehingga jatuh ke admin saja.
+
+   Ini hanya menentukan tombolnya muncul atau tidak — aturan yang mengikat ada
+   di server (tolakUbahSO di api-server.js). Tanggal dibandingkan sebagai teks
+   'YYYY-MM' supaya tidak ikut bergeser oleh zona waktu peramban. */
+const bisaUbahSO = (so, user) =>
+  !!user && !!so &&
+  (user.peran === "admin" ||
+    (!!so.dibuat_oleh && so.dibuat_oleh === user.id &&
+      String(so.tgl).slice(0, 7) === today().slice(0, 7)));
+
+function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pelanggan, produk, pById, cById, gById, totalSO, majuSO, mundurSO, getStok, piutang, say, can, minta, doDeletePenjualan, hapusUsulan, ajukanHapus, putusanHapus }) {
   const { t, lang } = useLang();
   const [rinci, setRinci] = useState(null); // penjualan yang rinciannya dibuka
   const [baru, setBaru] = useState(false);
   const [dok, setDok] = useState(null);
   const [detail, setDetail] = useState(null); // pelanggan yang dibuka dari peringkat
   const [tagihan, setTagihan] = useState(null); // piutang satu pelanggan
+  const [sunting, setSunting] = useState(null);       // SO yang sedang diubah
   const [usulHapus, setUsulHapus] = useState(null);   // SO yang diusulkan dihapus
   const [putusanH, setPutusanH] = useState(null);     // usulan hapus yang diputuskan
   const tungguHapus = useMemo(() => menungguHapus(hapusUsulan, "penjualan"), [hapusUsulan]);
@@ -2280,6 +2306,15 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
           nomor={(tgl) => nomorBaru("SO", penjualan, tgl)}
         />
       )}
+      {/* Form yang sama dipakai untuk mengubah: yang berbeda hanya nilai awal,
+          judul, dan bahwa nomor/tanggal dokumen dipertahankan apa adanya. */}
+      {sunting && (
+        <FormPenjualan
+          awal={sunting}
+          close={() => setSunting(null)} pelanggan={pelanggan} produk={produk} getStok={getStok}
+          piutang={piutang} say={say} submit={doUpdatePenjualan}
+        />
+      )}
       {/* Tabel ringkas tidak lagi memuat kolom aksi — semua tindakan atas satu
           transaksi pindah ke dialog rinciannya, tempat angkanya juga terbaca. */}
       {rinci && (
@@ -2287,10 +2322,14 @@ function Penjualan({ penjualan, doCreatePenjualan, pelanggan, produk, pById, cBy
           close={() => setRinci(null)} onCetak={() => { setDok(rinci); setRinci(null); }}
           onMaju={rinci.status !== "lunas" ? () => { majuSO(rinci); setRinci(null); } : null}
           onMundur={SO_FLOW.indexOf(rinci.status) > SO_FLOW.indexOf("kirim") ? () => { mundurSO(rinci); setRinci(null); } : null}
+          /* Ubah & Hapus langsung dibuka aturan yang sama: admin, atau pembuat
+             dokumen selama masih bulan berjalan. Di luar itu tombol hapusnya
+             tetap berarti "Usul Hapus" dan tombol ubahnya tidak muncul. */
+          onUbah={bisaUbahSO(rinci, user) ? () => { setSunting(rinci); setRinci(null); } : null}
           hapus={{
-            label: can("delete") ? t("Hapus") : t("Usul Hapus"),
+            label: bisaUbahSO(rinci, user) ? t("Hapus") : t("Usul Hapus"),
             tunggu: tungguHapus.has(rinci.id),
-            aksi: can("delete")
+            aksi: bisaUbahSO(rinci, user)
               ? () => minta(t("Hapus penjualan {no}? Data & mutasi stoknya ikut terhapus.", { no: rinci.no }),
                   () => { doDeletePenjualan(rinci); setRinci(null); })
               /* dialog berurutan, bukan bertumpuk: rincian ditutup dulu */
@@ -2475,7 +2514,7 @@ const PENERBIT = {
 /* Rincian satu penjualan: layar tabel hanya memuat kode & qty, sedangkan harga
    satuan dan subtotal per baris baru terbaca di sini — tanpa harus membuka
    dokumen cetak yang formatnya untuk pelanggan, bukan untuk petugas. */
-function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, onMaju, onMundur, hapus }) {
+function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, onMaju, onMundur, onUbah, hapus }) {
   const { t, lang } = useLang();
   const box = useDialog(close);
   const judul = useId();
@@ -2546,6 +2585,7 @@ function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, on
           ) : (
             <button className="btn danger" onClick={hapus.aksi}>{hapus.label}</button>
           ))}
+          {onUbah && <button className="btn" onClick={onUbah}>{t("Ubah")}</button>}
           <span className="ft-isi" />
           {onMundur && (
             <button className="btn" title={t("Kembalikan status satu langkah")} onClick={onMundur}>
@@ -2701,12 +2741,20 @@ function DokumenPenjualan({ so, pById, cById, gById, totalSO, close }) {
   );
 }
 
-function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit, nomor }) {
+/* Dipakai dua arah: tanpa `awal` = penjualan baru, dengan `awal` = mengubah
+   dokumen yang sudah ada. Yang TIDAK bisa diubah dari sini adalah nomor,
+   tanggal, dan status — nomor menaut buku mutasi, tanggal menentukan dokumen
+   ini masih boleh disentuh atau tidak, dan status punya tombol majunya sendiri. */
+function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit, nomor, awal }) {
   /* yang bisa dijual: ban jadi + Ban Jasa */
   const { t } = useLang();
   const jadi = produk.filter((p) => ["jadi", "jasa"].includes(p.kategori));
-  const [f, setF] = useState({ pelanggan: "", gudang: "", tgl: today() });
-  const [items, setItems] = useState([{ produk: "", qty: "", harga: "" }]);
+  const [f, setF] = useState(awal
+    ? { pelanggan: awal.pelanggan, gudang: awal.gudang, tgl: awal.tgl }
+    : { pelanggan: "", gudang: "", tgl: today() });
+  const [items, setItems] = useState(awal
+    ? awal.items.map((i) => ({ produk: i.produk, qty: String(i.qty), harga: String(i.harga) }))
+    : [{ produk: "", qty: "", harga: "" }]);
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
 
   const ubah = (i, k, v) => setItems((l) => l.map((x, n) => {
@@ -2721,7 +2769,13 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
      masuk dengan limit_kredit bawaan 0, dan menolaknya di sini membuat mereka
      tidak bisa dijual sama sekali. Layar pelanggan sudah membaca 0 begitu juga. */
   const adaLimit = punyaLimit(c);
-  const sisaLimit = adaLimit ? c.limit - piutang(c.id) - total : null;
+  /* Saat mengubah dokumen yang sudah masuk hitungan piutang (kirim/tagihan),
+     nilai LAMA-nya sudah ada di dalam piutang(c.id). Kalau tidak dikembalikan
+     dulu, total baru akan dihitung dua kali dan koreksi kecil pun tertolak
+     sebagai "melebihi limit". */
+  const sudahDihitung = awal && ["kirim", "tagihan"].includes(awal.status)
+    ? awal.items.reduce((a, i) => a + i.qty * i.harga, 0) : 0;
+  const sisaLimit = adaLimit ? c.limit - (piutang(c.id) - sudahDihitung) - total : null;
   const lewatLimit = sisaLimit !== null && sisaLimit < 0;
   /* baris yang qty-nya melebihi stok gudang pengirim — masih boleh disimpan
      sebagai penawaran, tapi pengiriman akan ditolak sampai stok mencukupi. */
@@ -2738,17 +2792,22 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
     if (valid.some((i) => !(Number(i.harga) >= 0))) return say(t("Harga harus berupa angka."), true);
     if (lewatLimit) return say(t("Melebihi limit kredit {nama} sebesar {v}.", { nama: c.nama, v: rp(-sisaLimit) }), true);
     try {
-      await submit({
-        id: uid("SO"), no: nomor(f.tgl),
-        tgl: f.tgl, pelanggan: f.pelanggan, gudang: f.gudang, status: "penawaran",
-        items: valid.map((i) => ({ produk: i.produk, qty: Number(i.qty), harga: Number(i.harga) })),
-      });
+      const baris = valid.map((i) => ({ produk: i.produk, qty: Number(i.qty), harga: Number(i.harga) }));
+      await submit(awal
+        ? { id: awal.id, no: awal.no, tgl: awal.tgl, pelanggan: f.pelanggan, gudang: f.gudang, items: baris }
+        : {
+            id: uid("SO"), no: nomor(f.tgl),
+            tgl: f.tgl, pelanggan: f.pelanggan, gudang: f.gudang, status: "penawaran",
+            items: baris,
+          });
       close();
     } catch (e) { say(e.message, true); }
   };
 
   return (
-    <Modal title={t("Penjualan Baru")} close={close} onSave={kirim} wide saveLabel={t("Simpan Penawaran")}>
+    <Modal title={awal ? t("Ubah Penjualan {no}", { no: awal.no }) : t("Penjualan Baru")}
+      close={close} onSave={kirim} wide
+      saveLabel={awal ? t("Simpan Perubahan") : t("Simpan Penawaran")}>
       <div className="row2">
         <Combo label={t("Pelanggan")} value={f.pelanggan} onChange={set("pelanggan")} placeholder={t("-- Pilih Pelanggan --")} opts={pelanggan.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
         <Combo label={t("Gudang Pengirim")} value={f.gudang} onChange={set("gudang")} placeholder={t("-- Pilih Gudang --")} opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
