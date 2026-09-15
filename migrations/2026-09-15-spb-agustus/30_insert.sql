@@ -7,6 +7,9 @@
 --   · stok_mutasi  = tipe 'keluar', qty 음수, ref = so_no
 BEGIN;
 
+-- 임시 테이블은 세션에 남습니다. Neon 콘솔처럼 세션이 유지되는 곳에서는
+-- 재실행할 때 "relation already exists" 로 막히므로 먼저 지웁니다.
+DROP TABLE IF EXISTS so_baru;
 CREATE TEMP TABLE so_baru AS
 SELECT DISTINCT s.so_no
 FROM stg_spb_2608 s
