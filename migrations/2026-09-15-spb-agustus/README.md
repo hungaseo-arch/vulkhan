@@ -81,6 +81,7 @@ psql "$DATABASE_URL" -f 00_staging.sql   # 스테이징만. 본 테이블 안 �
 psql "$DATABASE_URL" -f 10_dry_run.sql   # 읽기 전용. 출력 확인 필수
 psql "$DATABASE_URL" -f 20_master.sql    # 신규 거래처·품목 생성
 psql "$DATABASE_URL" -f 30_insert.sql    # 판매 83라인 적재
+psql "$DATABASE_URL" -f 40_verifikasi.sql # 읽기 전용 사후 확인
 ```
 
 `30_insert.sql` 은 매칭 안 되는 거래처·품목이 남아 있으면 `RAISE EXCEPTION`
