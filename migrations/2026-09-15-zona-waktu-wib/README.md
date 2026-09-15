@@ -77,6 +77,22 @@ Neon 인스턴스는 **UTC(GMT)** 로 돕니다. production 에서 직접 확인
 `20_verifikasi.sql` 기대값: 기본값 3개가 전부 `wib_today()`, 3번 쿼리는 0행.
 `selisih_hari` 는 WIB 00~07시에 실행하면 `1`, 그 밖의 시간이면 `0` 입니다.
 
+## 적용 완료 (2026-09-15)
+
+배포 후 production 에서 확인했습니다. 콘솔에서 `10_wib.sql` 을 따로 돌리지
+않았고, 배포된 코드의 `ensureWaktu()` 가 첫 요청에서 전부 적용했습니다.
+
+| 확인 | 결과 |
+|---|---|
+| `wib_today()` 호출 | 에러 없이 `2026-09-15` — 함수 생성됨 |
+| `CURRENT_DATE` 와의 차이 | 0 (확인 시각 WIB 16시대라 정상. 갈라지는 건 00~07시뿐) |
+| `tgl` 기본값 3개 | `pembelian` / `penjualan` / `stok_mutasi` 전부 `wib_today()` |
+
+이번 작업의 유일한 불확실성은 `$wib$ ... $wib$` 로 dollar-quote 한
+`CREATE FUNCTION` 본문이 Neon serverless 드라이버(HTTP)를 통과하는가였습니다
+— 리포에 전례가 없었습니다. **통과합니다.** 본문 안의 세미콜론도 문제되지
+않습니다. 앞으로 `ensure*` 에서 함수·트리거를 만들어도 됩니다.
+
 ## 남는 것
 
 이미 적재된 과거 데이터는 손대지 않았습니다. 1~8월 임포트분은 원본 엑셀의
