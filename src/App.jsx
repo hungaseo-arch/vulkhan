@@ -247,6 +247,13 @@ const HAPUS_LABEL = { penjualan: "Penjualan", pembelian: "Pembelian", pelanggan:
 const menungguHapus = (usulan, jenis) =>
   new Set((usulan || []).filter((u) => u.jenis === jenis && u.status === "menunggu").map((u) => u.sasaran));
 
+/* limit_kredit bawaan di basis data adalah 0, dan pelanggan hasil impor masuk
+   tanpa angka sendiri — jadi 0 berarti "belum diatur", bukan "tidak boleh
+   berutang". Keduanya harus dibaca sama di seluruh layar: tanpa ini, pelanggan
+   impor tidak bisa dijual sama sekali dan selalu tampil melebihi limit. */
+const punyaLimit = (c) => Number(c?.limit) > 0;
+const lewatiLimit = (c, piutang) => punyaLimit(c) && piutang > c.limit;
+
 const ROLE_LABEL = {
   admin:   { id: "Admin", desc: "Akses penuh" },
   manager: { id: "Manajer", desc: "+ Hapus" },
@@ -1025,7 +1032,7 @@ const hitungPiutang = (penjualan, cById, totalSO) => {
     perPelanggan.set(r.c.id, cur);
   });
   const topPelanggan = [...perPelanggan.values()]
-    .map((x) => ({ ...x, pakai: x.c.limit ? (x.nilai / x.c.limit) * 100 : 0 }))
+    .map((x) => ({ ...x, pakai: punyaLimit(x.c) ? (x.nilai / x.c.limit) * 100 : 0 }))
     .sort((a, b) => b.nilai - a.nilai);
 
   return { piutangRows, piutangF, agingRows, piutang90, rasio90, topPelanggan };
@@ -2710,7 +2717,12 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
   }));
   const total = items.reduce((a, i) => a + (Number(i.qty) || 0) * (Number(i.harga) || 0), 0);
   const c = pelanggan.find((p) => p.id === f.pelanggan) || {};
-  const sisaLimit = (c.limit || 0) - piutang(c.id) - total;
+  /* limit 0 = belum diatur, bukan "tidak boleh berutang": pelanggan hasil impor
+     masuk dengan limit_kredit bawaan 0, dan menolaknya di sini membuat mereka
+     tidak bisa dijual sama sekali. Layar pelanggan sudah membaca 0 begitu juga. */
+  const adaLimit = punyaLimit(c);
+  const sisaLimit = adaLimit ? c.limit - piutang(c.id) - total : null;
+  const lewatLimit = sisaLimit !== null && sisaLimit < 0;
   /* baris yang qty-nya melebihi stok gudang pengirim — masih boleh disimpan
      sebagai penawaran, tapi pengiriman akan ditolak sampai stok mencukupi. */
   const lebihStok = items.filter((i) => Number(i.qty) > 0 && Number(i.qty) > getStok(f.gudang, i.produk));
@@ -2724,7 +2736,7 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
     if (!valid.length) return say(t("Tambahkan minimal satu baris barang."), true);
     if (valid.some((i) => !i.produk)) return say(t("Pilih barang untuk setiap baris."), true);
     if (valid.some((i) => !(Number(i.harga) >= 0))) return say(t("Harga harus berupa angka."), true);
-    if (sisaLimit < 0) return say(t("Melebihi limit kredit {nama} sebesar {v}.", { nama: c.nama, v: rp(-sisaLimit) }), true);
+    if (lewatLimit) return say(t("Melebihi limit kredit {nama} sebesar {v}.", { nama: c.nama, v: rp(-sisaLimit) }), true);
     try {
       await submit({
         id: uid("SO"), no: nomor(f.tgl),
@@ -2770,9 +2782,13 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
 
       <div className="sum">
         <div><span>{t("Total")}</span><b className="n">{rp(total)}</b></div>
-        <div><span>{t("Sisa Limit Kredit")}</span><b className={"n " + (sisaLimit < 0 ? "bad" : "ok")}>{rp(sisaLimit)}</b></div>
+        <div><span>{t("Sisa Limit Kredit")}</span>
+          {adaLimit
+            ? <b className={"n " + (lewatLimit ? "bad" : "ok")}>{rp(sisaLimit)}</b>
+            : <b className="n mut" title={t("Limit kredit belum diatur untuk pelanggan ini.")}>—</b>}
+        </div>
       </div>
-      {sisaLimit < 0 && (
+      {lewatLimit && (
         <p className="peringatan bad-box" role="status">
           {t("Melebihi limit kredit {nama} sebesar {v} — penawaran tidak bisa disimpan.", { nama: c.nama, v: rp(-sisaLimit) })}
         </p>
@@ -3150,7 +3166,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
             <tbody>
               {list.map((c) => {
                 const p = piutang(c.id);
-                const lewat = p > c.limit;
+                const lewat = lewatiLimit(c, p);
                 return (
                   <tr key={c.id} className="klik" onClick={() => setDetail(c)}>
                     <td><span className="chip">{c.kode}</span></td>
@@ -3162,7 +3178,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
                     <td className="c"><span className={"grade g" + c.grade}>{c.grade}</span></td>
                     <td className="r n mut">{t("{n} hari", { n: c.termin })}</td>
                     <td className={"r n strong " + (lewat ? "bad" : "")}>{rp(p)}</td>
-                    <td className="r n">{rp(c.limit)}</td>
+                    <td className="r n">{punyaLimit(c) ? rp(c.limit) : <span className="mut">—</span>}</td>
                     <td className="r n">{rp(omzet(c.id))}</td>
                     {/* tombol tidak boleh ikut membuka detail baris */}
                     <td className="r" onClick={(e) => e.stopPropagation()}>
@@ -3263,7 +3279,7 @@ function FormPelanggan({ c, close, say, submit }) {
       </div>
       {c ? (
         <p className="note">
-          {t("Limit Kredit")}: <b>{rp(c.limit)}</b> · {t("Termin")}: <b>{t("{n} hari", { n: c.termin })}</b>
+          {t("Limit Kredit")}: <b>{punyaLimit(c) ? rp(c.limit) : t("Belum diatur")}</b> · {t("Termin")}: <b>{t("{n} hari", { n: c.termin })}</b>
           {" — "}{t("Hanya berubah lewat usulan yang disetujui admin.")}
         </p>
       ) : (
@@ -3312,14 +3328,15 @@ function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close, 
             <div><span className="lbl2">{t("Sales")}</span><b>{c.sales || "-"}</b></div>
             <div><span className="lbl2">{t("Grade")}</span><span className={"grade g" + c.grade}>{c.grade}</span></div>
             <div><span className="lbl2">{t("Termin")}</span><b>{t("{n} hari", { n: c.termin })}</b></div>
-            <div><span className="lbl2">{t("Limit Kredit")}</span><b>{rp(c.limit)}</b></div>
-            <div><span className="lbl2">{t("Sisa Limit")}</span><b>{rp(Math.max(0, c.limit - p))}</b></div>
+            <div><span className="lbl2">{t("Limit Kredit")}</span><b>{punyaLimit(c) ? rp(c.limit) : t("Belum diatur")}</b></div>
+            <div><span className="lbl2">{t("Sisa Limit")}</span><b>{punyaLimit(c) ? rp(Math.max(0, c.limit - p)) : "—"}</b></div>
             <div><span className="lbl2">{t("Transaksi Terakhir")}</span><b>{riwayat[0]?.tgl || "-"}</b></div>
             {c.catatan && <div className="span3"><span className="lbl2">{t("Catatan")}</span><b>{c.catatan}</b></div>}
           </div>
 
           <div className="kpis">
-            <Kpi label={t("Piutang")} val={rp(p)} sub={p > c.limit ? t("melebihi limit kredit") : t("belum lunas")} tone={p > c.limit ? "alert" : p > 0 ? "warn" : ""} />
+            <Kpi label={t("Piutang")} val={rp(p)} sub={lewatiLimit(c, p) ? t("melebihi limit kredit") : t("belum lunas")}
+              tone={lewatiLimit(c, p) ? "alert" : p > 0 ? "warn" : ""} />
             <Kpi label={t("Omzet")} val={rp(omzet)} sub={t("{n} transaksi", { n: riwayat.length })} />
           </div>
 
@@ -3541,7 +3558,7 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById }) {
                       </td>
                       <td className="r n">{rp(x.nilai)}</td>
                       <td className={"r n " + (x.telat > 90 ? "bad" : x.telat > 30 ? "warn" : "")}>{x.telat > 0 ? t("{n} hr", { n: fmt(x.telat) }) : "—"}</td>
-                      <td className="r n">{x.c.limit ? `${fmt(x.pakai)}%` : "—"}</td>
+                      <td className="r n">{punyaLimit(x.c) ? `${fmt(x.pakai)}%` : "—"}</td>
                       <td><span className={"st s-" + tone}>{t(label)}</span></td>
                     </tr>
                   );

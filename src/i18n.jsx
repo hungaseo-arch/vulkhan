@@ -383,6 +383,8 @@ const KO = {
   "Harga baris {i}": "{i}번째 줄 단가",
   "Hapus baris {i}": "{i}번째 줄 삭제",
   "Sisa Limit Kredit": "여신 한도 잔액",
+  "Limit kredit belum diatur untuk pelanggan ini.": "이 고객은 여신 한도 미설정",
+  "Belum diatur": "미설정",
   "Pilih pelanggan terlebih dahulu.": "고객 선택 필요",
   "Pilih gudang pengirim terlebih dahulu.": "출고 창고 선택 필요",
   "Qty harus berupa angka lebih besar dari 0.": "수량은 0보다 큰 숫자만 입력",
