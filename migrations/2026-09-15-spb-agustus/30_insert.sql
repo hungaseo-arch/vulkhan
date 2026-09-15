@@ -16,8 +16,15 @@ WHERE p.no IS NULL;
 -- 매칭 안 되는 거래처/품목이 하나라도 남아 있으면 중단합니다.
 -- (inner join 으로 조용히 흘려보내면 매출이 비는 채로 커밋되어 버립니다)
 DO $x$
-DECLARE n_buyer int; n_produk int;
+DECLARE n_stg int; n_buyer int; n_produk int;
 BEGIN
+  -- 스테이징이 비어 있으면 아래 검사는 전부 0을 통과시키고 0행이 적재됩니다.
+  -- Neon 콘솔에서 `\copy` 가 무시된 채 진행되면 정확히 이 상태가 되므로
+  -- 먼저 막습니다.
+  SELECT count(*) INTO n_stg FROM stg_spb_2608;
+  IF n_stg <> 83 THEN
+    RAISE EXCEPTION '스테이징이 83행이 아님 (현재 %행). 00_staging.sql 또는 00_staging_konsol.sql 을 먼저 실행하십시오.', n_stg;
+  END IF;
   SELECT count(*) INTO n_buyer FROM (
     SELECT DISTINCT s.buyer FROM stg_spb_2608 s
     LEFT JOIN pelanggan c ON upper(trim(c.nama)) = upper(trim(s.buyer))

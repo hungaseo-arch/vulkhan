@@ -75,9 +75,16 @@
 
 ## 실행 순서
 
+Neon **콘솔**(SQL Editor)에서는 `\copy` 가 동작하지 않습니다 — psql 전용
+메타명령이라 콘솔은 그냥 넘어가고, 스테이징이 빈 채로 다음 단계가 돌면
+0행이 적재되면서도 에러가 안 납니다. 콘솔이면 0번을 `00_staging_konsol.sql`
+(같은 83행을 INSERT 로 넣는 파일)로 바꿔 쓰십시오. `30_insert.sql` 은
+스테이징이 83행이 아니면 중단하도록 되어 있습니다.
+
 ```bash
 cd migrations/2026-09-15-spb-agustus
 psql "$DATABASE_URL" -f 00_staging.sql   # 스테이징만. 본 테이블 안 건드림
+                                         # (Neon 콘솔이면 00_staging_konsol.sql)
 psql "$DATABASE_URL" -f 10_dry_run.sql   # 읽기 전용. 출력 확인 필수
 psql "$DATABASE_URL" -f 20_master.sql    # 신규 거래처·품목 생성
 psql "$DATABASE_URL" -f 30_insert.sql    # 판매 83라인 적재
