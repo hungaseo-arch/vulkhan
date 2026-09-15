@@ -262,6 +262,18 @@ const ROLE_LABEL = {
 
 /* ============================================================ */
 
+/* Modul yang untuk sementara disembunyikan dari menu.
+
+   Gudang & pembelian tidak dipakai: buku mutasinya sudah dikosongkan
+   (migrations/2026-09-15-reset-stok-pembelian) dan akan dimulai lagi dari
+   pengisian saldo awal kalau nanti dipakai. Sampai saat itu layarnya hanya
+   menampilkan nol dan tabel kosong, yang lebih membingungkan daripada tidak
+   ada sama sekali.
+
+   Ini semata soal tampilan — kodenya utuh, datanya utuh, dan tidak ada
+   endpoint yang ditutup. Untuk mengembalikannya: kosongkan daftar ini. */
+const MODUL_SEMBUNYI = ["stok", "beli"];
+
 export default function App() {
   return (
     <LangProvider>
@@ -657,7 +669,7 @@ function Aplikasi() {
     ["mitra", "Pelanggan"],
     ["piutang", "Piutang"],
     ...(can("users") ? [["admin", "Pengguna"]] : []),
-  ];
+  ].filter(([k]) => !MODUL_SEMBUNYI.includes(k));
 
   /* ---------- gerbang: loading & login ---------- */
   if (conn === "loading")
@@ -695,9 +707,9 @@ function Aplikasi() {
 
       <main className="wrap">
         {tab === "dasbor" && <Dasbor {...ctx} />}
-        {tab === "stok" && <Stok {...ctx} />}
+        {tab === "stok" && !MODUL_SEMBUNYI.includes("stok") && <Stok {...ctx} />}
         {tab === "jual" && <Penjualan {...ctx} />}
-        {tab === "beli" && <Pembelian {...ctx} />}
+        {tab === "beli" && !MODUL_SEMBUNYI.includes("beli") && <Pembelian {...ctx} />}
         {tab === "mitra" && <Pelanggan {...ctx} />}
         {tab === "piutang" && <Piutang {...ctx} />}
         {tab === "admin" && can("users") && <PenggunaAdmin {...ctx} />}
@@ -1089,9 +1101,16 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
     <>
       <SectionTitle id={t("Ringkasan Operasi")} />
       <div className="kpis">
-        <Kpi label={t("Nilai Stok")} val={rp(nilaiStok)} sub={nilaiStok < 0 ? t("⚠ stok negatif — periksa Buku Mutasi Stok") : t("harga pokok")} tone={nilaiStok < 0 ? "alert" : ""} />
+        {/* KPI gudang & pembelian ikut hilang bersama menunya — kalau tidak,
+            dasbor menampilkan Rp 0 besar-besar yang terbaca seperti kerugian,
+            bukan seperti modul yang memang sedang tidak dipakai. */}
+        {!MODUL_SEMBUNYI.includes("stok") && (
+          <Kpi label={t("Nilai Stok")} val={rp(nilaiStok)} sub={nilaiStok < 0 ? t("⚠ stok negatif — periksa Buku Mutasi Stok") : t("harga pokok")} tone={nilaiStok < 0 ? "alert" : ""} />
+        )}
         <Kpi label={t("Penjualan")} val={rp(jual)} sub={t("{n} transaksi", { n: jualKonfirm.length })} />
-        <Kpi label={t("Pembelian")} val={rp(beli)} sub={t("{n} transaksi", { n: pembelian.length })} />
+        {!MODUL_SEMBUNYI.includes("beli") && (
+          <Kpi label={t("Pembelian")} val={rp(beli)} sub={t("{n} transaksi", { n: pembelian.length })} />
+        )}
         <Kpi label={t("Piutang Berjalan")} val={rp(piutangF)} sub={t("belum lunas")} tone={piutangF > 0 ? "warn" : ""} />
         <Kpi label={t("Piutang > 90 Hari")} val={rp(piutang90)} sub={t("{p}% dari piutang berjalan", { p: fmt(rasio90) })} tone={piutang90 > 0 ? "alert" : ""} />
       </div>
@@ -1151,6 +1170,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
         </Scroll>
       </Card>
 
+      {!MODUL_SEMBUNYI.includes("stok") && (<>
       <SectionTitle id={t("Ringkasan Stok")} />
       <Card title={t("Stok per Gudang")}>
         <Scroll>
@@ -1181,6 +1201,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
           </table>
         </Scroll>
       </Card>
+      </>)}
     </>
   );
 }
