@@ -229,6 +229,7 @@ const KO = {
   "Penjualan {bulan}": "{bulan} 판매",
   "Tidak ada data.": "데이터가 없습니다.",
   "Penjualan per Bulan": "월별 판매",
+  "tidak termasuk penawaran · pelanggan dihitung unik": "견적 제외 · 고객수 중복 제외",
   "tidak termasuk penawaran": "견적 제외",
   "Stok per Gudang": "창고별 재고",
   "Bulan": "월",

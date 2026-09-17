@@ -1230,18 +1230,21 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
     const m = new Map();
     jualKonfirm.forEach((s) => {
       const b = String(s.tgl).slice(0, 7);
-      const c = m.get(b) || { bulan: b, n: 0, qty: 0, nilai: 0, perGudang: {} };
-      c.n += 1; c.qty += qtySO(s); c.nilai += totalSO(s);
+      const c = m.get(b) || { bulan: b, pel: new Set(), qty: 0, nilai: 0, perGudang: {} };
+      c.pel.add(s.pelanggan); c.qty += qtySO(s); c.nilai += totalSO(s);
       c.perGudang[s.gudang] = (c.perGudang[s.gudang] || 0) + qtySO(s);
       m.set(b, c);
     });
     return [...m.values()].sort((a, b) => b.bulan.localeCompare(a.bulan));
   })();
+  /* Pelanggan dihitung unik per baris, jadi totalnya bukan jumlah kolomnya:
+     satu pelanggan yang membeli tiap bulan tetap satu pelanggan setahun. */
   const totalBulanan = jualBulanan.reduce((a, b) => {
-    a.n += b.n; a.qty += b.qty; a.nilai += b.nilai;
+    b.pel.forEach((id) => a.pel.add(id));
+    a.qty += b.qty; a.nilai += b.nilai;
     GUDANG.forEach((g) => { a.perGudang[g.id] = (a.perGudang[g.id] || 0) + (b.perGudang[g.id] || 0); });
     return a;
-  }, { n: 0, qty: 0, nilai: 0, perGudang: {} });
+  }, { pel: new Set(), qty: 0, nilai: 0, perGudang: {} });
   const jumlahBulan = jualBulanan.length;
 
   /* Yang ditanyakan tiap pagi bukan "berapa piutangnya" melainkan "mana yang
@@ -1310,13 +1313,13 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
       )}
 
       <SectionTitle id={t("Ringkasan Bulanan")} />
-      <Card title={t("Penjualan per Bulan")} note={t("tidak termasuk penawaran")}>
+      <Card title={t("Penjualan per Bulan")} note={t("tidak termasuk penawaran · pelanggan dihitung unik")}>
         <Scroll>
           <table>
             <thead>
               <tr>
                 <th scope="col">{t("Bulan")}</th>
-                <th scope="col" className="r">{t("Transaksi")}</th>
+                <th scope="col" className="r">{t("Pelanggan")}</th>
                 {GUDANG.map((g) => (
                   <th scope="col" className="r" key={g.id}>{kodeGudang(g)}</th>
                 ))}
@@ -1333,7 +1336,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
                       {bulanLabel(b.bulan, lang)}
                     </button>
                   </td>
-                  <td className="r n">{fmt(b.n)}</td>
+                  <td className="r n">{fmt(b.pel.size)}</td>
                   {GUDANG.map((g) => (
                     <td className="r n" key={g.id}>{fmt(b.perGudang[g.id] || 0)}</td>
                   ))}
@@ -1347,7 +1350,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
               <tfoot>
                 <tr className="tf-total">
                   <td><b>{t("Total")}</b></td>
-                  <td className="r n strong">{fmt(totalBulanan.n)}</td>
+                  <td className="r n strong">{fmt(totalBulanan.pel.size)}</td>
                   {GUDANG.map((g) => (
                     <td className="r n strong" key={g.id}>{fmt(totalBulanan.perGudang[g.id] || 0)}</td>
                   ))}
@@ -1356,7 +1359,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
                 </tr>
                 <tr className="tf-avg">
                   <td><em className="mut2">{t("Rata-rata / bulan")}</em></td>
-                  <td className="r n mut">{fmt(totalBulanan.n / jumlahBulan)}</td>
+                  <td className="r n mut">{fmt(jualBulanan.reduce((a, b) => a + b.pel.size, 0) / jumlahBulan)}</td>
                   {GUDANG.map((g) => (
                     <td className="r n mut" key={g.id}>{fmt((totalBulanan.perGudang[g.id] || 0) / jumlahBulan)}</td>
                   ))}
