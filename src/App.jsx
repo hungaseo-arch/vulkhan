@@ -1189,7 +1189,7 @@ const gradePiutang = (x) => {
   return ["Rendah", "ok"];
 };
 
-function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, totalSO, bukaPenjualan }) {
+function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById, gById, totalSO, bukaPenjualan }) {
   const { t, lang } = useLang();
   const qtySO = (s) => s.items.reduce((a, i) => a + i.qty, 0);
   const nilaiPO = (p) => p.items.reduce((a, i) => a + i.qty * i.harga, 0);
@@ -1232,12 +1232,13 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
   const labelJual = t("Penjualan {bulan}", { bulan: bulanLabel(bulanIni, lang) });
 
   const [detail, setDetail] = useState(null); // kartu KPI yang dibuka
+  const [rinci, setRinci] = useState(null);   // dokumen yang dibuka dari daftar itu
   const bukaJual = () => setDetail({
     judul: labelJual,
     kolom: [[t("No."), 0], [t("Tanggal"), 0], [t("Pelanggan"), 0], [t("Nilai"), 1]],
     baris: [...jualBulanIni]
       .sort((a, b) => (a.tgl < b.tgl ? 1 : a.tgl > b.tgl ? -1 : 0))
-      .map((s) => ({ k: s.id, sel: [s.no, s.tgl, cById(s.pelanggan).nama, rp(totalSO(s))] })),
+      .map((s) => ({ k: s.id, so: s, sel: [s.no, s.tgl, cById(s.pelanggan).nama, rp(totalSO(s))] })),
     total: rp(nilaiBulanIni),
   });
   const bukaPiutang = (status, judul) => () => setDetail({
@@ -1246,7 +1247,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
     baris: piutangRows
       .filter((r) => STATUS_UMUR[r.bucket] === status)
       .sort((a, b) => b.telat - a.telat || b.nilai - a.nilai)
-      .map((r) => ({ k: r.so.id, sel: [r.so.no, r.c.nama, r.tempo, r.telat ? fmt(r.telat) : "—", rp(r.nilai)] })),
+      .map((r) => ({ k: r.so.id, so: r.so, sel: [r.so.no, r.c.nama, r.tempo, r.telat ? fmt(r.telat) : "—", rp(r.nilai)] })),
     total: rp(statusRows.find((x) => x.status === status).nilai),
   });
 
@@ -1268,7 +1269,16 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
         <Kpi label={t("Ondue")} val={rp(ondue.nilai)} sub={subPiutang(ondue)} tone={ondue.nilai > 0 ? "warn" : ""} onClick={bukaPiutang("Ondue", t("Ondue"))} />
         <Kpi label={t("Overdue")} val={rp(overdue.nilai)} sub={subPiutang(overdue)} tone={overdue.nilai > 0 ? "alert" : ""} onClick={bukaPiutang("Overdue", t("Overdue"))} />
       </div>
-      {detail && <DetailKpi {...detail} close={() => setDetail(null)} />}
+      {detail && (
+        <DetailKpi {...detail} close={() => setDetail(null)}
+          onPilih={(so) => { setRinci(so); setDetail(null); }} />
+      )}
+      {/* Dokumennya hanya dibaca dari sini. Mengubah status tetap milik layar
+          Penjualan, tempat orang sudah terbiasa mencarinya. */}
+      {rinci && (
+        <RincianPenjualan so={rinci} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
+          close={() => setRinci(null)} />
+      )}
 
       <SectionTitle id={t("Ringkasan Bulanan")} />
       <Card title={t("Penjualan per Bulan")} note={t("tidak termasuk penawaran")}>
@@ -4014,7 +4024,7 @@ const SectionTitle = ({ id, mid, children }) => (
 /* Rincian di balik satu kartu KPI. Kartunya menjawab "berapa"; yang ditanyakan
    berikutnya selalu "yang mana", dan sampai sekarang jawabannya menuntut pindah
    layar. Kolomnya datang dari pemanggil — [judul, rata kanan]. */
-function DetailKpi({ judul, kolom, baris, total, close }) {
+function DetailKpi({ judul, kolom, baris, total, close, onPilih }) {
   const { t } = useLang();
   const box = useDialog(close);
   const id = useId();
@@ -4035,7 +4045,13 @@ function DetailKpi({ judul, kolom, baris, total, close }) {
               <tbody>
                 {baris.map((b) => (
                   <tr key={b.k}>
-                    {b.sel.map((v, i) => <td key={kolom[i][0]} className={kolom[i][1] ? "r n" : undefined}>{v}</td>)}
+                    {b.sel.map((v, i) => (
+                      <td key={kolom[i][0]} className={kolom[i][1] ? "r n" : undefined}>
+                        {i === 0 && onPilih && b.so
+                          ? <button type="button" className="namelink" title={t("Lihat rincian")} onClick={() => onPilih(b.so)}>{v}</button>
+                          : v}
+                      </td>
+                    ))}
                   </tr>
                 ))}
                 {!baris.length && <tr><td colSpan={kolom.length}><Empty id={t("Tidak ada data.")} /></td></tr>}
