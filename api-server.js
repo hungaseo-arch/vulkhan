@@ -1028,8 +1028,6 @@ app.put("/api/penjualan/:id", wrap(async (req, res) => {
     tglKirim = String(s.tgl_kirim || so.tgl_kirim || tgl);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(tglKirim))
       return res.status(400).json({ error: "Tanggal kirim tidak valid." });
-    if (tglKirim < tgl)
-      return res.status(400).json({ error: `Tanggal kirim mendahului tanggal dokumen (${tgl}).` });
   }
 
   const [jejak] = await sql`
@@ -1098,13 +1096,12 @@ app.patch("/api/penjualan/:id/status", wrap(async (req, res) => {
   let tglKirim = null;
   if (req.body.status === "kirim" && req.body.tgl != null) {
     tglKirim = String(req.body.tgl);
+    /* Hanya bentuknya yang diperiksa. Tanggal kirim TIDAK diharuskan sesudah
+       tanggal dokumen: barang berangkat lebih dulu dan suratnya menyusul
+       adalah urutan yang biasa di sini, jadi aturan itu menolak justru
+       pencatatan yang paling sering terjadi. */
     if (!/^\d{4}-\d{2}-\d{2}$/.test(tglKirim))
       return res.status(400).json({ error: "Tanggal kirim tidak valid." });
-    // Barang tidak bisa berangkat sebelum dokumennya ada. Batas atasnya
-    // sengaja dibiarkan terbuka: pencatatan menyusul beberapa hari adalah
-    // hal biasa, dan pengiriman terjadwal ke depan pun sah.
-    if (tglKirim < so.tgl)
-      return res.status(400).json({ error: `Tanggal kirim mendahului tanggal dokumen (${so.tgl}).` });
   }
 
   /* Pada langkah 'kirim' kolomnya SELALU terisi — kalau klien tidak memilih

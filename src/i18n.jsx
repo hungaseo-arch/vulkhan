@@ -376,8 +376,6 @@ const KO = {
   "Tanggal dokumen: {tgl}": "문서일: {tgl}",
   "Isi tanggal pengiriman.": "출고일을 입력하세요",
   "Hanya untuk dokumen yang sudah dikirim.": "출고 상태인 문서에만 적용됩니다",
-  "Tanggal kirim tidak boleh mendahului tanggal dokumen ({tgl}).":
-    "출고일은 문서일({tgl})보다 이를 수 없습니다",
 
   /* ---------- formulir penjualan ---------- */
   "Penjualan Baru": "새 판매",

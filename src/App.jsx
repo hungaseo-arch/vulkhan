@@ -874,7 +874,6 @@ function FormTglKirim({ so, submit, say, close }) {
   const [tgl, setTgl] = useState(today());
   const kirim = async () => {
     if (!tgl) return say(t("Isi tanggal pengiriman."), true);
-    if (tgl < so.tgl) return say(t("Tanggal kirim tidak boleh mendahului tanggal dokumen ({tgl}).", { tgl: so.tgl }), true);
     try { await submit(tgl); } catch (e) { say(e.message, true); }
   };
   return (
@@ -2855,8 +2854,6 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
     if (valid.some((i) => !i.produk)) return say(t("Pilih barang untuk setiap baris."), true);
     if (valid.some((i) => !(Number(i.harga) >= 0))) return say(t("Harga harus berupa angka."), true);
     if (lewatLimit) return say(t("Melebihi limit kredit {nama} sebesar {v}.", { nama: c.nama, v: rp(-sisaLimit) }), true);
-    if (dikirim && f.tglKirim && f.tglKirim < awal.tgl)
-      return say(t("Tanggal kirim tidak boleh mendahului tanggal dokumen ({tgl}).", { tgl: awal.tgl }), true);
     try {
       const baris = valid.map((i) => ({ produk: i.produk, qty: Number(i.qty), harga: Number(i.harga) }));
       await submit(awal
