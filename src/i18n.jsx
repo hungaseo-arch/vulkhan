@@ -517,6 +517,23 @@ const KO = {
   "Tinggi": "높음",
   "Sedang": "보통",
   "Rendah": "낮음",
+
+  /* ---------- penagihan lewat pihak lain & PPN ---------- */
+  "Penagihan & Pajak": "청구·세금",
+  "Ditagih lewat": "청구 경유처",
+  "Ditagih ke": "청구처",
+  "-- Ditagih langsung --": "-- 직접 청구 --",
+  "Langsung": "직접",
+  "lewat {nama}": "{nama} 경유",
+  "Status Pajak": "과세 구분",
+  "Non-PKP (tanpa PPN)": "면세 (PPN 없음)",
+  "PKP (PPN {p}%)": "과세 (PPN {p}%)",
+  "PPN {p}%": "PPN {p}%",
+  "Perusahaan ini yang menagih pelanggan lain.": "다른 고객의 청구를 대행하는 회사입니다.",
+  "Bila diisi, penjualan kepada pelanggan ini ditagih ke pihak tersebut dan PPN mengikuti status pajak pihak itu.":
+    "지정하면 이 고객의 판매는 해당 업체로 청구되고, PPN은 그 업체의 과세 구분을 따릅니다.",
+  "Ditagih lewat {nama}.": "{nama} 경유 청구.",
+  "Ditagih lewat {nama} · PPN {p}% sudah termasuk dalam total.": "{nama} 경유 청구 · 합계에 PPN {p}% 포함.",
 };
 
 const KAMUS = { id: {}, ko: KO };

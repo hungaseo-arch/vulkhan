@@ -238,6 +238,16 @@ async function ensurePelanggan() {
   await sql`ALTER TABLE pelanggan ADD COLUMN IF NOT EXISTS npwp    TEXT NOT NULL DEFAULT ''`;
   await sql`ALTER TABLE pelanggan ADD COLUMN IF NOT EXISTS sales   TEXT NOT NULL DEFAULT ''`;
   await sql`ALTER TABLE pelanggan ADD COLUMN IF NOT EXISTS catatan TEXT NOT NULL DEFAULT ''`;
+  /* Rute penagihan grup. Pelanggan yang tidak mau/tidak bisa ditagih tanpa
+     faktur pajak dilayani lewat PT ASCENDO INTERNATIONAL: yang ditagih adalah
+     perusahaan itu, yang memakai barangnya tetap pelanggan ini. NULL = dijual
+     dan ditagih langsung, seperti seluruh baris yang sudah ada.
+
+     ppn menempel pada pihak yang DITAGIH, bukan pada dokumennya: PKP atau
+     tidak adalah sifat perusahaan, dan menaruhnya di sini membuat satu
+     pelanggan tidak bisa punya dua perlakuan pajak yang berbeda-beda. */
+  await sql`ALTER TABLE pelanggan ADD COLUMN IF NOT EXISTS via TEXT REFERENCES pelanggan(id) ON DELETE SET NULL`;
+  await sql`ALTER TABLE pelanggan ADD COLUMN IF NOT EXISTS ppn BOOLEAN NOT NULL DEFAULT false`;
 }
 
 /* Kolom pemilik dokumen penjualan. Dipakai aturan "boleh ubah/hapus sendiri
@@ -262,14 +272,78 @@ async function ensurePenjualan() {
      dikirim — termasuk seluruh baris lama, yang memang tidak pernah punya
      tanggal ini. Jatuh tempo tetap dihitung dari p.tgl. */
   await sql`ALTER TABLE penjualan ADD COLUMN IF NOT EXISTS tgl_kirim DATE`;
+  /* Dua pihak dalam satu dokumen. pelanggan = yang ditagih (dan yang piutang
+     serta limit kreditnya dipakai), pelanggan_akhir = yang memakai barangnya.
+     NULL pada seluruh baris lama, yang memang dijual langsung.
+
+     ppn disimpan sebagai PERSEN pada dokumen, bukan dihitung ulang dari master
+     tiap kali dibaca: tarifnya bisa berubah, dan faktur yang sudah terbit
+     tidak boleh ikut berubah bersamanya. total di v_penjualan tetap nilai
+     barang saja — PPN-nya kolom tersendiri supaya keduanya bisa dibaca. */
+  await sql`ALTER TABLE penjualan ADD COLUMN IF NOT EXISTS pelanggan_akhir TEXT
+    REFERENCES pelanggan(id) ON DELETE SET NULL`;
+  await sql`ALTER TABLE penjualan ADD COLUMN IF NOT EXISTS ppn NUMERIC NOT NULL DEFAULT 0`;
   await sql`
     CREATE OR REPLACE VIEW v_penjualan AS
       SELECT p.id, p.no, p.tgl, p.pelanggan, p.gudang, p.status,
              COALESCE(SUM(i.qty * i.harga),0) AS total,
-             p.dibuat_oleh, p.tgl_kirim
+             p.dibuat_oleh, p.tgl_kirim, p.pelanggan_akhir, p.ppn
       FROM penjualan p
       LEFT JOIN penjualan_item i ON i.penjualan = p.id
       GROUP BY p.id`;
+  /* Piutang ikut PPN: yang harus masuk ke rekening adalah nilai barang plus
+     pajaknya. Dibulatkan PER DOKUMEN, sama seperti layarnya menjumlahkan
+     dokumen satu per satu — kalau dibulatkan sekali di akhir, angka di kartu
+     pelanggan dan di daftar invoice bisa berselisih beberapa rupiah. */
+  await sql`
+    CREATE OR REPLACE VIEW v_piutang AS
+      SELECT pl.id AS pelanggan, pl.nama,
+             COALESCE(SUM(d.total),0) AS piutang
+      FROM pelanggan pl
+      LEFT JOIN (
+        SELECT p.pelanggan,
+               ROUND(COALESCE(SUM(i.qty * i.harga),0) * (1 + COALESCE(p.ppn,0) / 100)) AS total
+        FROM penjualan p
+        LEFT JOIN penjualan_item i ON i.penjualan = p.id
+        WHERE p.status IN ('kirim','tagihan')
+        GROUP BY p.id
+      ) d ON d.pelanggan = pl.id
+      GROUP BY pl.id`;
+}
+
+/* Tarif PPN untuk penjualan yang ditagih lewat perusahaan PKP. Satu angka di
+   satu tempat: dokumen menyimpan hasilnya, jadi mengubah tarif di sini hanya
+   menyentuh dokumen yang dibuat sesudahnya. */
+const PPN_PERSEN = 11;
+
+/* Siapa yang ditagih untuk penjualan kepada pelanggan ini. Diputuskan di
+   server, bukan di formulir: rute penagihan adalah sifat master pelanggan,
+   dan dokumen tidak boleh bisa ditulis dengan rute yang menyimpang darinya. */
+/* Rute hanya boleh satu tingkat: A ditagih lewat B, dan B ditagih sendiri.
+   Rantai (A→B→C) akan membuat "siapa yang berutang" bergantung pada urutan
+   pembacaan, dan menunjuk diri sendiri akan menggantungkannya sama sekali. */
+async function tolakRute(id, via) {
+  if (!via) return null;
+  if (via === id) return "Pelanggan tidak bisa ditagih lewat dirinya sendiri.";
+  const [tujuan] = await sql`SELECT id, via FROM pelanggan WHERE id = ${via}`;
+  if (!tujuan) return "Pelanggan penagih tidak ditemukan.";
+  if (tujuan.via) return "Penagih itu sendiri ditagih lewat pelanggan lain — rute bertingkat tidak didukung.";
+  const [{ ada }] = await sql`
+    SELECT EXISTS (SELECT 1 FROM pelanggan WHERE via = ${id}) AS ada`;
+  if (ada) return "Pelanggan ini sudah menjadi penagih bagi pelanggan lain.";
+  return null;
+}
+
+async function ruteTagih(idPelanggan) {
+  const [c] = await sql`SELECT id, via FROM pelanggan WHERE id = ${idPelanggan}`;
+  if (!c) return { pelanggan: idPelanggan, akhir: null, ppn: 0 };
+  const idTagih = c.via || c.id;
+  const [tagih] = await sql`SELECT ppn FROM pelanggan WHERE id = ${idTagih}`;
+  return {
+    pelanggan: idTagih,
+    akhir: c.via ? c.id : null,
+    ppn: tagih?.ppn ? PPN_PERSEN : 0,
+  };
 }
 
 /* Satu jam untuk seluruh sistem: WIB (Asia/Jakarta).
@@ -510,12 +584,15 @@ app.get("/api/pelanggan", wrap(async (_req, res) => {
 
 app.post("/api/pelanggan", wrap(async (req, res) => {
   const c = req.body;
+  const salahRute = await tolakRute(c.id, c.via);
+  if (salahRute) return res.status(400).json({ error: salahRute });
   const [row] = await sql`
     INSERT INTO pelanggan (id, kode, nama, pemilik, pic, telp, email, alamat, kota, npwp,
-                           sales, catatan, grade, limit_kredit, termin)
+                           sales, catatan, grade, limit_kredit, termin, via, ppn)
     VALUES (${c.id}, ${c.kode}, ${c.nama}, ${teks(c.pemilik)}, ${teks(c.pic)}, ${teks(c.telp)},
             ${teks(c.email)}, ${teks(c.alamat)}, ${teks(c.kota)}, ${teks(c.npwp)},
-            ${teks(c.sales)}, ${teks(c.catatan)}, ${c.grade}, ${c.limit}, ${c.termin})
+            ${teks(c.sales)}, ${teks(c.catatan)}, ${c.grade}, ${c.limit}, ${c.termin},
+            ${c.via || null}, ${!!c.ppn})
     RETURNING *`;
   res.status(201).json(row);
 }));
@@ -526,12 +603,15 @@ app.put("/api/pelanggan/:id", wrap(async (req, res) => {
   const c = req.body || {};
   if (!String(c.nama || "").trim())
     return res.status(400).json({ error: "Nama pelanggan wajib diisi." });
+  const salahRute = await tolakRute(req.params.id, c.via);
+  if (salahRute) return res.status(400).json({ error: salahRute });
   const [row] = await sql`
     UPDATE pelanggan SET
       nama = ${String(c.nama).trim()}, pemilik = ${teks(c.pemilik)}, pic = ${teks(c.pic)},
       telp = ${teks(c.telp)}, email = ${teks(c.email)}, alamat = ${teks(c.alamat)},
       kota = ${teks(c.kota)}, npwp = ${teks(c.npwp)}, sales = ${teks(c.sales)},
-      catatan = ${teks(c.catatan)}, grade = ${c.grade}
+      catatan = ${teks(c.catatan)}, grade = ${c.grade},
+      via = ${c.via || null}, ppn = ${!!c.ppn}
     WHERE id = ${req.params.id}
     RETURNING *`;
   if (!row) return res.status(404).json({ error: "Pelanggan tidak ditemukan." });
@@ -956,9 +1036,11 @@ app.post("/api/penjualan", wrap(async (req, res) => {
     return res.status(400).json({ error: "Minimal satu baris barang." });
   // Header + semua item dalam satu transaksi & satu perjalanan HTTP ke Neon:
   // tidak ada SO tanpa item bila salah satu insert gagal.
+  const rute = await ruteTagih(s.pelanggan);
   const [[row]] = await sql.transaction([
-    sql`INSERT INTO penjualan (id, no, tgl, pelanggan, gudang, status, dibuat_oleh)
-        VALUES (${s.id}, ${s.no}, ${s.tgl}, ${s.pelanggan}, ${s.gudang}, 'penawaran', ${req.user.id})
+    sql`INSERT INTO penjualan (id, no, tgl, pelanggan, pelanggan_akhir, ppn, gudang, status, dibuat_oleh)
+        VALUES (${s.id}, ${s.no}, ${s.tgl}, ${rute.pelanggan}, ${rute.akhir}, ${rute.ppn},
+                ${s.gudang}, 'penawaran', ${req.user.id})
         RETURNING *`,
     ...s.items.map((it) => sql`
         INSERT INTO penjualan_item (penjualan, produk, qty, harga)
@@ -1016,7 +1098,9 @@ app.put("/api/penjualan/:id", wrap(async (req, res) => {
     return res.status(400).json({ error: "Minimal satu baris barang." });
 
   const tgl = s.tgl || so.tgl;
-  const pelanggan = s.pelanggan || so.pelanggan;
+  // Pihak yang DIPILIH, bukan yang ditagih: dokumen lama yang sudah dirutekan
+  // menyimpan pengguna akhirnya di kolom tersendiri.
+  const pelanggan = s.pelanggan || so.pelanggan_akhir || so.pelanggan;
   const gudang = s.gudang || so.gudang;
 
   // Tanggal baru harus tetap di bulan berjalan. Tanpa ini satu penyuntingan
@@ -1047,6 +1131,10 @@ app.put("/api/penjualan/:id", wrap(async (req, res) => {
     if (salahTgl) return res.status(400).json({ error: salahTgl });
   }
 
+  /* Formulir mengirimkan pelanggan yang DIPILIH; rutenya ditentukan ulang di
+     sini supaya dokumen lama ikut pindah bila master pelanggannya berubah. */
+  const rute = await ruteTagih(pelanggan);
+
   const [jejak] = await sql`
     SELECT catatan FROM stok_mutasi WHERE ref = ${so.no} AND tipe = 'keluar' ORDER BY id LIMIT 1`;
 
@@ -1068,7 +1156,8 @@ app.put("/api/penjualan/:id", wrap(async (req, res) => {
      belum jadi dikirim tidak boleh meninggalkan mutasi apa pun. */
   const perintah = [
     sql`UPDATE penjualan
-        SET tgl = ${tgl}, pelanggan = ${pelanggan}, gudang = ${gudang},
+        SET tgl = ${tgl}, pelanggan = ${rute.pelanggan}, pelanggan_akhir = ${rute.akhir},
+            ppn = ${rute.ppn}, gudang = ${gudang},
             status = ${status}, tgl_kirim = ${tglKirim}
         WHERE id = ${so.id}`,
     sql`DELETE FROM penjualan_item WHERE penjualan = ${so.id}`,

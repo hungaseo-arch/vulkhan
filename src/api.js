@@ -41,6 +41,8 @@ const normMutasi = (m) => ({ ...m, id: String(m.id), qty: num(m.qty) });
 const normTrx = (t) => ({
   ...t,
   total: t.total != null ? num(t.total) : undefined,
+  // NUMERIC → number; dokumen tanpa PPN tetap 0, bukan "0"
+  ppn: t.ppn != null ? num(t.ppn) : undefined,
   items: (t.items || []).map((i) => ({ produk: i.produk, qty: num(i.qty), harga: num(i.harga) })),
 });
 

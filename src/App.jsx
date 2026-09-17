@@ -397,6 +397,20 @@ function LangSwitch() {
   );
 }
 
+/* ---------- nilai dokumen penjualan ----------
+   Dua sumbu, satu dokumen. `pelanggan` adalah pihak yang DITAGIH (untuk
+   penjualan lewat grup: PT ASCENDO INTERNATIONAL), `pelanggan_akhir` adalah
+   pemakai sebenarnya. Piutang dan limit kredit ikut pihak yang ditagih —
+   uangnya memang ditagih ke sana; penjualan dan peringkat pelanggan ikut
+   pemakai akhir, karena di sanalah bannya dipakai.
+   PPN disimpan di dokumen sebagai persen (0 untuk penerbit non-PKP) supaya
+   dokumen lama tidak berubah nilainya ketika tarifnya suatu saat berganti. */
+const PPN_PERSEN = 11; // tarif PPN Indonesia; dokumen menyimpan angkanya sendiri
+const subtotalSO = (s) => s.items.reduce((a, b) => a + b.qty * b.harga, 0);
+const ppnSO = (s) => Math.round(subtotalSO(s) * (Number(s.ppn) || 0) / 100);
+const nilaiSO = (s) => subtotalSO(s) + ppnSO(s);
+const pelangganSO = (s) => s.pelanggan_akhir || s.pelanggan;
+
 function Aplikasi() {
   const { t } = useLang();
   const [tab, setTab] = useState("dasbor");
@@ -517,7 +531,7 @@ function Aplikasi() {
   const cById = (id) => pelanggan.find((x) => x.id === id) || {};
   const gById = (id) => GUDANG.find((x) => x.id === id) || {};
   const sById = (id) => pemasok.find((x) => x.id === id) || {};
-  const totalSO = (s) => s.items.reduce((a, b) => a + b.qty * b.harga, 0);
+  const totalSO = nilaiSO;
 
   const addMutasi = (rows) => setMutasi((m) => [...m, ...rows.map((r) => ({ id: uid("M"), ...r }))]);
 
@@ -638,9 +652,17 @@ function Aplikasi() {
     say(t("Saldo awal {n} barang tersimpan.", { n: r.ditulis }));
   }
 
+  /* Rute penagihan: pelanggan yang punya `via` ditagih lewat pihak itu, dan
+     PPN mengikuti status PKP pihak yang menagih. Saat online server yang
+     memutuskan (satu sumber kebenaran); ini salinannya untuk mode demo. */
+  const ruteSO = (so) => {
+    const c = cById(so.pelanggan);
+    const tagih = c.via ? cById(c.via) : c;
+    return { ...so, pelanggan: tagih.id || so.pelanggan, pelanggan_akhir: c.via ? c.id : null, ppn: tagih.ppn ? PPN_PERSEN : 0 };
+  };
   async function doCreatePenjualan(so) {
     if (online) { await api.createPenjualan(so); await reload(); }
-    else setPenjualan((l) => [...l, so]);
+    else setPenjualan((l) => [...l, ruteSO(so)]);
     say(t("{no} dibuat sebagai Penawaran.", { no: so.no }));
   }
 
@@ -649,7 +671,7 @@ function Aplikasi() {
      boleh atau tidak — lihat bisaUbahSO / tolakUbahSO. */
   async function doUpdatePenjualan(so) {
     if (online) { await api.updatePenjualan(so.id, so); await reload(); }
-    else setPenjualan((l) => l.map((x) => (x.id === so.id ? { ...x, ...so } : x)));
+    else setPenjualan((l) => l.map((x) => (x.id === so.id ? ruteSO({ ...x, ...so }) : x)));
     say(t("{no} diperbarui.", { no: so.no }));
   }
 
@@ -684,7 +706,7 @@ function Aplikasi() {
     say(t("{no} dihapus.", { no: po.no }));
   }
   async function doDeletePelanggan(c) {
-    if (penjualan.some((s) => s.pelanggan === c.id))
+    if (penjualan.some((s) => s.pelanggan === c.id || s.pelanggan_akhir === c.id))
       throw new Error(t("Tidak bisa dihapus: pelanggan masih punya transaksi penjualan."));
     if (online) { await api.deletePelanggan(c.id); await reload(); }
     else setPelanggan((l) => l.filter((x) => x.id !== c.id));
@@ -1231,7 +1253,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
     jualKonfirm.forEach((s) => {
       const b = String(s.tgl).slice(0, 7);
       const c = m.get(b) || { bulan: b, pel: new Set(), qty: 0, nilai: 0, perGudang: {} };
-      c.pel.add(s.pelanggan); c.qty += qtySO(s); c.nilai += totalSO(s);
+      c.pel.add(pelangganSO(s)); c.qty += qtySO(s); c.nilai += totalSO(s);
       c.perGudang[s.gudang] = (c.perGudang[s.gudang] || 0) + qtySO(s);
       m.set(b, c);
     });
@@ -1268,7 +1290,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
     taut: { 0: "so", 2: "c" },
     baris: [...jualBulanIni]
       .sort((a, b) => (a.tgl < b.tgl ? 1 : a.tgl > b.tgl ? -1 : 0))
-      .map((s) => ({ k: s.id, so: s, c: cById(s.pelanggan), sel: [s.no, s.tgl, cById(s.pelanggan).nama, rp(totalSO(s))] })),
+      .map((s) => ({ k: s.id, so: s, c: cById(pelangganSO(s)), sel: [s.no, s.tgl, cById(pelangganSO(s)).nama, rp(totalSO(s))] })),
     total: rp(nilaiBulanIni),
   });
   /* Kartu tanpa isi tidak bisa dibuka — dialog kosong hanya menipu, sama
@@ -1307,7 +1329,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
           close={() => setRinci(null)} />
       )}
       {pel && (
-        <DetailPelanggan c={pel} penjualan={penjualan} totalSO={totalSO} piutang={piutang}
+        <DetailPelanggan c={pel} penjualan={penjualan} totalSO={totalSO} piutang={piutang} cById={cById}
           gById={gById} pById={pById} close={() => setPel(null)}
           onPilihSO={(so) => { setPel(null); setRinci(so); }} />
       )}
@@ -2060,7 +2082,10 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
      pernah punya bulan sebelumnya untuk dibandingkan. */
   const perNama = useMemo(() => {
     const q = cust.trim().toLowerCase();
-    return q ? penjualan.filter((s) => cById(s.pelanggan).nama.toLowerCase().includes(q)) : penjualan;
+    return q
+      ? penjualan.filter((s) => [s.pelanggan, s.pelanggan_akhir]
+          .some((id) => id && cById(id).nama?.toLowerCase().includes(q)))
+      : penjualan;
   }, [penjualan, cust, cById]);
   const list = useMemo(
     () => perNama.filter((s) => (!d0 || s.tgl >= d0) && (!d1 || s.tgl <= d1)),
@@ -2130,8 +2155,9 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
   const peringkatPelanggan = useCallback((rows) => {
     const m = new Map();
     for (const s of rows) {
-      let b = m.get(s.pelanggan);
-      if (!b) { b = { id: s.pelanggan, ...KOSONG(), jadi: 0, jasa: 0, rows: [] }; m.set(s.pelanggan, b); }
+      const id = pelangganSO(s);
+      let b = m.get(id);
+      if (!b) { b = { id, ...KOSONG(), jadi: 0, jasa: 0, rows: [] }; m.set(id, b); }
       b.n += 1; b.qty += qtySO(s); b.jadi += qtyKat(s, "jadi"); b.jasa += qtyKat(s, "jasa");
       b.total += totalSO(s); b.rows.push(s);
     }
@@ -2185,7 +2211,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
     const a = setahunLalu(d0), z = setahunLalu(d1);
     const pertama = new Map(), terakhir = new Map(), sekarang = new Set(), setahun = new Map();
     for (const s of perNama) {
-      const id = s.pelanggan;
+      const id = pelangganSO(s);
       if (!pertama.has(id) || s.tgl < pertama.get(id)) pertama.set(id, s.tgl);
       if (!terakhir.has(id) || s.tgl > terakhir.get(id)) terakhir.set(id, s.tgl);
       if (s.tgl >= d0 && s.tgl <= d1) sekarang.add(id);
@@ -2223,9 +2249,10 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
   const tagihanCust = useMemo(() => {
     const m = new Map();
     for (const r of hitungPiutang(penjualan, cById, totalSO).piutangRows) {
-      const cur = m.get(r.c.id) || { nilai: 0, rows: [] };
+      const id = pelangganSO(r.so); // baris peringkat memakai pemakai akhir
+      const cur = m.get(id) || { nilai: 0, rows: [] };
       cur.nilai += r.nilai; cur.rows.push(r);
-      m.set(r.c.id, cur);
+      m.set(id, cur);
     }
     return m;
   }, [penjualan, cById, totalSO]);
@@ -2246,7 +2273,8 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
         : [
             [t("No."), t("Tanggal"), t("Pelanggan"), t("PIC"), t("Cabang"), t("Gudang"), t("Status"), t("Rincian"), t("Qty"), t("Total")],
             ...list.map((s) => [
-              s.no, s.tgl, cById(s.pelanggan).nama, cById(s.pelanggan).pic, namaCabang(cById(s.pelanggan).kota, t), kodeGudang(gById(s.gudang)),
+              s.no, s.tgl, cById(pelangganSO(s)).nama, cById(pelangganSO(s)).pic,
+              namaCabang(cById(pelangganSO(s)).kota, t), kodeGudang(gById(s.gudang)),
               t(SO_LABEL[s.status].id),
               s.items.map((i) => `${pById(i.produk).kode} × ${fmt(i.qty)}`).join(", "),
               qtySO(s), totalSO(s),
@@ -2560,7 +2588,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
           }} />
       )}
       {detail && (
-        <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang}
+        <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang} cById={cById}
           gById={gById} pById={pById} close={() => setDetail(null)}
           onPilihSO={(s) => { setRinci(s); setDetail(null); }} />
       )}
@@ -2569,11 +2597,11 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
           onPilih={(s) => { setRinci(s); setTagihan(null); }} />
       )}
       {dok && (
-        <DokumenPenjualan so={dok} pById={pById} cById={cById} gById={gById} totalSO={totalSO} close={() => setDok(null)} />
+        <DokumenPenjualan so={dok} pById={pById} cById={cById} gById={gById} close={() => setDok(null)} />
       )}
       {usulHapus && (
         <FormUsulHapus jenis="penjualan" sasaran={usulHapus.id} judul={usulHapus.no}
-          ket={`${usulHapus.tgl} · ${cById(usulHapus.pelanggan).nama} · ${rp(totalSO(usulHapus))}`}
+          ket={`${usulHapus.tgl} · ${cById(pelangganSO(usulHapus)).nama} · ${rp(totalSO(usulHapus))}`}
           close={() => setUsulHapus(null)} say={say} submit={ajukanHapus} />
       )}
       {putusanH && (
@@ -2732,6 +2760,7 @@ function GrafBulanan({ data, lang, pilih, onPilih }) {
 const PENERBIT = {
   spb: { nama: "CV. Sinar Perkasa Ban", ppn: false, sub: "Ban Vulkanisir" },
   dfj: { nama: "PT. Daimond Fajar Jaya", ppn: true, sub: "Ban Vulkanisir" },
+  asc: { nama: "PT ASCENDO INTERNATIONAL", ppn: true, sub: "Ban Vulkanisir" },
 };
 
 /* Rincian satu penjualan: layar tabel hanya memuat kode & qty, sedangkan harga
@@ -2741,7 +2770,12 @@ function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, on
   const { t, lang } = useLang();
   const box = useDialog(close);
   const judul = useId();
-  const c = cById(so.pelanggan);
+  /* `c` = pemakai barang (yang namanya dicari orang), `tagih` = pihak yang
+     dikirimi tagihan. Termin dan jatuh tempo milik yang ditagih — dialah yang
+     membayar. Pada penjualan biasa keduanya pihak yang sama. */
+  const c = cById(pelangganSO(so));
+  const tagih = cById(so.pelanggan);
+  const ppn = ppnSO(so);
   const total = totalSO(so);
   const qty = so.items.reduce((a, i) => a + i.qty, 0);
 
@@ -2758,8 +2792,11 @@ function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, on
             <div><span className="lbl2">{t("PIC")}</span><b>{c.pic || "-"}</b></div>
             <div><span className="lbl2">{t("Gudang")}</span><b>{namaGudang(gById(so.gudang), t)}</b></div>
             <div><span className="lbl2">{t("Status")}</span><Status s={so.status} map={SO_LABEL} /></div>
-            <div><span className="lbl2">{t("Termin")}</span><b>{t("{n} hari", { n: c.termin })}</b></div>
-            <div><span className="lbl2">{t("Jatuh Tempo")}</span><b>{addDays(so.tgl, Number(c.termin) || 30)}</b></div>
+            <div><span className="lbl2">{t("Termin")}</span><b>{t("{n} hari", { n: tagih.termin })}</b></div>
+            <div><span className="lbl2">{t("Jatuh Tempo")}</span><b>{addDays(so.tgl, Number(tagih.termin) || 30)}</b></div>
+            {so.pelanggan_akhir && (
+              <div><span className="lbl2">{t("Ditagih ke")}</span><b>{tagih.nama}</b></div>
+            )}
             {/* Baris lama hasil import dikirim tanpa tanggal ini; "—" lebih
                 jujur daripada meminjam tanggal dokumen. */}
             <div><span className="lbl2">{t("Tanggal Kirim")}</span><b>{so.tgl_kirim || "—"}</b></div>
@@ -2789,9 +2826,24 @@ function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, on
                 })}
               </tbody>
               <tfoot>
+                {ppn > 0 && (
+                  <>
+                    <tr>
+                      <td><b>{t("Subtotal")}</b></td>
+                      <td className="r n">{fmt(qty)}</td>
+                      <td />
+                      <td className="r n">{rp(subtotalSO(so))}</td>
+                    </tr>
+                    <tr>
+                      <td><b>{t("PPN {p}%", { p: Number(so.ppn) })}</b></td>
+                      <td /><td />
+                      <td className="r n">{rp(ppn)}</td>
+                    </tr>
+                  </>
+                )}
                 <tr className="tf-total">
                   <td><b>{t("Total")}</b></td>
-                  <td className="r n strong">{fmt(qty)}</td>
+                  <td className="r n strong">{ppn > 0 ? "" : fmt(qty)}</td>
                   <td />
                   <td className="r n strong">{rp(total)}</td>
                 </tr>
@@ -2831,18 +2883,24 @@ function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, on
   );
 }
 
-function DokumenPenjualan({ so, pById, cById, gById, totalSO, close }) {
+function DokumenPenjualan({ so, pById, cById, gById, close }) {
   const { t } = useLang();
   const [jenis, setJenis] = useState(so.status === "penawaran" || so.status === "pesanan" ? "penawaran" : "faktur");
-  const [terbit, setTerbit] = useState("spb");
+  /* Dokumen ber-PPN lahir dari penjualan yang ditagih lewat pihak PKP, jadi
+     penerbitnya sudah tertentu — memilihnya ulang setiap kali cetak hanya
+     mengundang faktur yang terbit atas nama yang salah. */
+  const [terbit, setTerbit] = useState(so.ppn > 0 ? "asc" : "spb");
   const box = useDialog(close);
   const judul = useId();
   const isFaktur = jenis === "faktur";
   const firm = PENERBIT[terbit];
-  const c = cById(so.pelanggan);
+  /* Dokumen ditujukan kepada PEMAKAI barang: pihak yang menagih justru yang
+     menerbitkan dokumen ini, jadi menulis namanya di "Kepada Yth." berarti
+     menagih diri sendiri. */
+  const c = cById(pelangganSO(so));
   const g = gById(so.gudang);
-  const subtotal = totalSO(so);
-  const ppn = firm.ppn ? Math.round(subtotal * 0.11) : 0;
+  const subtotal = subtotalSO(so);
+  const ppn = firm.ppn ? Math.round(subtotal * PPN_PERSEN / 100) : 0;
   const grand = subtotal + ppn;
   const jatuhTempo = addDays(so.tgl, isFaktur ? (Number(c.termin) || 30) : 14);
 
@@ -2932,7 +2990,7 @@ function DokumenPenjualan({ so, pById, cById, gById, totalSO, close }) {
                 {firm.ppn ? (
                   <>
                     <tr><td>Subtotal (DPP)</td><td className="r n">{rp(subtotal)}</td></tr>
-                    <tr><td>PPN 11%</td><td className="r n">{rp(ppn)}</td></tr>
+                    <tr><td>PPN {PPN_PERSEN}%</td><td className="r n">{rp(ppn)}</td></tr>
                   </>
                 ) : (
                   <tr><td>Subtotal</td><td className="r n">{rp(subtotal)}</td></tr>
@@ -2976,7 +3034,7 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
   const { t } = useLang();
   const jadi = produk.filter((p) => ["jadi", "jasa"].includes(p.kategori));
   const [f, setF] = useState(awal
-    ? { pelanggan: awal.pelanggan, gudang: awal.gudang, tgl: awal.tgl,
+    ? { pelanggan: awal.pelanggan_akhir || awal.pelanggan, gudang: awal.gudang, tgl: awal.tgl,
         status: awal.status, tglKirim: awal.tgl_kirim || "" }
     : { pelanggan: "", gudang: "", tgl: today() });
   const [items, setItems] = useState(awal
@@ -2990,19 +3048,26 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
     if (k === "produk") y.harga = (jadi.find((p) => p.id === v) || {}).harga ?? "";
     return y;
   }));
-  const total = items.reduce((a, i) => a + (Number(i.qty) || 0) * (Number(i.harga) || 0), 0);
+  const subtotal = items.reduce((a, i) => a + (Number(i.qty) || 0) * (Number(i.harga) || 0), 0);
+  /* Yang dipilih di layar adalah PEMAKAI barang. Kalau dia ditagih lewat pihak
+     lain (grup), pihak itulah yang memikul piutang, limit kredit dan PPN-nya —
+     jadi seluruh pemeriksaan di bawah memakai `tagih`, bukan `c`. */
   const c = pelanggan.find((p) => p.id === f.pelanggan) || {};
+  const tagih = (c.via && pelanggan.find((p) => p.id === c.via)) || c;
+  const lewat = tagih.id && tagih.id !== c.id ? tagih : null;
+  const persenPpn = tagih.ppn ? PPN_PERSEN : 0;
+  const ppn = Math.round(subtotal * persenPpn / 100);
+  const total = subtotal + ppn;
   /* limit 0 = belum diatur, bukan "tidak boleh berutang": pelanggan hasil impor
      masuk dengan limit_kredit bawaan 0, dan menolaknya di sini membuat mereka
      tidak bisa dijual sama sekali. Layar pelanggan sudah membaca 0 begitu juga. */
-  const adaLimit = punyaLimit(c);
+  const adaLimit = punyaLimit(tagih);
   /* Saat mengubah dokumen yang sudah masuk hitungan piutang (kirim/tagihan),
      nilai LAMA-nya sudah ada di dalam piutang(c.id). Kalau tidak dikembalikan
      dulu, total baru akan dihitung dua kali dan koreksi kecil pun tertolak
      sebagai "melebihi limit". */
-  const sudahDihitung = awal && ["kirim", "tagihan"].includes(awal.status)
-    ? awal.items.reduce((a, i) => a + i.qty * i.harga, 0) : 0;
-  const sisaLimit = adaLimit ? c.limit - (piutang(c.id) - sudahDihitung) - total : null;
+  const sudahDihitung = awal && ["kirim", "tagihan"].includes(awal.status) ? nilaiSO(awal) : 0;
+  const sisaLimit = adaLimit ? tagih.limit - (piutang(tagih.id) - sudahDihitung) - total : null;
   const lewatLimit = sisaLimit !== null && sisaLimit < 0;
   /* Status & tanggal kirim hanya muncul saat mengubah dokumen: penjualan baru
      selalu lahir sebagai penawaran, dan memilih statusnya di sini hanya akan
@@ -3018,7 +3083,7 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
     if (!valid.length) return say(t("Tambahkan minimal satu baris barang."), true);
     if (valid.some((i) => !i.produk)) return say(t("Pilih barang untuk setiap baris."), true);
     if (valid.some((i) => !(Number(i.harga) >= 0))) return say(t("Harga harus berupa angka."), true);
-    if (lewatLimit) return say(t("Melebihi limit kredit {nama} sebesar {v}.", { nama: c.nama, v: rp(-sisaLimit) }), true);
+    if (lewatLimit) return say(t("Melebihi limit kredit {nama} sebesar {v}.", { nama: tagih.nama, v: rp(-sisaLimit) }), true);
     if (dikirim && f.tglKirim && f.tglKirim < awal.tgl && !bolehMundurTgl())
       return say(t("Tanggal kirim tidak boleh mendahului tanggal dokumen ({tgl}).", { tgl: awal.tgl }), true);
     try {
@@ -3080,6 +3145,8 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
       <button className="btn sm" onClick={() => setItems((l) => [...l, { produk: "", qty: "", harga: "" }])}>{t("+ Tambah Baris")}</button>
 
       <div className="sum">
+        {persenPpn > 0 && <div><span>{t("Subtotal")}</span><b className="n">{rp(subtotal)}</b></div>}
+        {persenPpn > 0 && <div><span>{t("PPN {p}%", { p: persenPpn })}</span><b className="n">{rp(ppn)}</b></div>}
         <div><span>{t("Total")}</span><b className="n">{rp(total)}</b></div>
         <div><span>{t("Sisa Limit Kredit")}</span>
           {adaLimit
@@ -3087,9 +3154,16 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
             : <b className="n mut" title={t("Limit kredit belum diatur untuk pelanggan ini.")}>—</b>}
         </div>
       </div>
+      {lewat && (
+        <p className="peringatan" role="status">
+          {persenPpn > 0
+            ? t("Ditagih lewat {nama} · PPN {p}% sudah termasuk dalam total.", { nama: lewat.nama, p: persenPpn })
+            : t("Ditagih lewat {nama}.", { nama: lewat.nama })}
+        </p>
+      )}
       {lewatLimit && (
         <p className="peringatan bad-box" role="status">
-          {t("Melebihi limit kredit {nama} sebesar {v} — penawaran tidak bisa disimpan.", { nama: c.nama, v: rp(-sisaLimit) })}
+          {t("Melebihi limit kredit {nama} sebesar {v} — penawaran tidak bisa disimpan.", { nama: tagih.nama, v: rp(-sisaLimit) })}
         </p>
       )}
     </Modal>
@@ -3362,7 +3436,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
     await Promise.all([muatUsulan(), reload()]);
     say(hasil === "disetujui" ? t("Usulan disetujui, limit kredit diperbarui.") : t("Usulan ditolak."));
   };
-  const omzet = (cid) => penjualan.filter((s) => s.pelanggan === cid && s.status !== "penawaran").reduce((a, s) => a + totalSO(s), 0);
+  const omzet = (cid) => penjualan.filter((s) => pelangganSO(s) === cid && s.status !== "penawaran").reduce((a, s) => a + totalSO(s), 0);
   const list = useMemo(() => {
     const q = cari.trim().toLowerCase();
     if (!q) return pelanggan;
@@ -3517,7 +3591,12 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
                     <td><span className="chip">{c.kode}</span></td>
                     <td>
                       <b>{c.nama}</b>
-                      <em className="mut2">{c.pic} · {c.telp}</em>
+                      {/* Rute penagihan ikut nama, bukan kolom sendiri: hanya
+                          sebagian kecil pelanggan memilikinya. */}
+                      <em className="mut2">
+                        {c.pic} · {c.telp}
+                        {c.via && ` · ${t("lewat {nama}", { nama: cById(c.via).nama })}`}
+                      </em>
                     </td>
                     <td className="mut">{namaCabang(c.kota, t)}</td>
                     <td className="c"><span className={"grade g" + c.grade}>{c.grade}</span></td>
@@ -3544,9 +3623,9 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
       </Card>
 
       {buka && (
-        <FormPelanggan close={() => setBuka(false)} say={say} submit={doCreatePelanggan} />
+        <FormPelanggan pelanggan={pelanggan} close={() => setBuka(false)} say={say} submit={doCreatePelanggan} />
       )}
-      {ubah && <FormPelanggan c={ubah} close={() => setUbah(null)} say={say} submit={doUpdatePelanggan} />}
+      {ubah && <FormPelanggan c={ubah} pelanggan={pelanggan} close={() => setUbah(null)} say={say} submit={doUpdatePelanggan} />}
       {usul && <FormUsulLimit c={usul} close={() => setUsul(null)} say={say} submit={ajukan} />}
       {putusan && <FormPutusan u={putusan} close={() => setPutusan(null)} say={say} submit={putuskan} />}
       {usulHapus && (
@@ -3562,7 +3641,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
           onPilih={(jenis, obj) => { setKpi(null); setDetail(obj); }} />
       )}
       {detail && (
-        <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang}
+        <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang} cById={cById}
           gById={gById} pById={pById} close={() => setDetail(null)}
           onUsul={() => { setUsul(detail); setDetail(null); }}
           onUbah={() => { setUbah(detail); setDetail(null); }}
@@ -3584,21 +3663,28 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
 /* Satu formulir untuk tambah dan ubah: c terisi berarti mode ubah. Saat ubah,
    limit & termin tidak ditampilkan — keduanya hanya berpindah lewat usulan
    yang disetujui admin, supaya jejak persetujuannya tidak bisa dilewati. */
-function FormPelanggan({ c, close, say, submit }) {
+function FormPelanggan({ c, pelanggan = [], close, say, submit }) {
   const { t } = useLang();
   const [f, setF] = useState({
     nama: c?.nama || "", pemilik: c?.pemilik || "", pic: c?.pic || "", telp: c?.telp || "",
     email: c?.email || "", alamat: c?.alamat || "", kota: c?.kota || "", npwp: c?.npwp || "",
     sales: c?.sales || "", catatan: c?.catatan || "", grade: c?.grade || "B",
     limit: String(c?.limit ?? 100000000), termin: String(c?.termin ?? 30),
+    via: c?.via || "", ppn: c?.ppn ? "1" : "0",
   });
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
+  /* Rantai penagihan hanya boleh satu tingkat: pihak penagih tidak boleh
+     sendiri ditagih lewat orang lain, dan tidak ada yang menagih dirinya
+     sendiri. Server menolak hal yang sama — ini supaya tidak sampai terpilih. */
+  const calonVia = pelanggan.filter((x) => x.id !== c?.id && !x.via);
+  const adaYangLewat = !!c && pelanggan.some((x) => x.via === c.id);
   const kirim = async () => {
     if (!f.nama.trim()) return say(t("Nama pelanggan wajib diisi."), true);
     const isi = {
       nama: f.nama.trim(), pemilik: f.pemilik.trim(), pic: f.pic.trim(), telp: f.telp.trim(),
       email: f.email.trim(), alamat: f.alamat.trim(), kota: f.kota.trim(), npwp: f.npwp.trim(),
       sales: f.sales.trim(), catatan: f.catatan.trim(), grade: f.grade,
+      via: adaYangLewat ? null : (f.via || null), ppn: f.ppn === "1",
     };
     try {
       await submit(c
@@ -3626,6 +3712,20 @@ function FormPelanggan({ c, close, say, submit }) {
         <Inp label={t("Telepon")} value={f.telp} onChange={set("telp")} />
       </div>
 
+      <h4 className="mut2">{t("Penagihan & Pajak")}</h4>
+      <div className="row2">
+        {adaYangLewat
+          ? <Inp label={t("Ditagih lewat")} value={t("Perusahaan ini yang menagih pelanggan lain.")} onChange={() => {}} disabled />
+          : <Combo label={t("Ditagih lewat")} value={f.via} onChange={set("via")}
+              placeholder={t("-- Ditagih langsung --")}
+              opts={calonVia.map((x) => [x.id, `${x.kode} — ${x.nama}`])} />}
+        <Sel label={t("Status Pajak")} value={f.ppn} onChange={set("ppn")}
+          opts={[["0", t("Non-PKP (tanpa PPN)")], ["1", t("PKP (PPN {p}%)", { p: PPN_PERSEN })]]} />
+      </div>
+      <p className="note">
+        {t("Bila diisi, penjualan kepada pelanggan ini ditagih ke pihak tersebut dan PPN mengikuti status pajak pihak itu.")}
+      </p>
+
       <h4 className="mut2">{t("Data Penjualan")}</h4>
       <div className="row2">
         <Inp label={t("Sales")} value={f.sales} onChange={set("sales")} hint={t("Petugas penjualan penanggung akun.")} />
@@ -3647,12 +3747,14 @@ function FormPelanggan({ c, close, say, submit }) {
   );
 }
 
-function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close, onUsul, onUbah, onPilihSO }) {
+function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, cById, close, onUsul, onUbah, onPilihSO }) {
   const { t } = useLang();
   const box = useDialog(close);
   const judul = useId();
   const riwayat = useMemo(
-    () => [...penjualan].filter((s) => s.pelanggan === c.id).sort((a, b) => (a.tgl < b.tgl ? 1 : a.tgl > b.tgl ? -1 : 0)),
+    () => [...penjualan]
+      .filter((s) => s.pelanggan === c.id || s.pelanggan_akhir === c.id)
+      .sort((a, b) => (a.tgl < b.tgl ? 1 : a.tgl > b.tgl ? -1 : 0)),
     [penjualan, c.id],
   );
   const omzet = riwayat.filter((s) => s.status !== "penawaran").reduce((a, s) => a + totalSO(s), 0);
@@ -3685,6 +3787,10 @@ function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close, 
             <div><span className="lbl2">{t("Limit Kredit")}</span><b>{punyaLimit(c) ? rp(c.limit) : t("Belum diatur")}</b></div>
             <div><span className="lbl2">{t("Sisa Limit")}</span><b>{punyaLimit(c) ? rp(Math.max(0, c.limit - p)) : "—"}</b></div>
             <div><span className="lbl2">{t("Transaksi Terakhir")}</span><b>{riwayat[0]?.tgl || "-"}</b></div>
+            <div><span className="lbl2">{t("Ditagih lewat")}</span>
+              <b>{c.via ? (cById?.(c.via).nama || c.via) : t("Langsung")}</b></div>
+            <div><span className="lbl2">{t("Status Pajak")}</span>
+              <b>{c.ppn ? t("PKP (PPN {p}%)", { p: PPN_PERSEN }) : t("Non-PKP (tanpa PPN)")}</b></div>
             {c.catatan && <div className="span3"><span className="lbl2">{t("Catatan")}</span><b>{c.catatan}</b></div>}
           </div>
 
@@ -3988,7 +4094,7 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
 
       {/* tanpa onUsul/onUbah: pengajuan limit tetap di layar pelanggan */}
       {detail && (
-        <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang}
+        <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang} cById={cById}
           gById={gById} pById={pById} close={() => setDetail(null)}
           onPilihSO={(s) => { setRinci(s); setDetail(null); }} />
       )}

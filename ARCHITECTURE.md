@@ -100,7 +100,19 @@ BI 색은 바꾸지 않습니다. 글자 크기도 같은 자리의 `--asm-fs-*`
 `public/ascendo-signature.png`(시그니처, 로그인 화면·`og:image`) 두 개입니다.
 
 인쇄 서류 kop은 아센도 로고를 쓰지 않고 중립 마크(`TreadMark`)를 씁니다. 그 서류의 발행처는
-`PENERBIT`에 정의된 CV. Sinar Perkasa Ban / PT. Daimond Fajar Jaya이기 때문입니다.
+`PENERBIT`에 정의된 CV. Sinar Perkasa Ban / PT. Daimond Fajar Jaya / PT ASCENDO INTERNATIONAL이기 때문입니다.
+
+### 경유 청구와 PPN
+
+부가세 거래는 그룹사(PT ASCENDO INTERNATIONAL)를 거쳐 나갑니다. 고객 마스터의 `pelanggan.via`가
+그 경유처이고, `pelanggan.ppn`은 PKP 여부입니다. 판매 문서를 저장할 때 서버(`ruteTagih`)가 이 둘을
+읽어 **청구처**(`penjualan.pelanggan`)와 **최종 사용자**(`penjualan.pelanggan_akhir`), 그리고 문서
+시점의 세율(`penjualan.ppn`, 퍼센트)을 정합니다. 경로 판단은 서버에만 있습니다 — 화면이 보낸 값으로
+마스터와 어긋난 문서가 생기지 않게 하기 위해서입니다. 체인은 한 단계까지만 허용합니다(`tolakRute`).
+
+두 축의 의미가 다릅니다. **미수금·여신한도·연령분석은 청구처**를 따르고(돈을 받는 상대가 그쪽이므로),
+**매출·고객 순위·월별 요약은 최종 사용자**를 따릅니다(`pelangganSO`). PPN은 매출·미수금 금액에
+포함해 계산합니다(`nilaiSO = subtotalSO + ppnSO`).
 
 ### 폰트
 
@@ -179,8 +191,8 @@ HTTP 요청에 실어 원자적으로 실행합니다. 비대화형이라 중간
 |---|---|
 | `v_stok` | `SUM(qty) GROUP BY gudang, produk` — 재고의 정의 |
 | `v_stok_total` | 제품별 합계 |
-| `v_penjualan` | SO 헤더 + 합계 금액 |
-| `v_piutang` | 고객별 미수금(출고·청구 상태 SO 합) |
+| `v_penjualan` | SO 헤더 + 합계 금액(항목 합계, PPN 제외) |
+| `v_piutang` | 고객별 미수금(출고·청구 상태 SO 합, 문서별 PPN 포함) |
 | `t_penjualan_kirim` | 상태가 `kirim`이 되면 항목별 `keluar` 원장 자동 생성. 원장 일자는 `COALESCE(tgl_kirim, wib_today())` |
 | `t_pembelian_terima` | 상태가 `diterima`가 되면 `masuk` 원장 자동 생성 |
 
