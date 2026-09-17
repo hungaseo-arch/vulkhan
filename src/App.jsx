@@ -1117,11 +1117,12 @@ function FormPengguna({ close, say, submit, awal, sendiri }) {
 /* ============================ DASBOR ============================ */
 /* [kunci, label umur, status]. Statusnya sengaja hanya tiga — yang ditanyakan
    orang pertama kali bukan "berapa hari", melainkan "sudah lewat atau belum".
-   'Belum Jatuh Tempo' dipecah dua: yang jatuh tempo HARI INI bukan lagi aman
-   (uangnya harus masuk hari ini juga), tapi juga belum terlambat. */
+   'Belum Jatuh Tempo' dipecah dua pada batas akhir bulan berjalan: yang jatuh
+   temponya masih dalam bulan ini adalah uang yang harus ditagih bulan ini juga
+   — belum terlambat, tapi juga bukan urusan bulan depan. */
 const AGING_DEF = [
   ["undue", "Belum Jatuh Tempo", "Undue"],
-  ["ondue", "Jatuh Tempo Hari Ini", "Ondue"],
+  ["ondue", "Jatuh Tempo Bulan Ini", "Ondue"],
   ["130", "1–30 Hari", "Overdue"],
   ["3060", "31–60 Hari", "Overdue"],
   ["6090", "61–90 Hari", "Overdue"],
@@ -1136,6 +1137,7 @@ const STATUS_UMUR = Object.fromEntries(AGING_DEF.map(([k, , status]) => [k, stat
    Jatuh tempo = tanggal SO + termin pelanggan (default 30 hari bila kosong). */
 const hitungPiutang = (penjualan, cById, totalSO) => {
   const hariIni = today(); // WIB — umur piutang ikut acuan yang sama
+  const tutupBulan = akhirBulan(hariIni.slice(0, 7)); // batas "jatuh tempo bulan ini"
   const piutangRows = penjualan
     .filter((s) => ["kirim", "tagihan"].includes(s.status))
     .map((s) => {
@@ -1144,7 +1146,7 @@ const hitungPiutang = (penjualan, cById, totalSO) => {
       const tempo = addDays(s.tgl, Number(c.termin) || 30);
       const telat = Math.max(0, diffDays(tempo, hariIni));
       const bucket = telat > 180 ? "180" : telat > 90 ? "90180" : telat > 60 ? "6090" : telat > 30 ? "3060" : telat > 0 ? "130"
-        : tempo === hariIni ? "ondue" : "undue";
+        : tempo <= tutupBulan ? "ondue" : "undue";
       return { so: s, c, nilai, telat, tempo, bucket };
     });
   const piutangF = piutangRows.reduce((a, r) => a + r.nilai, 0);
@@ -1198,8 +1200,10 @@ const daftarPiutang = (judul, rows, t) => ({
   judul,
   kolom: [[t("No."), 0], [t("Pelanggan"), 0], [t("Jatuh Tempo"), 0], [t("Lewat (hari)"), 1], [t("Nilai"), 1]],
   taut: { 0: "so", 1: "c" },
+  /* Yang sudah lewat: yang paling lama dulu. Yang belum: yang paling dekat
+     jatuh temponya dulu — itu urutan orang menagihnya. */
   baris: [...rows]
-    .sort((a, b) => b.telat - a.telat || b.nilai - a.nilai)
+    .sort((a, b) => b.telat - a.telat || (a.tempo < b.tempo ? -1 : a.tempo > b.tempo ? 1 : b.nilai - a.nilai))
     .map((r) => ({ k: r.so.id, so: r.so, c: r.c, sel: [r.so.no, r.c.nama, r.tempo, r.telat ? fmt(r.telat) : "—", rp(r.nilai)] })),
   total: rp(rows.reduce((a, r) => a + r.nilai, 0)),
 });
@@ -3885,7 +3889,7 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
                   {/* Yang terlama di kelompoknya — batas bawah kelompok sudah
                       terbaca dari labelnya, yang tidak terbaca adalah seberapa
                       jauh ujungnya sudah lewat. */}
-                  <td className="r n">{r.k === "undue" || !r.n ? "—" : fmt(r.maks)}</td>
+                  <td className="r n">{r.status !== "Overdue" || !r.n ? "—" : fmt(r.maks)}</td>
                   <td className="r n">{rp(r.nilai)}</td>
                   <td className="r n">{piutangF ? fmt((r.nilai / piutangF) * 100) : 0}%</td>
                 </tr>
