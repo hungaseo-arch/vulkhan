@@ -1196,7 +1196,7 @@ const gradePiutang = (x) => {
   return ["Rendah", "ok"];
 };
 
-function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById, gById, totalSO, bukaPenjualan }) {
+function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById, gById, totalSO, piutang, bukaPenjualan }) {
   const { t, lang } = useLang();
   const qtySO = (s) => s.items.reduce((a, i) => a + i.qty, 0);
   const nilaiPO = (p) => p.items.reduce((a, i) => a + i.qty * i.harga, 0);
@@ -1238,21 +1238,24 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
 
   const [detail, setDetail] = useState(null); // kartu KPI yang dibuka
   const [rinci, setRinci] = useState(null);   // dokumen yang dibuka dari daftar itu
+  const [pel, setPel] = useState(null);       // pelanggan yang dibuka dari daftar itu
   const bukaJual = () => setDetail({
     judul: labelJual,
     kolom: [[t("No."), 0], [t("Tanggal"), 0], [t("Pelanggan"), 0], [t("Nilai"), 1]],
+    taut: { 0: "so", 2: "c" },
     baris: [...jualBulanIni]
       .sort((a, b) => (a.tgl < b.tgl ? 1 : a.tgl > b.tgl ? -1 : 0))
-      .map((s) => ({ k: s.id, so: s, sel: [s.no, s.tgl, cById(s.pelanggan).nama, rp(totalSO(s))] })),
+      .map((s) => ({ k: s.id, so: s, c: cById(s.pelanggan), sel: [s.no, s.tgl, cById(s.pelanggan).nama, rp(totalSO(s))] })),
     total: rp(nilaiBulanIni),
   });
   const bukaPiutang = (status, judul) => () => setDetail({
     judul,
     kolom: [[t("No."), 0], [t("Pelanggan"), 0], [t("Jatuh Tempo"), 0], [t("Lewat (hari)"), 1], [t("Nilai"), 1]],
+    taut: { 0: "so", 1: "c" },
     baris: piutangRows
       .filter((r) => STATUS_UMUR[r.bucket] === status)
       .sort((a, b) => b.telat - a.telat || b.nilai - a.nilai)
-      .map((r) => ({ k: r.so.id, so: r.so, sel: [r.so.no, r.c.nama, r.tempo, r.telat ? fmt(r.telat) : "—", rp(r.nilai)] })),
+      .map((r) => ({ k: r.so.id, so: r.so, c: r.c, sel: [r.so.no, r.c.nama, r.tempo, r.telat ? fmt(r.telat) : "—", rp(r.nilai)] })),
     total: rp(statusRows.find((x) => x.status === status).nilai),
   });
 
@@ -1276,13 +1279,19 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
       </div>
       {detail && (
         <DetailKpi {...detail} close={() => setDetail(null)}
-          onPilih={(so) => { setRinci(so); setDetail(null); }} />
+          onPilih={(jenis, obj) => { setDetail(null); if (jenis === "so") setRinci(obj); else setPel(obj); }} />
       )}
-      {/* Dokumennya hanya dibaca dari sini. Mengubah status tetap milik layar
-          Penjualan, tempat orang sudah terbiasa mencarinya. */}
+      {/* Dokumen & pelanggan hanya dibaca dari sini. Mengubah status atau data
+          pelanggan tetap milik layarnya masing-masing, tempat orang sudah
+          terbiasa mencarinya. */}
       {rinci && (
         <RincianPenjualan so={rinci} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
           close={() => setRinci(null)} />
+      )}
+      {pel && (
+        <DetailPelanggan c={pel} penjualan={penjualan} totalSO={totalSO} piutang={piutang}
+          gById={gById} pById={pById} close={() => setPel(null)}
+          onPilihSO={(so) => { setPel(null); setRinci(so); }} />
       )}
 
       <SectionTitle id={t("Ringkasan Bulanan")} />
@@ -4027,7 +4036,7 @@ const SectionTitle = ({ id, mid, children }) => (
 /* Rincian di balik satu kartu KPI. Kartunya menjawab "berapa"; yang ditanyakan
    berikutnya selalu "yang mana", dan sampai sekarang jawabannya menuntut pindah
    layar. Kolomnya datang dari pemanggil — [judul, rata kanan]. */
-function DetailKpi({ judul, kolom, baris, total, close, onPilih }) {
+function DetailKpi({ judul, kolom, baris, total, taut, close, onPilih }) {
   const { t } = useLang();
   const box = useDialog(close);
   const id = useId();
@@ -4050,8 +4059,8 @@ function DetailKpi({ judul, kolom, baris, total, close, onPilih }) {
                   <tr key={b.k}>
                     {b.sel.map((v, i) => (
                       <td key={kolom[i][0]} className={kolom[i][1] ? "r n" : undefined}>
-                        {i === 0 && onPilih && b.so
-                          ? <button type="button" className="namelink" title={t("Lihat rincian")} onClick={() => onPilih(b.so)}>{v}</button>
+                        {onPilih && taut?.[i] && b[taut[i]]
+                          ? <button type="button" className="namelink" title={t("Lihat rincian")} onClick={() => onPilih(taut[i], b[taut[i]])}>{v}</button>
                           : v}
                       </td>
                     ))}
