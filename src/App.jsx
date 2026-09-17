@@ -178,9 +178,11 @@ const cabangDari = (teks) => {
   const k = String(teks || "").trim().toUpperCase();
   return CABANG.find((c) => c.alias.includes(k)) || null;
 };
-/* Nama kota siap tampil: diterjemahkan bila termasuk cabang, apa adanya bila
-   tidak. `t` diminta sebagai argumen karena ini bukan komponen. */
-const namaKota = (teks, t) => {
+/* Nama cabang siap tampil. Kolomnya memang berisi kota, tapi yang dimaksud
+   selalu cabang yang melayani pelanggan itu — jadi nama cabang yang dipakai,
+   dan teks yang tidak dikenali ditampilkan apa adanya. `t` diminta sebagai
+   argumen karena ini bukan komponen. */
+const namaCabang = (teks, t) => {
   const c = cabangDari(teks);
   return c ? t(c.nama) : String(teks || "");
 };
@@ -2217,8 +2219,8 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
   const unduhExcel = () => {
     const aoa = sumbu === "pelanggan"
       ? [
-          [t("Peringkat"), t("Pelanggan"), t("Kota"), t("Transaksi|kolom"), t("Ban Jadi"), t("Ban Jasa"), t("Total Qty"), t("Nilai Penjualan"), t("Harga Rata-rata"), t("Piutang")],
-          ...perPelanggan.map((b, i) => [i + 1, b.c.nama, namaKota(b.c.kota, t), b.n, b.jadi, b.jasa, b.qty, b.total, b.harga ?? "", tagihanCust.get(b.id)?.nilai || 0]),
+          [t("Peringkat"), t("Pelanggan"), t("Cabang"), t("Transaksi|kolom"), t("Ban Jadi"), t("Ban Jasa"), t("Total Qty"), t("Nilai Penjualan"), t("Harga Rata-rata"), t("Piutang")],
+          ...perPelanggan.map((b, i) => [i + 1, b.c.nama, namaCabang(b.c.kota, t), b.n, b.jadi, b.jasa, b.qty, b.total, b.harga ?? "", tagihanCust.get(b.id)?.nilai || 0]),
         ]
       : sumbu === "produk"
         ? [
@@ -2226,9 +2228,9 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
             ...perProduk.map((b, i) => [i + 1, namaKelompok(b, kelompok, t), b.n, b.qty, b.total, b.harga ?? ""]),
           ]
         : [
-            [t("No."), t("Tanggal"), t("Pelanggan"), t("PIC"), t("Kota"), t("Gudang"), t("Status"), t("Rincian"), t("Qty"), t("Total")],
+            [t("No."), t("Tanggal"), t("Pelanggan"), t("PIC"), t("Cabang"), t("Gudang"), t("Status"), t("Rincian"), t("Qty"), t("Total")],
             ...list.map((s) => [
-              s.no, s.tgl, cById(s.pelanggan).nama, cById(s.pelanggan).pic, namaKota(cById(s.pelanggan).kota, t), kodeGudang(gById(s.gudang)),
+              s.no, s.tgl, cById(s.pelanggan).nama, cById(s.pelanggan).pic, namaCabang(cById(s.pelanggan).kota, t), kodeGudang(gById(s.gudang)),
               t(SO_LABEL[s.status].id),
               s.items.map((i) => `${pById(i.produk).kode} × ${fmt(i.qty)}`).join(", "),
               qtySO(s), totalSO(s),
@@ -2315,7 +2317,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
                       </button>
                       <button type="button" className="namelink strong" title={t("Lihat rincian")}
                         onClick={() => setDetail(b.c)}>{b.c.nama}</button>
-                      <em className="mut2">{namaKota(b.c.kota, t) || "-"}</em>
+                      <em className="mut2">{namaCabang(b.c.kota, t) || "-"}</em>
                     </span>
                   </td>
                   <td className="r n">{fmt(b.n)}</td>
@@ -2601,7 +2603,7 @@ function DaftarGerak({ rows, kepala, kolom, kosong, takJelas, onPilih }) {
             <tr key={r.id} className="klik" onClick={() => onPilih(r.c)}>
               <td>
                 <button type="button" className="namelink" title={t("Lihat rincian")}>{r.c.nama}</button>
-                <em className="mut2">{namaKota(r.c.kota, t) || "-"}</em>
+                <em className="mut2">{namaCabang(r.c.kota, t) || "-"}</em>
               </td>
               {kolom(r)}
             </tr>
@@ -3348,15 +3350,15 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
     const q = cari.trim().toLowerCase();
     if (!q) return pelanggan;
     return pelanggan.filter((c) =>
-      /* namaKota ikut dicari: yang terbaca di tabel adalah nama
+      /* namaCabang ikut dicari: yang terbaca di tabel adalah nama
          terjemahannya, dan orang mengetikkan apa yang dilihatnya. */
-      [c.kode, c.nama, c.pemilik, c.pic, c.kota, namaKota(c.kota, t), c.sales]
+      [c.kode, c.nama, c.pemilik, c.pic, c.kota, namaCabang(c.kota, t), c.sales]
         .some((v) => (v || "").toLowerCase().includes(q)));
   }, [pelanggan, cari, t]);
 
   const unduhExcel = () => {
     const aoa = [
-      [t("Kode"), t("Nama"), t("Pemilik"), t("PIC"), t("Telepon"), t("Email"), t("Alamat"), t("Kota"),
+      [t("Kode"), t("Nama"), t("Pemilik"), t("PIC"), t("Telepon"), t("Email"), t("Alamat"), t("Cabang"),
        t("NPWP"), t("Sales"), t("Grade"), t("Limit Kredit"), t("Termin (hari)"), t("Piutang"), t("Omzet"), t("Catatan")],
       ...list.map((c) => [
         c.kode, c.nama, c.pemilik, c.pic, c.telp, c.email, c.alamat, c.kota, c.npwp, c.sales,
@@ -3438,7 +3440,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
               <tr>
                 <th scope="col">{t("Kode")}</th>
                 <th scope="col">{t("Pelanggan")}</th>
-                <th scope="col">{t("Kota")}</th>
+                <th scope="col">{t("Cabang")}</th>
                 <th scope="col" className="c">{t("Grade")}</th>
                 <th scope="col" className="r">{t("Termin")}</th>
                 <th scope="col" className="r">{t("Piutang")}</th>
@@ -3458,7 +3460,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
                       <b>{c.nama}</b>
                       <em className="mut2">{c.pic} · {c.telp}</em>
                     </td>
-                    <td className="mut">{namaKota(c.kota, t)}</td>
+                    <td className="mut">{namaCabang(c.kota, t)}</td>
                     <td className="c"><span className={"grade g" + c.grade}>{c.grade}</span></td>
                     <td className="r n mut">{t("{n} hari", { n: c.termin })}</td>
                     <td className={"r n strong " + (lewat ? "bad" : "")}>{rp(p)}</td>
@@ -3553,7 +3555,7 @@ function FormPelanggan({ c, close, say, submit }) {
       </div>
       <Inp label={t("Alamat")} value={f.alamat} onChange={set("alamat")} hint={t("Alamat penagihan lengkap.")} />
       <div className="row2">
-        <Inp label={t("Kota")} value={f.kota} onChange={set("kota")} />
+        <Inp label={t("Cabang")} value={f.kota} onChange={set("kota")} />
         <Inp label={t("Email")} value={f.email} onChange={set("email")} />
       </div>
       <div className="row2">
@@ -3608,7 +3610,7 @@ function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close, 
             <div><span className="lbl2">{t("Telepon")}</span><b>{c.telp || "-"}</b></div>
             <div><span className="lbl2">{t("Email")}</span><b>{c.email || "-"}</b></div>
             <div><span className="lbl2">{t("NPWP")}</span><b>{c.npwp || "-"}</b></div>
-            <div><span className="lbl2">{t("Kota")}</span><b>{namaKota(c.kota, t) || "-"}</b></div>
+            <div><span className="lbl2">{t("Cabang")}</span><b>{namaCabang(c.kota, t) || "-"}</b></div>
             <div className="span3"><span className="lbl2">{t("Alamat")}</span><b>{c.alamat || "-"}</b></div>
           </div>
 
