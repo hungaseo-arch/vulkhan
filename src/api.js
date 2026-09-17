@@ -92,7 +92,8 @@ export const api = {
   // berubah lewat jalur ini (nomor menaut buku mutasi, status punya endpoint
   // sendiri). Server menolak bila bukan admin / bukan pembuat / bukan bulan ini.
   updatePenjualan: (id, s) => j(`/penjualan/${id}`, { method: "PUT", body: s }),
-  statusPenjualan: (id, status) => j(`/penjualan/${id}/status`, { method: "PATCH", body: { status } }),
+  // tgl hanya dipakai saat status 'kirim' — tanggal barang benar-benar keluar.
+  statusPenjualan: (id, status, tgl) => j(`/penjualan/${id}/status`, { method: "PATCH", body: { status, tgl } }),
   createPembelian: (p) => j("/pembelian", { method: "POST", body: p }),
   statusPembelian: (id, status) => j(`/pembelian/${id}/status`, { method: "PATCH", body: { status } }),
 

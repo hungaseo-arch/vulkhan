@@ -256,11 +256,17 @@ async function ensurePelanggan() {
 async function ensurePenjualan() {
   await sql`ALTER TABLE penjualan ADD COLUMN IF NOT EXISTS dibuat_oleh TEXT
     REFERENCES pengguna(id) ON DELETE SET NULL`;
+  /* Tanggal barang benar-benar keluar, terpisah dari tanggal dokumen: barang
+     sering berangkat beberapa hari sesudah SO ditulis, dan yang dicari orang
+     di buku mutasi adalah hari keberangkatannya. NULL selama dokumen belum
+     dikirim — termasuk seluruh baris lama, yang memang tidak pernah punya
+     tanggal ini. Jatuh tempo tetap dihitung dari p.tgl. */
+  await sql`ALTER TABLE penjualan ADD COLUMN IF NOT EXISTS tgl_kirim DATE`;
   await sql`
     CREATE OR REPLACE VIEW v_penjualan AS
       SELECT p.id, p.no, p.tgl, p.pelanggan, p.gudang, p.status,
              COALESCE(SUM(i.qty * i.harga),0) AS total,
-             p.dibuat_oleh
+             p.dibuat_oleh, p.tgl_kirim
       FROM penjualan p
       LEFT JOIN penjualan_item i ON i.penjualan = p.id
       GROUP BY p.id`;
@@ -299,12 +305,14 @@ async function ensureWaktu() {
 
   // Kedua trigger mencatat tanggal mutasi sendiri — di sinilah CURRENT_DATE
   // paling sering salah, karena pengiriman pagi hari adalah hal biasa.
+  // Untuk penjualan, tanggal kirim yang dipilih orang menang atas hari ini;
+  // wib_today() tinggal jaring pengaman untuk dokumen tanpa tgl_kirim.
   await sql`
     CREATE OR REPLACE FUNCTION trg_penjualan_kirim() RETURNS TRIGGER AS $wib$
     BEGIN
       IF NEW.status = 'kirim' AND OLD.status IS DISTINCT FROM 'kirim' THEN
         INSERT INTO stok_mutasi (tgl, gudang, produk, tipe, qty, ref, catatan)
-        SELECT wib_today(), NEW.gudang, i.produk, 'keluar', -i.qty, NEW.no, 'Pengiriman penjualan'
+        SELECT COALESCE(NEW.tgl_kirim, wib_today()), NEW.gudang, i.produk, 'keluar', -i.qty, NEW.no, 'Pengiriman penjualan'
         FROM penjualan_item i WHERE i.penjualan = NEW.id;
       END IF;
       RETURN NEW;
@@ -964,16 +972,17 @@ async function tolakUbahSO(user, so) {
   return null;
 }
 
-/* Ubah isi SO. Nomor dan status TIDAK ikut berubah: nomor adalah kunci yang
-   menautkan buku mutasi (stok_mutasi.ref), dan status punya jalurnya sendiri
-   di PATCH .../status yang memeriksa stok serta memicu trigger.
+/* Ubah isi SO. Nomor TIDAK ikut berubah: ia kunci yang menautkan buku mutasi
+   (stok_mutasi.ref). Status dan tanggal kirim SEKARANG ikut — tombol maju/
+   mundur hanya bisa melangkah satu per satu, sedangkan yang perlu dibetulkan
+   biasanya dokumen yang sudah terlanjur salah beberapa langkah.
 
    Trigger t_penjualan_kirim hanya menyala saat status BERPINDAH, jadi pada
    penyuntingan biasa ia diam saja dan mutasi lamanya akan menggantung dengan
    qty/gudang yang sudah tidak cocok. Karena itu mutasinya disusun ulang di
-   sini — tapi HANYA bila dokumen ini memang sudah punya jejak mutasi. Kalau
-   bukunya pernah dikosongkan dengan sengaja, penyuntingan tidak boleh
-   menghidupkannya kembali satu per satu.
+   sini — tapi HANYA bila dokumen ini memang sudah punya jejak mutasi, atau
+   baru sekarang dinyatakan terkirim. Kalau bukunya pernah dikosongkan dengan
+   sengaja, penyuntingan tidak boleh menghidupkannya kembali satu per satu.
 
    Stok sengaja TIDAK diperiksa di sini (berbeda dari perpindahan ke 'kirim'):
    pemeriksaan itu perlu mengembalikan dulu qty yang dipesan dokumen ini
@@ -1002,26 +1011,61 @@ app.put("/api/penjualan/:id", wrap(async (req, res) => {
     if (!ok) return res.status(400).json({ error: "Tanggal harus tetap di dalam bulan berjalan." });
   }
 
-  const [jejak] = await sql`
-    SELECT tgl, catatan FROM stok_mutasi WHERE ref = ${so.no} ORDER BY id LIMIT 1`;
+  /* Status & tanggal kirim ikut bisa diperbaiki dari sini. Tombol maju/mundur
+     hanya melangkah satu per satu; yang dibetulkan lewat form justru dokumen
+     yang sudah terlanjur salah beberapa langkah, mis. dikirim padahal belum,
+     atau dikirim pada tanggal yang keliru. */
+  const status = s.status || so.status;
+  if (!SO_FLOW.includes(status))
+    return res.status(400).json({ error: `Status "${status}" tidak dikenal.` });
 
-  // Satu transaksi: header, item, lalu mutasi. INSERT ... SELECT mutasi harus
-  // paling belakang karena ia membaca penjualan_item yang baru ditulis di atas.
+  const dikirim = SO_FLOW.indexOf(status) >= SO_FLOW.indexOf("kirim");
+  let tglKirim = null;
+  if (dikirim) {
+    // Dokumen yang sudah dikirim selalu punya tanggal kirim: pilihan orang,
+    // lalu tanggal yang sudah tercatat, lalu tanggal dokumen sebagai dasar
+    // terakhir — bukan hari ini, karena ini perbaikan dokumen lama.
+    tglKirim = String(s.tgl_kirim || so.tgl_kirim || tgl);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(tglKirim))
+      return res.status(400).json({ error: "Tanggal kirim tidak valid." });
+    if (tglKirim < tgl)
+      return res.status(400).json({ error: `Tanggal kirim mendahului tanggal dokumen (${tgl}).` });
+  }
+
+  const [jejak] = await sql`
+    SELECT catatan FROM stok_mutasi WHERE ref = ${so.no} AND tipe = 'keluar' ORDER BY id LIMIT 1`;
+
+  /* Dokumen yang BARU sekarang dinyatakan terkirim menulis mutasinya seperti
+     tombol kirim. Yang sejak dulu berstatus 'kirim' tapi bukunya kosong tetap
+     kosong: buku mutasi pernah dikosongkan dengan sengaja (lihat
+     migrations/2026-09-15-reset-stok-pembelian), dan penyuntingan biasa tidak
+     boleh menghidupkannya kembali satu dokumen demi satu dokumen. */
+  const naikKeKirim = dikirim && SO_FLOW.indexOf(so.status) < SO_FLOW.indexOf("kirim");
+  const tulisMutasi = dikirim && (jejak || naikKeKirim);
+
+  /* Satu transaksi: header, item, lalu mutasi. Urutannya bukan selera:
+     - INSERT ... SELECT mutasi membaca penjualan_item yang baru ditulis;
+     - DELETE mutasi harus SESUDAH UPDATE header, karena UPDATE itulah yang
+       membangunkan trigger t_penjualan_kirim bila status baru menjadi
+       'kirim'. Baris buatan trigger ikut terhapus, lalu ditulis ulang di
+       sini dengan tanggal kirim yang benar.
+     Status yang mundur ke bawah 'kirim' berhenti pada DELETE: dokumen yang
+     belum jadi dikirim tidak boleh meninggalkan mutasi apa pun. */
   const perintah = [
-    sql`UPDATE penjualan SET tgl = ${tgl}, pelanggan = ${pelanggan}, gudang = ${gudang}
+    sql`UPDATE penjualan
+        SET tgl = ${tgl}, pelanggan = ${pelanggan}, gudang = ${gudang},
+            status = ${status}, tgl_kirim = ${tglKirim}
         WHERE id = ${so.id}`,
     sql`DELETE FROM penjualan_item WHERE penjualan = ${so.id}`,
     ...s.items.map((it) => sql`
         INSERT INTO penjualan_item (penjualan, produk, qty, harga)
         VALUES (${so.id}, ${it.produk}, ${it.qty}, ${it.harga})`),
+    sql`DELETE FROM stok_mutasi WHERE ref = ${so.no} AND tipe = 'keluar'`,
   ];
-  if (jejak) {
-    perintah.push(sql`DELETE FROM stok_mutasi WHERE ref = ${so.no}`);
-    // tgl & catatan mutasi lama dipertahankan: yang berubah isinya, bukan
-    // kapan barangnya keluar.
+  if (tulisMutasi) {
     perintah.push(sql`
         INSERT INTO stok_mutasi (tgl, gudang, produk, tipe, qty, ref, catatan)
-        SELECT ${jejak.tgl}, ${gudang}, i.produk, 'keluar', -i.qty, ${so.no}, ${jejak.catatan}
+        SELECT ${tglKirim}, ${gudang}, i.produk, 'keluar', -i.qty, ${so.no}, ${jejak?.catatan || "Pengiriman penjualan"}
         FROM penjualan_item i WHERE i.penjualan = ${so.id}`);
   }
   await sql.transaction(perintah);
@@ -1036,27 +1080,59 @@ app.patch("/api/penjualan/:id/status", wrap(async (req, res) => {
   const [so] = await sql`SELECT * FROM penjualan WHERE id = ${req.params.id}`;
   if (!so) return res.status(404).json({ error: "Data penjualan tidak ditemukan." });
 
-  const salah = pindahStatus(SO_FLOW, "kirim", so.status, req.body.status);
+  /* Batas mundur untuk penjualan adalah 'pesanan', bukan 'kirim': salah tekan
+     tombol kirim dulu hanya bisa dibetulkan dengan menghapus dokumennya.
+     Mundur dari 'kirim' aman karena mutasi yang dibuat trigger ikut dihapus
+     di bawah — satu-satunya jejak yang ditinggalkan langkah itu. */
+  const salah = pindahStatus(SO_FLOW, "pesanan", so.status, req.body.status);
   if (salah) return res.status(400).json({ error: salah });
 
-  if (req.body.status === "kirim") {
-    const baris = await sql`
-      SELECT p.kode, SUM(i.qty) AS butuh, COALESCE(s.stok, 0) AS ada
-      FROM penjualan_item i
-      JOIN produk p ON p.id = i.produk
-      LEFT JOIN v_stok s ON s.produk = i.produk AND s.gudang = ${so.gudang}
-      WHERE i.penjualan = ${so.id}
-      GROUP BY p.kode, s.stok`;
-    const habis = baris.find((r) => Number(r.ada) < Number(r.butuh));
-    if (habis)
-      return res.status(400).json({
-        error: `Stok ${habis.kode} tidak cukup di gudang pengirim (tersedia ${Number(habis.ada)}, dibutuhkan ${Number(habis.butuh)}).`,
-      });
+  // Pengelolaan stok tidak dipakai lagi: status 'kirim' tidak pernah ditahan
+  // oleh jumlah stok di gudang pengirim. Trigger DB tetap mencatat mutasi
+  // keluar, jadi stok boleh menjadi minus.
+
+  /* Tanggal kirim hanya berarti pada langkah 'kirim' — di situlah trigger
+     membuat mutasinya, dan sesudah itu tanggalnya tidak boleh bergeser diam-
+     diam oleh langkah 'tagihan'/'lunas' berikutnya. Kalau klien tidak
+     mengirimkannya, DEFAULT-nya tetap hari ini (wib_today di trigger). */
+  let tglKirim = null;
+  if (req.body.status === "kirim" && req.body.tgl != null) {
+    tglKirim = String(req.body.tgl);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(tglKirim))
+      return res.status(400).json({ error: "Tanggal kirim tidak valid." });
+    // Barang tidak bisa berangkat sebelum dokumennya ada. Batas atasnya
+    // sengaja dibiarkan terbuka: pencatatan menyusul beberapa hari adalah
+    // hal biasa, dan pengiriman terjadwal ke depan pun sah.
+    if (tglKirim < so.tgl)
+      return res.status(400).json({ error: `Tanggal kirim mendahului tanggal dokumen (${so.tgl}).` });
   }
 
-  const [row] = await sql`
-    UPDATE penjualan SET status = ${req.body.status}
-    WHERE id = ${req.params.id} RETURNING *`;
+  /* Pada langkah 'kirim' kolomnya SELALU terisi — kalau klien tidak memilih
+     tanggal, hari ini (WIB) yang tercatat. Dokumen yang sudah dikirim tanpa
+     tanggal kirim akan terbaca seperti data yang hilang, dan trigger pun
+     memakai nilai yang sama untuk buku mutasi. */
+  /* Membatalkan pengiriman: mutasi keluar milik dokumen ini dihapus dan
+     tanggal kirimnya ikut dikosongkan, supaya dokumen kembali persis seperti
+     sebelum tombol kirim ditekan. Keduanya dalam satu transaksi — dokumen
+     yang sudah mundur tapi mutasinya tertinggal adalah stok hantu. */
+  const batalKirim = so.status === "kirim" && req.body.status === "pesanan";
+  if (batalKirim) {
+    await sql.transaction([
+      sql`DELETE FROM stok_mutasi WHERE ref = ${so.no} AND tipe = 'keluar'`,
+      sql`UPDATE penjualan SET status = 'pesanan', tgl_kirim = NULL WHERE id = ${so.id}`,
+    ]);
+    const [row] = await sql`SELECT * FROM penjualan WHERE id = ${so.id}`;
+    return res.json(row);
+  }
+
+  const [row] = req.body.status === "kirim"
+    ? await sql`
+        UPDATE penjualan
+        SET status = ${req.body.status}, tgl_kirim = COALESCE(${tglKirim}::date, wib_today())
+        WHERE id = ${req.params.id} RETURNING *`
+    : await sql`
+        UPDATE penjualan SET status = ${req.body.status}
+        WHERE id = ${req.params.id} RETURNING *`;
   res.json(row);
 }));
 

@@ -303,8 +303,6 @@ const KO = {
   "Tidak ada selisih — tidak ada yang dicatat.": "차이 없음 — 기록 생략",
   "Transfer tercatat.": "이고 기록 완료",
   "Penyesuaian tercatat.": "조정 기록 완료",
-  "Stok {kode} di {gudang} tidak cukup (tersedia {n}).":
-    "{gudang}의 {kode} 재고 부족 (가용 {n})",
 
   /* ---------- penjualan ---------- */
   "Dari": "시작일",
@@ -370,6 +368,17 @@ const KO = {
   "Faktur": "청구서",
   "Penerbit": "발행처",
 
+  /* ---------- pengiriman ---------- */
+  "Tanggal Kirim": "출고일",
+  "Kirim {no}": "{no} 출고",
+  "Kirim": "출고",
+  "Tanggal Pengiriman": "출고일",
+  "Tanggal dokumen: {tgl}": "문서일: {tgl}",
+  "Isi tanggal pengiriman.": "출고일을 입력하세요",
+  "Hanya untuk dokumen yang sudah dikirim.": "출고 상태인 문서에만 적용됩니다",
+  "Tanggal kirim tidak boleh mendahului tanggal dokumen ({tgl}).":
+    "출고일은 문서일({tgl})보다 이를 수 없습니다",
+
   /* ---------- formulir penjualan ---------- */
   "Penjualan Baru": "새 판매",
   "Ubah Penjualan {no}": "판매 {no} 수정",
@@ -378,7 +387,6 @@ const KO = {
   "Gudang Pengirim": "출고 창고",
   "Rincian Barang": "품목 내역",
   "Harga": "단가",
-  "stok {n}": "재고 {n}",
   "+ Tambah Baris": "+ 줄 추가",
   "Barang baris {i}": "{i}번째 줄 품목",
   "Jumlah baris {i}": "{i}번째 줄 수량",
@@ -396,8 +404,6 @@ const KO = {
   "Melebihi limit kredit {nama} sebesar {v}.": "{nama} 여신 한도 {v} 초과",
   "Melebihi limit kredit {nama} sebesar {v} — penawaran tidak bisa disimpan.":
     "{nama} 여신 한도 {v} 초과 — 견적 저장 불가",
-  "{n} baris melebihi stok di {g}. Masih bisa disimpan sebagai penawaran, tetapi status {s} akan ditolak sampai stok mencukupi.":
-    "{n}개 줄이 {g} 재고 초과 — 견적 저장은 가능하나 재고 확보 전까지 '{s}' 상태 진행 불가",
 
   /* ---------- pembelian ---------- */
   "+ Pembelian Baru": "+ 새 구매",

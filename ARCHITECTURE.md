@@ -171,7 +171,7 @@ HTTP 요청에 실어 원자적으로 실행합니다. 비대화형이라 중간
 |---|---|
 | `gudang`, `produk`, `pelanggan`, `pemasok`, `pengguna` | 마스터. id는 텍스트(`G1`, `P12`, `C3`, `U1`) |
 | `stok_mutasi` | 재고 원장. `tipe ∈ {masuk, keluar, transfer, penyesuaian}`, `qty` 부호 포함, `ref`에 전표 번호. `ref='AWAL'`은 기초재고(창고·품목당 1행, 재저장 시 교체) |
-| `penjualan` + `penjualan_item` | SO 헤더/항목 |
+| `penjualan` + `penjualan_item` | SO 헤더/항목. `tgl_kirim`은 실제 출고일(출고 전·과거 import 행은 NULL). 만기일은 여전히 `tgl` 기준 |
 | `pembelian` + `pembelian_item` | PO 헤더/항목 |
 | `limit_usulan` | 여신한도 기안. 대기 건은 고객당 하나(부분 유니크 인덱스). 기안자/확정자는 FK가 아니라 이름 스냅샷 |
 
@@ -181,7 +181,7 @@ HTTP 요청에 실어 원자적으로 실행합니다. 비대화형이라 중간
 | `v_stok_total` | 제품별 합계 |
 | `v_penjualan` | SO 헤더 + 합계 금액 |
 | `v_piutang` | 고객별 미수금(출고·청구 상태 SO 합) |
-| `t_penjualan_kirim` | 상태가 `kirim`이 되면 항목별 `keluar` 원장 자동 생성 |
+| `t_penjualan_kirim` | 상태가 `kirim`이 되면 항목별 `keluar` 원장 자동 생성. 원장 일자는 `COALESCE(tgl_kirim, wib_today())` |
 | `t_pembelian_terima` | 상태가 `diterima`가 되면 `masuk` 원장 자동 생성 |
 
 인덱스: `stok_mutasi(gudang, produk)`, `stok_mutasi(ref)`.

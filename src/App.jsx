@@ -480,44 +480,52 @@ function Aplikasi() {
   /* ---------- aksi ----------
      Online  → tulis ke server, lalu muat ulang (server = sumber kebenaran).
      Offline → mutasi state di memori (perilaku demo seperti semula). */
-  async function majuSO(so) {
+  /* Langkah ke 'kirim' minta tanggalnya lebih dulu: barang sering berangkat
+     bukan pada hari dokumennya ditulis, dan sesudah tercatat tanggal itu
+     tidak bisa diperbaiki dari layar mana pun. Dialognya dipasang di sini,
+     bukan di tiap layar, supaya rincian penjualan berperilaku sama dari
+     layar Penjualan, Pelanggan maupun Piutang. */
+  const [tanyaKirim, setTanyaKirim] = useState(null); // { so }
+  async function majuSO(so, tglKirim) {
     const i = SO_FLOW.indexOf(so.status);
     if (i >= SO_FLOW.length - 1) return;
     const next = SO_FLOW[i + 1];
-    if (next === "kirim") {
-      const kurang = so.items.find((it) => getStok(so.gudang, it.produk) < it.qty);
-      if (kurang) {
-        say(t("Stok {kode} di {gudang} tidak cukup (tersedia {n}).",
-          { kode: pById(kurang.produk).kode, gudang: gById(so.gudang).nama, n: getStok(so.gudang, kurang.produk) }), true);
-        return;
-      }
-    }
+    if (next === "kirim" && !tglKirim) return setTanyaKirim(so);
+    // Pengelolaan stok tidak dipakai lagi: pengiriman tidak pernah ditahan
+    // oleh jumlah stok. Mutasi keluar tetap dicatat (boleh minus) agar
+    // riwayat pengiriman tidak berubah.
     try {
       if (online) {
-        await api.statusPenjualan(so.id, next); // trigger DB catat mutasi keluar saat 'kirim'
+        await api.statusPenjualan(so.id, next, tglKirim); // trigger DB catat mutasi keluar saat 'kirim'
         await reload();
       } else {
         if (next === "kirim")
-          addMutasi(so.items.map((it) => ({ tgl: today(), gudang: so.gudang, produk: it.produk, tipe: "keluar", qty: -it.qty, ref: so.no, catatan: "Pengiriman penjualan" })));
-        setPenjualan((list) => list.map((x) => (x.id === so.id ? { ...x, status: next } : x)));
+          addMutasi(so.items.map((it) => ({ tgl: tglKirim, gudang: so.gudang, produk: it.produk, tipe: "keluar", qty: -it.qty, ref: so.no, catatan: "Pengiriman penjualan" })));
+        setPenjualan((list) => list.map((x) => (x.id === so.id
+          ? { ...x, status: next, ...(next === "kirim" ? { tgl_kirim: tglKirim } : {}) }
+          : x)));
       }
       say(`${so.no} → ${t(SO_LABEL[next].id)}`);
     } catch (e) { say(e.message, true); }
   }
 
-  // Mundur satu langkah untuk membetulkan salah tandai pembayaran
-  // (lunas → tagihan). Server hanya mengizinkan mundur setelah 'kirim',
-  // jadi mutasi stok yang sudah tercatat tidak pernah ikut berubah.
+  /* Mundur satu langkah untuk membetulkan salah tekan — termasuk salah kirim
+     (kirim → pesanan), yang di server menghapus lagi mutasi keluar dokumen
+     ini dan mengosongkan tanggal kirimnya. Batas bawahnya 'pesanan':
+     penawaran yang terlanjur jadi pesanan tetap hanya bisa dihapus. */
   async function mundurSO(so) {
     const i = SO_FLOW.indexOf(so.status);
-    if (i <= SO_FLOW.indexOf("kirim")) return;
+    if (i <= SO_FLOW.indexOf("pesanan")) return;
     const prev = SO_FLOW[i - 1];
     try {
       if (online) {
         await api.statusPenjualan(so.id, prev);
         await reload();
       } else {
-        setPenjualan((list) => list.map((x) => (x.id === so.id ? { ...x, status: prev } : x)));
+        if (so.status === "kirim") setMutasi((m) => m.filter((x) => !(x.ref === so.no && x.tipe === "keluar")));
+        setPenjualan((list) => list.map((x) => (x.id === so.id
+          ? { ...x, status: prev, ...(so.status === "kirim" ? { tgl_kirim: null } : {}) }
+          : x)));
       }
       say(`${so.no} → ${t(SO_LABEL[prev].id)}`);
     } catch (e) { say(e.message, true); }
@@ -725,6 +733,10 @@ function Aplikasi() {
       <footer className="ft">Copyright © ASEOA</footer>
 
       {gantiSandi && <GantiSandi online={online} say={say} close={() => setGantiSandi(false)} />}
+      {tanyaKirim && (
+        <FormTglKirim so={tanyaKirim} say={say} close={() => setTanyaKirim(null)}
+          submit={(tgl) => { const so = tanyaKirim; setTanyaKirim(null); return majuSO(so, tgl); }} />
+      )}
       {konfirmasi && <Konfirmasi {...konfirmasi} say={say} close={() => setKonfirmasi(null)} />}
       {toast && (
         <div className={"toast" + (toast.bad ? " bad" : "")} role={toast.bad ? "alert" : "status"} aria-live="polite">
@@ -851,6 +863,25 @@ function Konfirmasi({ msg, onYes, close, say, tajuk, labelAksi }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/* Tanggal pengiriman — ditanyakan sekali, saat dokumen berpindah ke 'kirim'.
+   Bawaannya hari ini karena itu yang paling sering benar; tidak boleh
+   mendahului tanggal dokumen, sama seperti aturan di server. */
+function FormTglKirim({ so, submit, say, close }) {
+  const { t } = useLang();
+  const [tgl, setTgl] = useState(today());
+  const kirim = async () => {
+    if (!tgl) return say(t("Isi tanggal pengiriman."), true);
+    if (tgl < so.tgl) return say(t("Tanggal kirim tidak boleh mendahului tanggal dokumen ({tgl}).", { tgl: so.tgl }), true);
+    try { await submit(tgl); } catch (e) { say(e.message, true); }
+  };
+  return (
+    <Modal title={t("Kirim {no}", { no: so.no })} close={close} onSave={kirim} saveLabel={t("Kirim")}>
+      <Inp label={t("Tanggal Pengiriman")} type="date" value={tgl} onChange={setTgl}
+        hint={t("Tanggal dokumen: {tgl}", { tgl: so.tgl })} />
+    </Modal>
   );
 }
 
@@ -1831,7 +1862,7 @@ const bisaUbahSO = (so, user) =>
     (!!so.dibuat_oleh && so.dibuat_oleh === user.id &&
       String(so.tgl).slice(0, 7) === today().slice(0, 7)));
 
-function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pelanggan, produk, pById, cById, gById, totalSO, majuSO, mundurSO, getStok, piutang, say, can, minta, doDeletePenjualan, hapusUsulan, ajukanHapus, putusanHapus }) {
+function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pelanggan, produk, pById, cById, gById, totalSO, majuSO, mundurSO, piutang, say, can, minta, doDeletePenjualan, hapusUsulan, ajukanHapus, putusanHapus }) {
   const { t, lang } = useLang();
   const [rinci, setRinci] = useState(null); // penjualan yang rinciannya dibuka
   const [baru, setBaru] = useState(false);
@@ -2329,7 +2360,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
 
       {baru && (
         <FormPenjualan
-          close={() => setBaru(false)} pelanggan={pelanggan} produk={produk} getStok={getStok}
+          close={() => setBaru(false)} pelanggan={pelanggan} produk={produk}
           piutang={piutang} say={say} submit={doCreatePenjualan}
           nomor={(tgl) => nomorBaru("SO", penjualan, tgl)}
         />
@@ -2339,7 +2370,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
       {sunting && (
         <FormPenjualan
           awal={sunting}
-          close={() => setSunting(null)} pelanggan={pelanggan} produk={produk} getStok={getStok}
+          close={() => setSunting(null)} pelanggan={pelanggan} produk={produk}
           piutang={piutang} say={say} submit={doUpdatePenjualan}
         />
       )}
@@ -2349,7 +2380,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
         <RincianPenjualan so={rinci} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
           close={() => setRinci(null)} onCetak={() => { setDok(rinci); setRinci(null); }}
           onMaju={rinci.status !== "lunas" ? () => { majuSO(rinci); setRinci(null); } : null}
-          onMundur={SO_FLOW.indexOf(rinci.status) > SO_FLOW.indexOf("kirim") ? () => { mundurSO(rinci); setRinci(null); } : null}
+          onMundur={SO_FLOW.indexOf(rinci.status) > SO_FLOW.indexOf("pesanan") ? () => { mundurSO(rinci); setRinci(null); } : null}
           /* Ubah & Hapus langsung dibuka aturan yang sama: admin, atau pembuat
              dokumen selama masih bulan berjalan. Di luar itu tombol hapusnya
              tetap berarti "Usul Hapus" dan tombol ubahnya tidak muncul. */
@@ -2565,6 +2596,9 @@ function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, on
             <div><span className="lbl2">{t("Status")}</span><Status s={so.status} map={SO_LABEL} /></div>
             <div><span className="lbl2">{t("Termin")}</span><b>{t("{n} hari", { n: c.termin })}</b></div>
             <div><span className="lbl2">{t("Jatuh Tempo")}</span><b>{addDays(so.tgl, Number(c.termin) || 30)}</b></div>
+            {/* Baris lama hasil import dikirim tanpa tanggal ini; "—" lebih
+                jujur daripada meminjam tanggal dokumen. */}
+            <div><span className="lbl2">{t("Tanggal Kirim")}</span><b>{so.tgl_kirim || "—"}</b></div>
           </div>
 
           <Scroll max={300}>
@@ -2773,12 +2807,13 @@ function DokumenPenjualan({ so, pById, cById, gById, totalSO, close }) {
    dokumen yang sudah ada. Yang TIDAK bisa diubah dari sini adalah nomor,
    tanggal, dan status — nomor menaut buku mutasi, tanggal menentukan dokumen
    ini masih boleh disentuh atau tidak, dan status punya tombol majunya sendiri. */
-function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit, nomor, awal }) {
+function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, awal }) {
   /* yang bisa dijual: ban jadi + Ban Jasa */
   const { t } = useLang();
   const jadi = produk.filter((p) => ["jadi", "jasa"].includes(p.kategori));
   const [f, setF] = useState(awal
-    ? { pelanggan: awal.pelanggan, gudang: awal.gudang, tgl: awal.tgl }
+    ? { pelanggan: awal.pelanggan, gudang: awal.gudang, tgl: awal.tgl,
+        status: awal.status, tglKirim: awal.tgl_kirim || "" }
     : { pelanggan: "", gudang: "", tgl: today() });
   const [items, setItems] = useState(awal
     ? awal.items.map((i) => ({ produk: i.produk, qty: String(i.qty), harga: String(i.harga) }))
@@ -2805,9 +2840,10 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
     ? awal.items.reduce((a, i) => a + i.qty * i.harga, 0) : 0;
   const sisaLimit = adaLimit ? c.limit - (piutang(c.id) - sudahDihitung) - total : null;
   const lewatLimit = sisaLimit !== null && sisaLimit < 0;
-  /* baris yang qty-nya melebihi stok gudang pengirim — masih boleh disimpan
-     sebagai penawaran, tapi pengiriman akan ditolak sampai stok mencukupi. */
-  const lebihStok = items.filter((i) => Number(i.qty) > 0 && Number(i.qty) > getStok(f.gudang, i.produk));
+  /* Status & tanggal kirim hanya muncul saat mengubah dokumen: penjualan baru
+     selalu lahir sebagai penawaran, dan memilih statusnya di sini hanya akan
+     membuat langkah pertamanya bisa dilewati tanpa sengaja. */
+  const dikirim = awal && SO_FLOW.indexOf(f.status) >= SO_FLOW.indexOf("kirim");
 
   const kirim = async () => {
     if (!f.pelanggan) return say(t("Pilih pelanggan terlebih dahulu."), true);
@@ -2819,10 +2855,16 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
     if (valid.some((i) => !i.produk)) return say(t("Pilih barang untuk setiap baris."), true);
     if (valid.some((i) => !(Number(i.harga) >= 0))) return say(t("Harga harus berupa angka."), true);
     if (lewatLimit) return say(t("Melebihi limit kredit {nama} sebesar {v}.", { nama: c.nama, v: rp(-sisaLimit) }), true);
+    if (dikirim && f.tglKirim && f.tglKirim < awal.tgl)
+      return say(t("Tanggal kirim tidak boleh mendahului tanggal dokumen ({tgl}).", { tgl: awal.tgl }), true);
     try {
       const baris = valid.map((i) => ({ produk: i.produk, qty: Number(i.qty), harga: Number(i.harga) }));
       await submit(awal
-        ? { id: awal.id, no: awal.no, tgl: awal.tgl, pelanggan: f.pelanggan, gudang: f.gudang, items: baris }
+        ? { id: awal.id, no: awal.no, tgl: awal.tgl, pelanggan: f.pelanggan, gudang: f.gudang, items: baris,
+            status: f.status,
+            /* kosong = biar server yang memilih (tanggal kirim lama, atau
+               tanggal dokumen bila dokumen ini baru dinyatakan terkirim) */
+            tgl_kirim: dikirim ? (f.tglKirim || null) : null }
         : {
             id: uid("SO"), no: nomor(f.tgl),
             tgl: f.tgl, pelanggan: f.pelanggan, gudang: f.gudang, status: "penawaran",
@@ -2841,31 +2883,37 @@ function FormPenjualan({ close, pelanggan, produk, getStok, piutang, say, submit
         <Combo label={t("Gudang Pengirim")} value={f.gudang} onChange={set("gudang")} placeholder={t("-- Pilih Gudang --")} opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
       </div>
 
-      <div className="lbl mt">{t("Rincian Barang")}</div>
-      {items.map((it, i) => {
-        const ada = getStok(f.gudang, it.produk);
-        const kurang = it.produk && Number(it.qty) > ada;
-        return (
-          <div className="line" key={i}>
-            <Combo bare ariaLabel={t("Barang baris {i}", { i: i + 1 })} value={it.produk} onChange={(v) => ubah(i, "produk", v)}
-              placeholder={t("-- Pilih Barang --")} opts={jadi.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
-            <input type="number" min="0" inputMode="numeric" placeholder={t("Qty")} aria-label={t("Jumlah baris {i}", { i: i + 1 })}
-              aria-invalid={kurang || undefined} value={it.qty} onChange={(e) => ubah(i, "qty", e.target.value)} className={kurang ? "err" : ""} />
-            <input type="number" min="0" inputMode="numeric" placeholder={t("Harga")} aria-label={t("Harga baris {i}", { i: i + 1 })}
-              value={it.harga} onChange={(e) => ubah(i, "harga", e.target.value)} title={rp(it.harga)} />
-            <span className={"stokinfo" + (kurang ? " bad" : "")}>{it.produk ? t("stok {n}", { n: fmt(ada) }) : ""}</span>
-            <button className="x" aria-label={t("Hapus baris {i}", { i: i + 1 })} onClick={() => setItems((l) => l.filter((_, n) => n !== i))} disabled={items.length === 1}>×</button>
-          </div>
-        );
-      })}
-      <button className="btn sm" onClick={() => setItems((l) => [...l, { produk: "", qty: "", harga: "" }])}>{t("+ Tambah Baris")}</button>
-
-      {lebihStok.length > 0 && (
-        <p className="peringatan" role="status">
-          {t("{n} baris melebihi stok di {g}. Masih bisa disimpan sebagai penawaran, tetapi status {s} akan ditolak sampai stok mencukupi.",
-            { n: lebihStok.length, g: (GUDANG.find((x) => x.id === f.gudang) || {}).nama, s: t(SO_LABEL.kirim.id) })}
-        </p>
+      {awal && (
+        <div className="row2">
+          <Sel label={t("Status")} value={f.status} onChange={set("status")}
+            opts={SO_FLOW.map((k) => [k, t(SO_LABEL[k].id)])} />
+          <Inp label={t("Tanggal Kirim")} type="date" value={f.tglKirim} onChange={set("tglKirim")}
+            disabled={!dikirim}
+            hint={dikirim
+              ? t("Tanggal dokumen: {tgl}", { tgl: awal.tgl })
+              : t("Hanya untuk dokumen yang sudah dikirim.")} />
+        </div>
       )}
+
+      <div className="lbl mt">{t("Rincian Barang")}</div>
+      {/* Tidak ada lagi tanda "stok kurang" di sini: pengelolaan stok tidak
+          dipakai, jadi angka gudang tidak berarti apa-apa dan pengiriman tidak
+          pernah ditahan olehnya. Kolomnya diisi satuan barang, sama seperti
+          form pembelian — kalau dikosongkan, grid .line kehilangan satu sel
+          dan tombol × bergeser. */}
+      {items.map((it, i) => (
+        <div className="line" key={i}>
+          <Combo bare ariaLabel={t("Barang baris {i}", { i: i + 1 })} value={it.produk} onChange={(v) => ubah(i, "produk", v)}
+            placeholder={t("-- Pilih Barang --")} opts={jadi.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
+          <input type="number" min="0" inputMode="numeric" placeholder={t("Qty")} aria-label={t("Jumlah baris {i}", { i: i + 1 })}
+            value={it.qty} onChange={(e) => ubah(i, "qty", e.target.value)} />
+          <input type="number" min="0" inputMode="numeric" placeholder={t("Harga")} aria-label={t("Harga baris {i}", { i: i + 1 })}
+            value={it.harga} onChange={(e) => ubah(i, "harga", e.target.value)} title={rp(it.harga)} />
+          <span className="stokinfo">{jadi.find((p) => p.id === it.produk)?.satuan}</span>
+          <button className="x" aria-label={t("Hapus baris {i}", { i: i + 1 })} onClick={() => setItems((l) => l.filter((_, n) => n !== i))} disabled={items.length === 1}>×</button>
+        </div>
+      ))}
+      <button className="btn sm" onClick={() => setItems((l) => [...l, { produk: "", qty: "", harga: "" }])}>{t("+ Tambah Baris")}</button>
 
       <div className="sum">
         <div><span>{t("Total")}</span><b className="n">{rp(total)}</b></div>
@@ -3115,7 +3163,7 @@ function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
 }
 
 /* ============================ PELANGGAN ============================ */
-function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan, totalSO, piutang, gById, pById, cById, say, can, minta, doDeletePelanggan, online, reload, hapusUsulan, ajukanHapus, putusanHapus }) {
+function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan, totalSO, piutang, gById, pById, cById, say, can, minta, doDeletePelanggan, online, reload, hapusUsulan, ajukanHapus, putusanHapus, majuSO, mundurSO }) {
   const { t } = useLang();
   const [buka, setBuka] = useState(false);
   const [ubah, setUbah] = useState(null);       // pelanggan yang sedang diubah
@@ -3306,9 +3354,14 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
           onUbah={() => { setUbah(detail); setDetail(null); }}
           onPilihSO={(s) => { setRinci(s); setDetail(null); }} />
       )}
+      {/* Tombol status ikut dibawa ke sini: dokumen yang mau dikirim paling
+          sering ditemukan lewat pelanggannya, dan tanpa ini orang harus
+          mencarinya lagi di layar Penjualan. Ubah & hapus tetap di sana. */}
       {rinci && (
         <RincianPenjualan so={rinci} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
-          close={() => setRinci(null)} />
+          close={() => setRinci(null)}
+          onMaju={rinci.status !== "lunas" ? () => { majuSO(rinci); setRinci(null); } : null}
+          onMundur={SO_FLOW.indexOf(rinci.status) > SO_FLOW.indexOf("pesanan") ? () => { mundurSO(rinci); setRinci(null); } : null} />
       )}
     </>
   );
@@ -3539,7 +3592,7 @@ function FormPutusan({ u, close, say, submit }) {
 }
 
 /* ============================ PIUTANG ============================ */
-function Piutang({ penjualan, cById, totalSO, piutang, gById, pById }) {
+function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mundurSO }) {
   const { t } = useLang();
   const [cari, setCari] = useState("");
   const [detail, setDetail] = useState(null); // pelanggan yang dibuka dari nama
@@ -3702,9 +3755,14 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById }) {
         <DaftarUmur label={t(umur.label)} rows={piutangRows.filter((r) => r.bucket === umur.k)}
           close={() => setUmur(null)} onPilih={(so) => { setRinci(so); setUmur(null); }} />
       )}
+      {/* Tombol status ikut dibawa ke sini: dokumen yang mau dikirim paling
+          sering ditemukan lewat pelanggannya, dan tanpa ini orang harus
+          mencarinya lagi di layar Penjualan. Ubah & hapus tetap di sana. */}
       {rinci && (
         <RincianPenjualan so={rinci} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
-          close={() => setRinci(null)} />
+          close={() => setRinci(null)}
+          onMaju={rinci.status !== "lunas" ? () => { majuSO(rinci); setRinci(null); } : null}
+          onMundur={SO_FLOW.indexOf(rinci.status) > SO_FLOW.indexOf("pesanan") ? () => { mundurSO(rinci); setRinci(null); } : null} />
       )}
     </>
   );
