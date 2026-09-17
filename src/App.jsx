@@ -1154,6 +1154,7 @@ const hitungPiutang = (penjualan, cById, totalSO) => {
     return {
       k, label, status,
       n: new Set(rows.map((r) => r.c.id)).size,
+      inv: rows.length,
       maks: rows.reduce((a, r) => Math.max(a, r.telat), 0),
       nilai: rows.reduce((a, r) => a + r.nilai, 0),
     };
@@ -1181,6 +1182,12 @@ const hitungPiutang = (penjualan, cById, totalSO) => {
 
   return { piutangRows, piutangF, agingRows, statusRows, topPelanggan };
 };
+/* Keterangan di bawah ketiga kartu piutang. Bentuknya sengaja sama untuk
+   ketiganya — kartu yang berbeda susunannya terbaca seperti ukuran berbeda,
+   padahal ketiganya menghitung hal yang sama. Berapa hari lewatnya ada di
+   kolom "Lewat (hari)" pada rinciannya. */
+const subPiutang = (x, t) => t("{n} pelanggan · {i} invoice", { n: fmt(x.n), i: fmt(x.inv) });
+
 /* grade risiko: kombinasi umur piutang & pemakaian limit kredit — bukan nilai piutang semata */
 const gradePiutang = (x) => {
   if (x.telat > 180 || x.pakai > 100) return ["Kritis", "alert"];
@@ -1221,8 +1228,6 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
      sudah lewat tempo" — jadi saldonya dipecah tiga sejak di dasbor. */
   const { piutangRows, statusRows } = hitungPiutang(penjualan, cById, totalSO);
   const [undue, ondue, overdue] = statusRows;
-  const subPiutang = (x) =>
-    x.maks > 0 ? t("{n} pelanggan · maks {d} hari", { n: fmt(x.n), d: fmt(x.maks) }) : t("{n} pelanggan", { n: fmt(x.n) });
 
   /* Penjualan bulan berjalan, bukan sepanjang masa: yang dinilai tiap pagi
      adalah bulan yang sedang jalan, dan angka kumulatif hanya membesar. */
@@ -1265,9 +1270,9 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
         {!MODUL_SEMBUNYI.includes("beli") && (
           <Kpi label={t("Pembelian")} val={rp(beli)} sub={t("{n} transaksi", { n: pembelian.length })} />
         )}
-        <Kpi label={t("Undue")} val={rp(undue.nilai)} sub={subPiutang(undue)} onClick={bukaPiutang("Undue", t("Undue"))} />
-        <Kpi label={t("Ondue")} val={rp(ondue.nilai)} sub={subPiutang(ondue)} tone={ondue.nilai > 0 ? "warn" : ""} onClick={bukaPiutang("Ondue", t("Ondue"))} />
-        <Kpi label={t("Overdue")} val={rp(overdue.nilai)} sub={subPiutang(overdue)} tone={overdue.nilai > 0 ? "alert" : ""} onClick={bukaPiutang("Overdue", t("Overdue"))} />
+        <Kpi label={t("Undue")} val={rp(undue.nilai)} sub={subPiutang(undue, t)} onClick={bukaPiutang("Undue", t("Undue"))} />
+        <Kpi label={t("Ondue")} val={rp(ondue.nilai)} sub={subPiutang(ondue, t)} tone={ondue.nilai > 0 ? "warn" : ""} onClick={bukaPiutang("Ondue", t("Ondue"))} />
+        <Kpi label={t("Overdue")} val={rp(overdue.nilai)} sub={subPiutang(overdue, t)} tone={overdue.nilai > 0 ? "alert" : ""} onClick={bukaPiutang("Overdue", t("Overdue"))} />
       </div>
       {detail && (
         <DetailKpi {...detail} close={() => setDetail(null)}
@@ -3750,8 +3755,6 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
   /* Kartu di atas memakai tiga status yang sama dengan dasbor — layar ini yang
      merinci, jadi saldo totalnya tetap ditampilkan sebagai garis dasar. */
   const [undue, ondue, overdue] = statusRows;
-  const subPiutang = (x) =>
-    x.maks > 0 ? t("{n} pelanggan · maks {d} hari", { n: fmt(x.n), d: fmt(x.maks) }) : t("{n} pelanggan", { n: fmt(x.n) });
 
   const unduhExcel = () => {
     const aoa = [
@@ -3769,9 +3772,9 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
 
       <div className="kpis">
         <Kpi label={t("Piutang Berjalan")} val={rp(piutangF)} sub={t("{n} invoice belum lunas", { n: fmt(piutangRows.length) })} tone={piutangF > 0 ? "warn" : ""} />
-        <Kpi label={t("Undue")} val={rp(undue.nilai)} sub={subPiutang(undue)} />
-        <Kpi label={t("Ondue")} val={rp(ondue.nilai)} sub={subPiutang(ondue)} tone={ondue.nilai > 0 ? "warn" : ""} />
-        <Kpi label={t("Overdue")} val={rp(overdue.nilai)} sub={subPiutang(overdue)} tone={overdue.nilai > 0 ? "alert" : ""} />
+        <Kpi label={t("Undue")} val={rp(undue.nilai)} sub={subPiutang(undue, t)} />
+        <Kpi label={t("Ondue")} val={rp(ondue.nilai)} sub={subPiutang(ondue, t)} tone={ondue.nilai > 0 ? "warn" : ""} />
+        <Kpi label={t("Overdue")} val={rp(overdue.nilai)} sub={subPiutang(overdue, t)} tone={overdue.nilai > 0 ? "alert" : ""} />
       </div>
 
       <SectionTitle id={t("Umur Piutang (Aging)")} />
