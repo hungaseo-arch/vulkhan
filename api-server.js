@@ -904,6 +904,23 @@ app.post("/api/mutasi/saldo-awal", requireRole("manager"), wrap(async (req, res)
 
 // ---------- alur status (harus sama dengan SO_FLOW / PO_FLOW di App.jsx) ----------
 const SO_FLOW = ["penawaran", "pesanan", "kirim", "tagihan", "lunas"];
+
+/* Masa stabilisasi sistem: sampai akhir September 2026 dokumen-dokumen lama
+   masih dimasukkan menyusul, jadi tanggal kirim BOLEH mendahului tanggal
+   dokumen. Sesudah tanggal itu pencatatan berjalan seiring hari, dan tanggal
+   kirim yang lebih tua dari dokumennya hampir pasti salah ketik.
+
+   Perbandingannya dikerjakan Postgres, sama seperti aturan bulan berjalan:
+   satu jam saja yang dipercaya, jam Jakarta milik server. */
+const AKHIR_MASA_STABILISASI = "2026-09-30";
+
+async function tolakTglKirim(tglKirim, tglDok) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(tglKirim)) return "Tanggal kirim tidak valid.";
+  const [{ ok }] = await sql`
+    SELECT ${tglKirim}::date >= ${tglDok}::date
+        OR wib_today() <= ${AKHIR_MASA_STABILISASI}::date AS ok`;
+  return ok ? null : `Tanggal kirim tidak boleh mendahului tanggal dokumen (${tglDok}).`;
+}
 const PO_FLOW = ["order", "diterima", "lunas"];
 // Mengembalikan pesan error bila perpindahan tidak sah, atau null bila sah.
 //
@@ -1026,8 +1043,8 @@ app.put("/api/penjualan/:id", wrap(async (req, res) => {
     // lalu tanggal yang sudah tercatat, lalu tanggal dokumen sebagai dasar
     // terakhir — bukan hari ini, karena ini perbaikan dokumen lama.
     tglKirim = String(s.tgl_kirim || so.tgl_kirim || tgl);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(tglKirim))
-      return res.status(400).json({ error: "Tanggal kirim tidak valid." });
+    const salahTgl = await tolakTglKirim(tglKirim, tgl);
+    if (salahTgl) return res.status(400).json({ error: salahTgl });
   }
 
   const [jejak] = await sql`
@@ -1096,12 +1113,8 @@ app.patch("/api/penjualan/:id/status", wrap(async (req, res) => {
   let tglKirim = null;
   if (req.body.status === "kirim" && req.body.tgl != null) {
     tglKirim = String(req.body.tgl);
-    /* Hanya bentuknya yang diperiksa. Tanggal kirim TIDAK diharuskan sesudah
-       tanggal dokumen: barang berangkat lebih dulu dan suratnya menyusul
-       adalah urutan yang biasa di sini, jadi aturan itu menolak justru
-       pencatatan yang paling sering terjadi. */
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(tglKirim))
-      return res.status(400).json({ error: "Tanggal kirim tidak valid." });
+    const salahTgl = await tolakTglKirim(tglKirim, so.tgl);
+    if (salahTgl) return res.status(400).json({ error: salahTgl });
   }
 
   /* Pada langkah 'kirim' kolomnya SELALU terisi — kalau klien tidak memilih
