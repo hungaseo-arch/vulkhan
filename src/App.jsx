@@ -1108,6 +1108,8 @@ const AGING_DEF = [
   ["180", "> 180 Hari", "Overdue"],
 ];
 
+const STATUS_UMUR = Object.fromEntries(AGING_DEF.map(([k, , status]) => [k, status]));
+
 /* piutang & umur piutang (mengacu panduan analisis AR) — dipakai Dasbor & halaman Piutang.
    SO berstatus "kirim"/"tagihan" = sudah dikirim tapi belum lunas.
    Jatuh tempo = tanggal SO + termin pelanggan (default 30 hari bila kosong). */
@@ -1137,6 +1139,17 @@ const hitungPiutang = (penjualan, cById, totalSO) => {
       nilai: rows.reduce((a, r) => a + r.nilai, 0),
     };
   });
+  /* Tiga status yang sama dipakai dasbor, dihitung dari baris yang sama supaya
+     dasbor dan halaman Piutang tidak pernah menyebut angka yang berbeda. */
+  const statusRows = ["Undue", "Ondue", "Overdue"].map((status) => {
+    const rows = piutangRows.filter((r) => STATUS_UMUR[r.bucket] === status);
+    return {
+      status,
+      n: new Set(rows.map((r) => r.c.id)).size,
+      maks: rows.reduce((a, r) => Math.max(a, r.telat), 0),
+      nilai: rows.reduce((a, r) => a + r.nilai, 0),
+    };
+  });
   const piutang90 = piutangRows.filter((r) => r.telat > 90).reduce((a, r) => a + r.nilai, 0);
   const rasio90 = piutangF ? (piutang90 / piutangF) * 100 : 0;
 
@@ -1150,7 +1163,7 @@ const hitungPiutang = (penjualan, cById, totalSO) => {
     .map((x) => ({ ...x, pakai: punyaLimit(x.c) ? (x.nilai / x.c.limit) * 100 : 0 }))
     .sort((a, b) => b.nilai - a.nilai);
 
-  return { piutangRows, piutangF, agingRows, piutang90, rasio90, topPelanggan };
+  return { piutangRows, piutangF, agingRows, statusRows, piutang90, rasio90, topPelanggan };
 };
 /* grade risiko: kombinasi umur piutang & pemakaian limit kredit — bukan nilai piutang semata */
 const gradePiutang = (x) => {
@@ -1189,7 +1202,11 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
   }, { n: 0, qty: 0, nilai: 0, perGudang: {} });
   const jumlahBulan = jualBulanan.length;
 
-  const { piutangF, piutang90, rasio90 } = hitungPiutang(penjualan, cById, totalSO);
+  /* Yang ditanyakan tiap pagi bukan "berapa piutangnya" melainkan "mana yang
+     sudah lewat tempo" — jadi saldonya dipecah tiga sejak di dasbor. */
+  const [undue, ondue, overdue] = hitungPiutang(penjualan, cById, totalSO).statusRows;
+  const subPiutang = (x) =>
+    x.maks > 0 ? t("{n} pelanggan · maks {d} hari", { n: fmt(x.n), d: fmt(x.maks) }) : t("{n} pelanggan", { n: fmt(x.n) });
 
   return (
     <>
@@ -1205,8 +1222,9 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
         {!MODUL_SEMBUNYI.includes("beli") && (
           <Kpi label={t("Pembelian")} val={rp(beli)} sub={t("{n} transaksi", { n: pembelian.length })} />
         )}
-        <Kpi label={t("Piutang Berjalan")} val={rp(piutangF)} sub={t("belum lunas")} tone={piutangF > 0 ? "warn" : ""} />
-        <Kpi label={t("Piutang > 90 Hari")} val={rp(piutang90)} sub={t("{p}% dari piutang berjalan", { p: fmt(rasio90) })} tone={piutang90 > 0 ? "alert" : ""} />
+        <Kpi label={t("Undue")} val={rp(undue.nilai)} sub={subPiutang(undue)} />
+        <Kpi label={t("Ondue")} val={rp(ondue.nilai)} sub={subPiutang(ondue)} tone={ondue.nilai > 0 ? "warn" : ""} />
+        <Kpi label={t("Overdue")} val={rp(overdue.nilai)} sub={subPiutang(overdue)} tone={overdue.nilai > 0 ? "alert" : ""} />
       </div>
 
       <SectionTitle id={t("Ringkasan Bulanan")} />
@@ -1218,7 +1236,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
                 <th scope="col">{t("Bulan")}</th>
                 <th scope="col" className="r">{t("Transaksi")}</th>
                 {GUDANG.map((g) => (
-                  <th scope="col" className="r" key={g.id}>{g.kode}</th>
+                  <th scope="col" className="r" key={g.id}>{kodeGudang(g)}</th>
                 ))}
                 <th scope="col" className="r">{t("Qty")}</th>
                 <th scope="col" className="r">{t("Nilai")}</th>

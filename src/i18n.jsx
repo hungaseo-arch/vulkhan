@@ -239,6 +239,7 @@ const KO = {
   "Jasa|kolom": "서비스",
   "Total Qty": "합계 수량",
   "{n} pelanggan": "고객 {n}개소",
+  "{n} pelanggan · maks {d} hari": "고객 {n}개소 · 최대 {d}일",
   "Nilai": "금액",
   "Total": "합계",
   "Rata-rata / bulan": "월평균",
