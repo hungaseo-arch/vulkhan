@@ -1061,13 +1061,18 @@ function FormPengguna({ close, say, submit, awal, sendiri }) {
 }
 
 /* ============================ DASBOR ============================ */
+/* [kunci, label umur, status]. Statusnya sengaja hanya tiga — yang ditanyakan
+   orang pertama kali bukan "berapa hari", melainkan "sudah lewat atau belum".
+   'Belum Jatuh Tempo' dipecah dua: yang jatuh tempo HARI INI bukan lagi aman
+   (uangnya harus masuk hari ini juga), tapi juga belum terlambat. */
 const AGING_DEF = [
-  ["current", "Belum Jatuh Tempo"],
-  ["130", "1–30 Hari"],
-  ["3060", "31–60 Hari"],
-  ["6090", "61–90 Hari"],
-  ["90180", "91–180 Hari"],
-  ["180", "> 180 Hari"],
+  ["undue", "Belum Jatuh Tempo", "Undue"],
+  ["ondue", "Jatuh Tempo Hari Ini", "Ondue"],
+  ["130", "1–30 Hari", "Overdue"],
+  ["3060", "31–60 Hari", "Overdue"],
+  ["6090", "61–90 Hari", "Overdue"],
+  ["90180", "91–180 Hari", "Overdue"],
+  ["180", "> 180 Hari", "Overdue"],
 ];
 
 /* piutang & umur piutang (mengacu panduan analisis AR) — dipakai Dasbor & halaman Piutang.
@@ -1082,13 +1087,22 @@ const hitungPiutang = (penjualan, cById, totalSO) => {
       const nilai = totalSO(s);
       const tempo = addDays(s.tgl, Number(c.termin) || 30);
       const telat = Math.max(0, diffDays(tempo, hariIni));
-      const bucket = telat > 180 ? "180" : telat > 90 ? "90180" : telat > 60 ? "6090" : telat > 30 ? "3060" : telat > 0 ? "130" : "current";
+      const bucket = telat > 180 ? "180" : telat > 90 ? "90180" : telat > 60 ? "6090" : telat > 30 ? "3060" : telat > 0 ? "130"
+        : tempo === hariIni ? "ondue" : "undue";
       return { so: s, c, nilai, telat, tempo, bucket };
     });
   const piutangF = piutangRows.reduce((a, r) => a + r.nilai, 0);
-  const agingRows = AGING_DEF.map(([k, label]) => {
+  /* Yang dihitung per kelompok adalah PELANGGAN, bukan lembar invoice: satu
+     pelanggan dengan lima invoice lewat tempo tetap satu telepon penagihan.
+     Rincian per invoice tetap ada — tinggal klik baris umurnya. */
+  const agingRows = AGING_DEF.map(([k, label, status]) => {
     const rows = piutangRows.filter((r) => r.bucket === k);
-    return { k, label, n: rows.length, nilai: rows.reduce((a, r) => a + r.nilai, 0) };
+    return {
+      k, label, status,
+      n: new Set(rows.map((r) => r.c.id)).size,
+      maks: rows.reduce((a, r) => Math.max(a, r.telat), 0),
+      nilai: rows.reduce((a, r) => a + r.nilai, 0),
+    };
   });
   const piutang90 = piutangRows.filter((r) => r.telat > 90).reduce((a, r) => a + r.nilai, 0);
   const rasio90 = piutangF ? (piutang90 / piutangF) * 100 : 0;
@@ -3648,7 +3662,9 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
             <thead>
               <tr>
                 <th scope="col">{t("Umur")}</th>
-                <th scope="col" className="r">{t("Invoice")}</th>
+                <th scope="col">{t("Status")}</th>
+                <th scope="col" className="r">{t("Pelanggan")}</th>
+                <th scope="col" className="r">{t("Lewat (hari)")}</th>
                 <th scope="col" className="r">{t("Nilai")}</th>
                 <th scope="col" className="r">{t("Porsi")}</th>
               </tr>
@@ -3662,18 +3678,27 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
                       ? <button type="button" className="namelink" title={t("Lihat rincian")}>{t(r.label)}</button>
                       : t(r.label)}
                   </td>
+                  <td>
+                    <span className={"st s-" + (r.status === "Overdue" ? "alert" : r.status === "Ondue" ? "warn" : "ok")}>
+                      {t(r.status)}
+                    </span>
+                  </td>
                   <td className="r n">{fmt(r.n)}</td>
+                  {/* Yang terlama di kelompoknya — batas bawah kelompok sudah
+                      terbaca dari labelnya, yang tidak terbaca adalah seberapa
+                      jauh ujungnya sudah lewat. */}
+                  <td className="r n">{r.k === "undue" || !r.n ? "—" : fmt(r.maks)}</td>
                   <td className="r n">{rp(r.nilai)}</td>
                   <td className="r n">{piutangF ? fmt((r.nilai / piutangF) * 100) : 0}%</td>
                 </tr>
               ))}
-              {piutangRows.length === 0 && <tr><td colSpan={4}><Empty id={t("Tidak ada piutang berjalan.")} /></td></tr>}
+              {piutangRows.length === 0 && <tr><td colSpan={6}><Empty id={t("Tidak ada piutang berjalan.")} /></td></tr>}
             </tbody>
           </table>
         </Scroll>
       </Card>
 
-      <SectionTitle id={t("Pelanggan Berisiko")}
+      <Lipat id={t("Pelanggan Berisiko")}
         mid={
           <div className="filters">
             <label className="fld cari">
@@ -3681,78 +3706,80 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
               <input type="search" value={cari} onChange={(e) => setCari(e.target.value)} placeholder={t("Nama pelanggan")} />
             </label>
           </div>
-        } />
-      <Card>
-        {berisiko.length === 0 ? (
-          <Empty id={cari ? t("Tidak ada pelanggan yang cocok.") : t("Tidak ada piutang berjalan.")} />
-        ) : (
+        }>
+        <Card>
+          {berisiko.length === 0 ? (
+            <Empty id={cari ? t("Tidak ada pelanggan yang cocok.") : t("Tidak ada piutang berjalan.")} />
+          ) : (
+            <Scroll>
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">{t("Pelanggan")}</th>
+                    <th scope="col" className="r">{t("Piutang")}</th>
+                    <th scope="col" className="r">{t("Telat")}</th>
+                    <th scope="col" className="r">{t("Pakai Limit")}</th>
+                    <th scope="col">{t("Grade")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {berisiko.map((x) => {
+                    const [label, tone] = gradePiutang(x);
+                    return (
+                      <tr key={x.c.id}>
+                        <td>
+                          <button type="button" className="namelink" onClick={() => setDetail(x.c)}>{x.c.nama}</button>
+                        </td>
+                        <td className="r n">{rp(x.nilai)}</td>
+                        <td className={"r n " + (x.telat > 90 ? "bad" : x.telat > 30 ? "warn" : "")}>{x.telat > 0 ? t("{n} hr", { n: fmt(x.telat) }) : "—"}</td>
+                        <td className="r n">{punyaLimit(x.c) ? `${fmt(x.pakai)}%` : "—"}</td>
+                        <td><span className={"st s-" + tone}>{t(label)}</span></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </Scroll>
+          )}
+        </Card>
+      </Lipat>
+
+      <Lipat id={t("Rincian Invoice")}>
+        <Card>
           <Scroll>
             <table>
               <thead>
                 <tr>
+                  <th scope="col">{t("No.")}</th>
                   <th scope="col">{t("Pelanggan")}</th>
-                  <th scope="col" className="r">{t("Piutang")}</th>
+                  <th scope="col">{t("Tanggal")}</th>
+                  <th scope="col">{t("Jatuh Tempo")}</th>
                   <th scope="col" className="r">{t("Telat")}</th>
-                  <th scope="col" className="r">{t("Pakai Limit")}</th>
-                  <th scope="col">{t("Grade")}</th>
+                  <th scope="col" className="r">{t("Nilai")}</th>
                 </tr>
               </thead>
               <tbody>
-                {berisiko.map((x) => {
-                  const [label, tone] = gradePiutang(x);
-                  return (
-                    <tr key={x.c.id}>
-                      <td>
-                        <button type="button" className="namelink" onClick={() => setDetail(x.c)}>{x.c.nama}</button>
-                      </td>
-                      <td className="r n">{rp(x.nilai)}</td>
-                      <td className={"r n " + (x.telat > 90 ? "bad" : x.telat > 30 ? "warn" : "")}>{x.telat > 0 ? t("{n} hr", { n: fmt(x.telat) }) : "—"}</td>
-                      <td className="r n">{punyaLimit(x.c) ? `${fmt(x.pakai)}%` : "—"}</td>
-                      <td><span className={"st s-" + tone}>{t(label)}</span></td>
-                    </tr>
-                  );
-                })}
+                {rincian.map((r) => (
+                  <tr key={r.so.id}>
+                    <td className="n strong">
+                      <button type="button" className="namelink" title={t("Lihat rincian")} onClick={() => setRinci(r.so)}>{r.so.no}</button>
+                    </td>
+                    <td>
+                      <button type="button" className="namelink" onClick={() => setDetail(r.c)}>{r.c.nama}</button>
+                      <em className="mut2">{t("Grade {g}", { g: r.c.grade })}</em>
+                    </td>
+                    <td className="n">{r.so.tgl}</td>
+                    <td className="n">{r.tempo}</td>
+                    <td className={"r n " + (r.telat > 90 ? "bad" : r.telat > 30 ? "warn" : "")}>{r.telat > 0 ? t("{n} hr", { n: fmt(r.telat) }) : "—"}</td>
+                    <td className="r n strong">{rp(r.nilai)}</td>
+                  </tr>
+                ))}
+                {rincian.length === 0 && <tr><td colSpan={6}><Empty id={t("Tidak ada piutang berjalan.")} /></td></tr>}
               </tbody>
             </table>
           </Scroll>
-        )}
-      </Card>
-
-      <SectionTitle id={t("Rincian Invoice")} />
-      <Card>
-        <Scroll>
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">{t("No.")}</th>
-                <th scope="col">{t("Pelanggan")}</th>
-                <th scope="col">{t("Tanggal")}</th>
-                <th scope="col">{t("Jatuh Tempo")}</th>
-                <th scope="col" className="r">{t("Telat")}</th>
-                <th scope="col" className="r">{t("Nilai")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rincian.map((r) => (
-                <tr key={r.so.id}>
-                  <td className="n strong">
-                    <button type="button" className="namelink" title={t("Lihat rincian")} onClick={() => setRinci(r.so)}>{r.so.no}</button>
-                  </td>
-                  <td>
-                    <button type="button" className="namelink" onClick={() => setDetail(r.c)}>{r.c.nama}</button>
-                    <em className="mut2">{t("Grade {g}", { g: r.c.grade })}</em>
-                  </td>
-                  <td className="n">{r.so.tgl}</td>
-                  <td className="n">{r.tempo}</td>
-                  <td className={"r n " + (r.telat > 90 ? "bad" : r.telat > 30 ? "warn" : "")}>{r.telat > 0 ? t("{n} hr", { n: fmt(r.telat) }) : "—"}</td>
-                  <td className="r n strong">{rp(r.nilai)}</td>
-                </tr>
-              ))}
-              {rincian.length === 0 && <tr><td colSpan={6}><Empty id={t("Tidak ada piutang berjalan.")} /></td></tr>}
-            </tbody>
-          </table>
-        </Scroll>
-      </Card>
+        </Card>
+      </Lipat>
 
       {/* tanpa onUsul/onUbah: pengajuan limit tetap di layar pelanggan */}
       {detail && (
@@ -3874,6 +3901,32 @@ const SectionTitle = ({ id, mid, children }) => (
     <div className="acts">{children}</div>
   </div>
 );
+
+/* Bagian yang bisa dilipat, tertutup dulu. Layar Piutang menumpuk tiga tabel;
+   yang pertama (umur piutang) adalah ringkasan yang selalu dibaca, dua
+   sisanya daftar panjang yang hanya dibuka kalau ada yang dicari. Tertutup,
+   ringkasannya muat dalam satu layar tanpa digulung.
+
+   Isinya tetap dirender dan hanya disembunyikan lewat `hidden`: pencarian
+   yang sudah diketik dan posisi gulung tabelnya bertahan ketika dilipat
+   lagi, dan datanya toh sudah ada di memori — tidak ada yang dihemat dengan
+   membuangnya dari DOM. */
+function Lipat({ id, mid, children }) {
+  const { t } = useLang();
+  const [buka, setBuka] = useState(false);
+  const isi = useId();
+  return (
+    <>
+      <SectionTitle id={id} mid={buka ? mid : null}>
+        <button type="button" className="btn" aria-expanded={buka} aria-controls={isi}
+          onClick={() => setBuka((b) => !b)}>
+          {buka ? "▾" : "▸"} {buka ? t("Tutup") : t("Buka")}
+        </button>
+      </SectionTitle>
+      <div id={isi} hidden={!buka}>{children}</div>
+    </>
+  );
+}
 
 const Card = ({ title, note, cls, children }) => (
   <section className={"card" + (cls ? " " + cls : "")}>
