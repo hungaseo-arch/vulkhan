@@ -746,6 +746,10 @@ function Aplikasi() {
           </button>
           <div className="hd-meta">
             <div className="who">
+              {/* Sesi tersimpan di localStorage tetap membuka layar walau server
+                  mati, dan layar itu diam-diam memakai data contoh. Tanpa tanda
+                  ini, angka contoh terbaca seperti angka perusahaan. */}
+              {!online && <span className="conn offline">{t("○ Server tidak terhubung — angka di layar ini hanya contoh")}</span>}
               <LangSwitch />
               <MenuPengguna user={user} gantiSandi={() => setGantiSandi(true)} logout={logout} />
             </div>

@@ -42,6 +42,7 @@ const KO = {
   "Isi username dan kata sandi.": "아이디·비밀번호 입력 필요",
   "● Neon terhubung": "● Neon 연결됨",
   "○ Server tidak terhubung — jalankan api-server.js": "○ 서버 연결 안 됨 — api-server.js 실행 필요",
+  "○ Server tidak terhubung — angka di layar ini hanya contoh": "서버 미연결 — 화면의 숫자는 예시입니다",
   "Server tidak terjangkau. Login membutuhkan koneksi.": "서버 연결 불가 — 로그인하려면 연결 필요",
   "Selamat datang, {nama}.": "{nama}님 환영",
   "Sesi berakhir. Silakan masuk kembali.": "세션 만료 — 재로그인 필요",
