@@ -1150,9 +1150,6 @@ const hitungPiutang = (penjualan, cById, totalSO) => {
       nilai: rows.reduce((a, r) => a + r.nilai, 0),
     };
   });
-  const piutang90 = piutangRows.filter((r) => r.telat > 90).reduce((a, r) => a + r.nilai, 0);
-  const rasio90 = piutangF ? (piutang90 / piutangF) * 100 : 0;
-
   const perPelanggan = new Map();
   piutangRows.forEach((r) => {
     const cur = perPelanggan.get(r.c.id) || { c: r.c, nilai: 0, telat: 0 };
@@ -1163,7 +1160,7 @@ const hitungPiutang = (penjualan, cById, totalSO) => {
     .map((x) => ({ ...x, pakai: punyaLimit(x.c) ? (x.nilai / x.c.limit) * 100 : 0 }))
     .sort((a, b) => b.nilai - a.nilai);
 
-  return { piutangRows, piutangF, agingRows, statusRows, piutang90, rasio90, topPelanggan };
+  return { piutangRows, piutangF, agingRows, statusRows, topPelanggan };
 };
 /* grade risiko: kombinasi umur piutang & pemakaian limit kredit — bukan nilai piutang semata */
 const gradePiutang = (x) => {
@@ -3675,7 +3672,7 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
   const [detail, setDetail] = useState(null); // pelanggan yang dibuka dari nama
   const [rinci, setRinci] = useState(null);   // penjualan yang dibuka dari nomor
   const [umur, setUmur] = useState(null);     // kelompok umur yang dibuka
-  const { piutangRows, piutangF, agingRows, piutang90, rasio90, topPelanggan } = useMemo(
+  const { piutangRows, piutangF, agingRows, statusRows, topPelanggan } = useMemo(
     () => hitungPiutang(penjualan, cById, totalSO),
     [penjualan, cById, totalSO],
   );
@@ -3688,6 +3685,12 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
     () => [...piutangRows].sort((a, b) => b.telat - a.telat),
     [piutangRows],
   );
+
+  /* Kartu di atas memakai tiga status yang sama dengan dasbor — layar ini yang
+     merinci, jadi saldo totalnya tetap ditampilkan sebagai garis dasar. */
+  const [undue, ondue, overdue] = statusRows;
+  const subPiutang = (x) =>
+    x.maks > 0 ? t("{n} pelanggan · maks {d} hari", { n: fmt(x.n), d: fmt(x.maks) }) : t("{n} pelanggan", { n: fmt(x.n) });
 
   const unduhExcel = () => {
     const aoa = [
@@ -3705,8 +3708,9 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
 
       <div className="kpis">
         <Kpi label={t("Piutang Berjalan")} val={rp(piutangF)} sub={t("{n} invoice belum lunas", { n: fmt(piutangRows.length) })} tone={piutangF > 0 ? "warn" : ""} />
-        <Kpi label={t("Piutang > 90 Hari")} val={rp(piutang90)} sub={t("{p}% dari piutang berjalan", { p: fmt(rasio90) })} tone={piutang90 > 0 ? "alert" : ""} />
-        <Kpi label={t("Pelanggan Berpiutang")} val={fmt(topPelanggan.length)} sub={t("pelanggan dengan tagihan berjalan")} />
+        <Kpi label={t("Undue")} val={rp(undue.nilai)} sub={subPiutang(undue)} />
+        <Kpi label={t("Ondue")} val={rp(ondue.nilai)} sub={subPiutang(ondue)} tone={ondue.nilai > 0 ? "warn" : ""} />
+        <Kpi label={t("Overdue")} val={rp(overdue.nilai)} sub={subPiutang(overdue)} tone={overdue.nilai > 0 ? "alert" : ""} />
       </div>
 
       <SectionTitle id={t("Umur Piutang (Aging)")} />

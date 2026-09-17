@@ -224,8 +224,6 @@ const KO = {
   "⚠ stok negatif — periksa Buku Mutasi Stok": "⚠ 재고 음수 — 재고 이동 장부 확인 필요",
   "Piutang Berjalan": "미수금 잔액",
   "belum lunas": "미수",
-  "Piutang > 90 Hari": "90일 초과 미수금",
-  "{p}% dari piutang berjalan": "미수금 잔액의 {p}%",
   "{n} transaksi": "{n}건",
   "Penjualan per Bulan": "월별 판매",
   "tidak termasuk penawaran": "견적 제외",
@@ -483,8 +481,6 @@ const KO = {
   /* ---------- piutang ---------- */
   "acuan: panduan analisis umur piutang": "기준: 미수금 연령분석 지침",
   "{n} invoice belum lunas": "미수 인보이스 {n}건",
-  "Pelanggan Berpiutang": "미수 고객",
-  "pelanggan dengan tagihan berjalan": "미수 잔액이 있는 고객",
   "Umur Piutang (Aging)": "미수금 연령분석",
   "Umur": "연령",
   "Porsi": "비중",
