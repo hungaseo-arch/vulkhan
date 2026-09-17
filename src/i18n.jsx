@@ -431,6 +431,10 @@ const KO = {
   "Kode / nama / pemilik / PIC / kota / sales": "코드 / 이름 / 오너 / 담당자 / 도시 / 영업",
   "+ Pelanggan Baru": "+ 새 고객",
   "Cabang": "지점",
+  "Total Pelanggan": "총 고객수",
+  "Cabang Lain": "기타 지점",
+  "{n} cabang": "{n}개 지점",
+  "{p}% dari seluruh pelanggan": "전체의 {p}%",
   /* ---------- cabang (kota) ---------- */
   "Surabaya": "수라바야",
   "Jakarta": "자카르타",

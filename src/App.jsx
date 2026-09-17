@@ -3356,6 +3356,20 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
         .some((v) => (v || "").toLowerCase().includes(q)));
   }, [pelanggan, cari, t]);
 
+  /* Jumlah pelanggan per cabang. Mengikuti baris yang sedang terlihat: saat
+     pencarian aktif, kartu yang tetap menghitung seluruh buku membuat orang
+     ragu apakah penyaringnya bekerja. Kota yang tidak dikenali dikumpulkan di
+     "?" supaya tidak hilang diam-diam dari jumlah totalnya. */
+  const perCabang = useMemo(() => {
+    const n = new Map();
+    list.forEach((c) => {
+      const k = cabangDari(c.kota)?.kode || "?";
+      n.set(k, (n.get(k) || 0) + 1);
+    });
+    return n;
+  }, [list]);
+  const bagian = (n) => t("{p}% dari seluruh pelanggan", { p: fmt(list.length ? (n / list.length) * 100 : 0) });
+
   const unduhExcel = () => {
     const aoa = [
       [t("Kode"), t("Nama"), t("Pemilik"), t("PIC"), t("Telepon"), t("Email"), t("Alamat"), t("Cabang"),
@@ -3382,6 +3396,17 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
         <button className="btn" onClick={unduhExcel}>↓ Excel</button>
         <button className="btn pri" onClick={() => setBuka(true)}>{t("+ Pelanggan Baru")}</button>
       </SectionTitle>
+
+      <div className="kpis">
+        <Kpi label={t("Total Pelanggan")} val={fmt(list.length)}
+          sub={t("{n} cabang", { n: fmt(CABANG.filter((c) => perCabang.get(c.kode)).length) })} />
+        {CABANG.filter((c) => perCabang.get(c.kode)).map((c) => (
+          <Kpi key={c.kode} label={t(c.nama)} val={fmt(perCabang.get(c.kode))} sub={bagian(perCabang.get(c.kode))} />
+        ))}
+        {!!perCabang.get("?") && (
+          <Kpi label={t("Cabang Lain")} val={fmt(perCabang.get("?"))} sub={bagian(perCabang.get("?"))} tone="warn" />
+        )}
+      </div>
 
       {/* Kartu muncul hanya bila ada usulan — sama seperti kartu permintaan
           hapus. Tabel kosong dengan delapan kepala kolom hanya memakan tempat
