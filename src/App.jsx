@@ -1168,6 +1168,7 @@ const hitungPiutang = (penjualan, cById, totalSO) => {
     return {
       status,
       n: new Set(rows.map((r) => r.c.id)).size,
+      inv: rows.length,
       maks: rows.reduce((a, r) => Math.max(a, r.telat), 0),
       nilai: rows.reduce((a, r) => a + r.nilai, 0),
     };
@@ -1189,6 +1190,19 @@ const hitungPiutang = (penjualan, cById, totalSO) => {
    padahal ketiganya menghitung hal yang sama. Berapa hari lewatnya ada di
    kolom "Lewat (hari)" pada rinciannya. */
 const subPiutang = (x, t) => t("{n} pelanggan · {i} invoice", { n: fmt(x.n), i: fmt(x.inv) });
+
+/* Daftar di balik satu kartu piutang. Dasbor dan layar Piutang memakai susunan
+   yang sama: kartu yang sama di dua layar yang memperlihatkan kolom berbeda
+   terbaca seperti dua angka yang berbeda pula. */
+const daftarPiutang = (judul, rows, t) => ({
+  judul,
+  kolom: [[t("No."), 0], [t("Pelanggan"), 0], [t("Jatuh Tempo"), 0], [t("Lewat (hari)"), 1], [t("Nilai"), 1]],
+  taut: { 0: "so", 1: "c" },
+  baris: [...rows]
+    .sort((a, b) => b.telat - a.telat || b.nilai - a.nilai)
+    .map((r) => ({ k: r.so.id, so: r.so, c: r.c, sel: [r.so.no, r.c.nama, r.tempo, r.telat ? fmt(r.telat) : "—", rp(r.nilai)] })),
+  total: rp(rows.reduce((a, r) => a + r.nilai, 0)),
+});
 
 /* grade risiko: kombinasi umur piutang & pemakaian limit kredit — bukan nilai piutang semata */
 const gradePiutang = (x) => {
@@ -1250,16 +1264,11 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
       .map((s) => ({ k: s.id, so: s, c: cById(s.pelanggan), sel: [s.no, s.tgl, cById(s.pelanggan).nama, rp(totalSO(s))] })),
     total: rp(nilaiBulanIni),
   });
-  const bukaPiutang = (status, judul) => () => setDetail({
-    judul,
-    kolom: [[t("No."), 0], [t("Pelanggan"), 0], [t("Jatuh Tempo"), 0], [t("Lewat (hari)"), 1], [t("Nilai"), 1]],
-    taut: { 0: "so", 1: "c" },
-    baris: piutangRows
-      .filter((r) => STATUS_UMUR[r.bucket] === status)
-      .sort((a, b) => b.telat - a.telat || b.nilai - a.nilai)
-      .map((r) => ({ k: r.so.id, so: r.so, c: r.c, sel: [r.so.no, r.c.nama, r.tempo, r.telat ? fmt(r.telat) : "—", rp(r.nilai)] })),
-    total: rp(statusRows.find((x) => x.status === status).nilai),
-  });
+  /* Kartu tanpa isi tidak bisa dibuka — dialog kosong hanya menipu, sama
+     seperti baris umur piutang yang jumlah pelanggannya nol. */
+  const bukaPiutang = (x) => x.inv
+    ? () => setDetail(daftarPiutang(t(x.status), piutangRows.filter((r) => STATUS_UMUR[r.bucket] === x.status), t))
+    : undefined;
 
   return (
     <>
@@ -1271,13 +1280,13 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
         {!MODUL_SEMBUNYI.includes("stok") && (
           <Kpi label={t("Nilai Stok")} val={rp(nilaiStok)} sub={nilaiStok < 0 ? t("⚠ stok negatif — periksa Buku Mutasi Stok") : t("harga pokok")} tone={nilaiStok < 0 ? "alert" : ""} />
         )}
-        <Kpi label={labelJual} val={rp(nilaiBulanIni)} sub={t("{n} transaksi", { n: jualBulanIni.length })} onClick={bukaJual} />
+        <Kpi label={labelJual} val={rp(nilaiBulanIni)} sub={t("{n} transaksi", { n: jualBulanIni.length })} onClick={jualBulanIni.length ? bukaJual : undefined} />
         {!MODUL_SEMBUNYI.includes("beli") && (
           <Kpi label={t("Pembelian")} val={rp(beli)} sub={t("{n} transaksi", { n: pembelian.length })} />
         )}
-        <Kpi label={t("Undue")} val={rp(undue.nilai)} sub={subPiutang(undue, t)} onClick={bukaPiutang("Undue", t("Undue"))} />
-        <Kpi label={t("Ondue")} val={rp(ondue.nilai)} sub={subPiutang(ondue, t)} tone={ondue.nilai > 0 ? "warn" : ""} onClick={bukaPiutang("Ondue", t("Ondue"))} />
-        <Kpi label={t("Overdue")} val={rp(overdue.nilai)} sub={subPiutang(overdue, t)} tone={overdue.nilai > 0 ? "alert" : ""} onClick={bukaPiutang("Overdue", t("Overdue"))} />
+        <Kpi label={t("Undue")} val={rp(undue.nilai)} sub={subPiutang(undue, t)} onClick={bukaPiutang(undue)} />
+        <Kpi label={t("Ondue")} val={rp(ondue.nilai)} sub={subPiutang(ondue, t)} tone={ondue.nilai > 0 ? "warn" : ""} onClick={bukaPiutang(ondue)} />
+        <Kpi label={t("Overdue")} val={rp(overdue.nilai)} sub={subPiutang(overdue, t)} tone={overdue.nilai > 0 ? "alert" : ""} onClick={bukaPiutang(overdue)} />
       </div>
       {detail && (
         <DetailKpi {...detail} close={() => setDetail(null)}
@@ -3317,6 +3326,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
   const [ubah, setUbah] = useState(null);       // pelanggan yang sedang diubah
   const [detail, setDetail] = useState(null);
   const [rinci, setRinci] = useState(null);    // SO yang dibuka dari riwayat pelanggan
+  const [kpi, setKpi] = useState(null);       // kartu ringkasan yang dibuka
   const [cari, setCari] = useState("");
   // Usulan limit dimuat terpisah dari /bootstrap: hanya layar ini yang memakainya.
   const [usulan, setUsulan] = useState(null);
@@ -3370,6 +3380,20 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
   }, [list]);
   const bagian = (n) => t("{p}% dari seluruh pelanggan", { p: fmt(list.length ? (n / list.length) * 100 : 0) });
 
+  /* Kartunya menjawab "berapa pelanggan"; yang ditanyakan berikutnya selalu
+     "siapa saja" — dan dari daftar itu namanya membuka kartu pelanggannya,
+     tanpa harus mencari barisnya lagi di tabel di bawah. */
+  const bukaDaftar = (judul, rows) => rows.length
+    ? () => setKpi({
+        judul,
+        kolom: [[t("Kode"), 0], [t("Pelanggan"), 0], [t("Cabang"), 0], [t("Piutang"), 1], [t("Omzet"), 1]],
+        taut: { 1: "c" },
+        baris: rows.map((c) => ({ k: c.id, c, sel: [c.kode, c.nama, namaCabang(c.kota, t), rp(piutang(c.id)), rp(omzet(c.id))] })),
+        total: rp(rows.reduce((a, c) => a + omzet(c.id), 0)),
+      })
+    : undefined;
+  const diCabang = (kode) => list.filter((c) => (cabangDari(c.kota)?.kode || "?") === kode);
+
   const unduhExcel = () => {
     const aoa = [
       [t("Kode"), t("Nama"), t("Pemilik"), t("PIC"), t("Telepon"), t("Email"), t("Alamat"), t("Cabang"),
@@ -3399,12 +3423,15 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
 
       <div className="kpis">
         <Kpi label={t("Total Pelanggan")} val={fmt(list.length)}
-          sub={t("{n} cabang", { n: fmt(CABANG.filter((c) => perCabang.get(c.kode)).length) })} />
+          sub={t("{n} cabang", { n: fmt(CABANG.filter((c) => perCabang.get(c.kode)).length) })}
+          onClick={bukaDaftar(t("Total Pelanggan"), list)} />
         {CABANG.filter((c) => perCabang.get(c.kode)).map((c) => (
-          <Kpi key={c.kode} label={t(c.nama)} val={fmt(perCabang.get(c.kode))} sub={bagian(perCabang.get(c.kode))} />
+          <Kpi key={c.kode} label={t(c.nama)} val={fmt(perCabang.get(c.kode))} sub={bagian(perCabang.get(c.kode))}
+            onClick={bukaDaftar(t(c.nama), diCabang(c.kode))} />
         ))}
         {!!perCabang.get("?") && (
-          <Kpi label={t("Cabang Lain")} val={fmt(perCabang.get("?"))} sub={bagian(perCabang.get("?"))} tone="warn" />
+          <Kpi label={t("Cabang Lain")} val={fmt(perCabang.get("?"))} sub={bagian(perCabang.get("?"))} tone="warn"
+            onClick={bukaDaftar(t("Cabang Lain"), diCabang("?"))} />
         )}
       </div>
 
@@ -3522,6 +3549,10 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
       )}
       {putusanH && (
         <FormPutusanHapus u={putusanH} close={() => setPutusanH(null)} say={say} submit={putusanHapus} />
+      )}
+      {kpi && (
+        <DetailKpi {...kpi} close={() => setKpi(null)}
+          onPilih={(jenis, obj) => { setKpi(null); setDetail(obj); }} />
       )}
       {detail && (
         <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang}
@@ -3774,6 +3805,7 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
   const [detail, setDetail] = useState(null); // pelanggan yang dibuka dari nama
   const [rinci, setRinci] = useState(null);   // penjualan yang dibuka dari nomor
   const [umur, setUmur] = useState(null);     // kelompok umur yang dibuka
+  const [kpi, setKpi] = useState(null);       // kartu ringkasan yang dibuka
   const { piutangRows, piutangF, agingRows, statusRows, topPelanggan } = useMemo(
     () => hitungPiutang(penjualan, cById, totalSO),
     [penjualan, cById, totalSO],
@@ -3792,6 +3824,13 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
      merinci, jadi saldo totalnya tetap ditampilkan sebagai garis dasar. */
   const [undue, ondue, overdue] = statusRows;
 
+  /* Kartu di sini terbuka seperti di dasbor: daftarnya sama, dan nomor invoice
+     maupun nama pelanggannya menuju dialog yang memang sudah ada di layar ini. */
+  const bukaKartu = (judul, rows) => rows.length
+    ? () => setKpi(daftarPiutang(judul, rows, t))
+    : undefined;
+  const bukaStatus = (x) => bukaKartu(t(x.status), piutangRows.filter((r) => STATUS_UMUR[r.bucket] === x.status));
+
   const unduhExcel = () => {
     const aoa = [
       [t("No."), t("Pelanggan"), t("Tanggal"), t("Jatuh Tempo"), t("Telat (hari)"), t("Nilai")],
@@ -3807,10 +3846,11 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
       </SectionTitle>
 
       <div className="kpis">
-        <Kpi label={t("Piutang Berjalan")} val={rp(piutangF)} sub={t("{n} invoice belum lunas", { n: fmt(piutangRows.length) })} tone={piutangF > 0 ? "warn" : ""} />
-        <Kpi label={t("Undue")} val={rp(undue.nilai)} sub={subPiutang(undue, t)} />
-        <Kpi label={t("Ondue")} val={rp(ondue.nilai)} sub={subPiutang(ondue, t)} tone={ondue.nilai > 0 ? "warn" : ""} />
-        <Kpi label={t("Overdue")} val={rp(overdue.nilai)} sub={subPiutang(overdue, t)} tone={overdue.nilai > 0 ? "alert" : ""} />
+        <Kpi label={t("Piutang Berjalan")} val={rp(piutangF)} sub={t("{n} invoice belum lunas", { n: fmt(piutangRows.length) })} tone={piutangF > 0 ? "warn" : ""}
+          onClick={bukaKartu(t("Piutang Berjalan"), piutangRows)} />
+        <Kpi label={t("Undue")} val={rp(undue.nilai)} sub={subPiutang(undue, t)} onClick={bukaStatus(undue)} />
+        <Kpi label={t("Ondue")} val={rp(ondue.nilai)} sub={subPiutang(ondue, t)} tone={ondue.nilai > 0 ? "warn" : ""} onClick={bukaStatus(ondue)} />
+        <Kpi label={t("Overdue")} val={rp(overdue.nilai)} sub={subPiutang(overdue, t)} tone={overdue.nilai > 0 ? "alert" : ""} onClick={bukaStatus(overdue)} />
       </div>
 
       <SectionTitle id={t("Umur Piutang (Aging)")} />
@@ -3944,6 +3984,10 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
         <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang}
           gById={gById} pById={pById} close={() => setDetail(null)}
           onPilihSO={(s) => { setRinci(s); setDetail(null); }} />
+      )}
+      {kpi && (
+        <DetailKpi {...kpi} close={() => setKpi(null)}
+          onPilih={(jenis, obj) => { setKpi(null); if (jenis === "so") setRinci(obj); else setDetail(obj); }} />
       )}
       {umur && (
         <DaftarUmur label={t(umur.label)} rows={piutangRows.filter((r) => r.bucket === umur.k)}
