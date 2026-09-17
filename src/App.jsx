@@ -100,6 +100,12 @@ const bulanLabel = (ym, lang) => {
   const [y, m] = String(ym).split("-");
   return lang === "ko" ? `${y}년 ${Number(m)}월` : `${BULAN[Number(m) - 1]} ${y}`;
 };
+/* Hari terakhir bulan "YYYY-MM". Dihitung di UTC supaya zona waktu peramban
+   tidak menggesernya ke tanggal 30 atau ke bulan sebelumnya. */
+const akhirBulan = (ym) => {
+  const [y, m] = String(ym).split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+};
 /* ---------- rentang periode ---------- */
 /* Dua kotak tanggal, bawaannya 1 Januari tahun berjalan sampai hari ini.
    Bawaannya berhenti di hari ini, bukan di akhir tahun: bulan yang belum tiba
@@ -708,13 +714,22 @@ function Aplikasi() {
     say(hasil === "disetujui" ? t("Usulan disetujui, data dihapus.") : t("Usulan ditolak."));
   };
 
+  /* Pindah ke layar Penjualan dengan periode tertentu. Penyaring layar itu
+     dibaca dari URL saat ia dipasang, jadi URL diatur dulu, tabnya kemudian —
+     tanpa memuat ulang halaman. */
+  const bukaPenjualan = (dari, sampai) => {
+    const q = new URLSearchParams({ dari, sampai });
+    window.history.replaceState(null, "", `${window.location.pathname}?${q}`);
+    setTab("jual");
+  };
+
   const ctx = {
     produk, pelanggan, pemasok, mutasi, mutasiLimit, penjualan, pembelian,
     getStok, stokTotal, pById, cById, gById, sById, totalSO,
     piutang, piutangTotal, majuSO, mundurSO, majuPO, mundurPO, say, online,
     doTransfer, doAdjust, doSaldoAwal, doCreatePenjualan, doUpdatePenjualan, doCreatePembelian, doCreatePelanggan,
     doUpdatePelanggan, user, can, minta, doDeletePenjualan, doDeletePembelian, doDeletePelanggan, reload,
-    hapusUsulan, ajukanHapus, putusanHapus,
+    hapusUsulan, ajukanHapus, putusanHapus, bukaPenjualan,
   };
 
   const TABS = [
@@ -1174,14 +1189,13 @@ const gradePiutang = (x) => {
   return ["Rendah", "ok"];
 };
 
-function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, totalSO }) {
+function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, totalSO, bukaPenjualan }) {
   const { t, lang } = useLang();
   const qtySO = (s) => s.items.reduce((a, i) => a + i.qty, 0);
   const nilaiPO = (p) => p.items.reduce((a, i) => a + i.qty * i.harga, 0);
   const jualKonfirm = penjualan.filter((s) => s.status !== "penawaran");
 
   const nilaiStok = produk.reduce((a, p) => a + stokTotal(p.id) * p.hpp, 0);
-  const jual = jualKonfirm.reduce((a, s) => a + totalSO(s), 0);
   const beli = pembelian.reduce((a, p) => a + nilaiPO(p), 0);
 
   /* ---------- ringkasan bulanan (penjualan per gudang) ---------- */
@@ -1205,9 +1219,36 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
 
   /* Yang ditanyakan tiap pagi bukan "berapa piutangnya" melainkan "mana yang
      sudah lewat tempo" — jadi saldonya dipecah tiga sejak di dasbor. */
-  const [undue, ondue, overdue] = hitungPiutang(penjualan, cById, totalSO).statusRows;
+  const { piutangRows, statusRows } = hitungPiutang(penjualan, cById, totalSO);
+  const [undue, ondue, overdue] = statusRows;
   const subPiutang = (x) =>
     x.maks > 0 ? t("{n} pelanggan · maks {d} hari", { n: fmt(x.n), d: fmt(x.maks) }) : t("{n} pelanggan", { n: fmt(x.n) });
+
+  /* Penjualan bulan berjalan, bukan sepanjang masa: yang dinilai tiap pagi
+     adalah bulan yang sedang jalan, dan angka kumulatif hanya membesar. */
+  const bulanIni = today().slice(0, 7);
+  const jualBulanIni = jualKonfirm.filter((s) => String(s.tgl).slice(0, 7) === bulanIni);
+  const nilaiBulanIni = jualBulanIni.reduce((a, s) => a + totalSO(s), 0);
+  const labelJual = t("Penjualan {bulan}", { bulan: bulanLabel(bulanIni, lang) });
+
+  const [detail, setDetail] = useState(null); // kartu KPI yang dibuka
+  const bukaJual = () => setDetail({
+    judul: labelJual,
+    kolom: [[t("No."), 0], [t("Tanggal"), 0], [t("Pelanggan"), 0], [t("Nilai"), 1]],
+    baris: [...jualBulanIni]
+      .sort((a, b) => (a.tgl < b.tgl ? 1 : a.tgl > b.tgl ? -1 : 0))
+      .map((s) => ({ k: s.id, sel: [s.no, s.tgl, cById(s.pelanggan).nama, rp(totalSO(s))] })),
+    total: rp(nilaiBulanIni),
+  });
+  const bukaPiutang = (status, judul) => () => setDetail({
+    judul,
+    kolom: [[t("No."), 0], [t("Pelanggan"), 0], [t("Jatuh Tempo"), 0], [t("Lewat (hari)"), 1], [t("Nilai"), 1]],
+    baris: piutangRows
+      .filter((r) => STATUS_UMUR[r.bucket] === status)
+      .sort((a, b) => b.telat - a.telat || b.nilai - a.nilai)
+      .map((r) => ({ k: r.so.id, sel: [r.so.no, r.c.nama, r.tempo, r.telat ? fmt(r.telat) : "—", rp(r.nilai)] })),
+    total: rp(statusRows.find((x) => x.status === status).nilai),
+  });
 
   return (
     <>
@@ -1219,14 +1260,15 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
         {!MODUL_SEMBUNYI.includes("stok") && (
           <Kpi label={t("Nilai Stok")} val={rp(nilaiStok)} sub={nilaiStok < 0 ? t("⚠ stok negatif — periksa Buku Mutasi Stok") : t("harga pokok")} tone={nilaiStok < 0 ? "alert" : ""} />
         )}
-        <Kpi label={t("Penjualan")} val={rp(jual)} sub={t("{n} transaksi", { n: jualKonfirm.length })} />
+        <Kpi label={labelJual} val={rp(nilaiBulanIni)} sub={t("{n} transaksi", { n: jualBulanIni.length })} onClick={bukaJual} />
         {!MODUL_SEMBUNYI.includes("beli") && (
           <Kpi label={t("Pembelian")} val={rp(beli)} sub={t("{n} transaksi", { n: pembelian.length })} />
         )}
-        <Kpi label={t("Undue")} val={rp(undue.nilai)} sub={subPiutang(undue)} />
-        <Kpi label={t("Ondue")} val={rp(ondue.nilai)} sub={subPiutang(ondue)} tone={ondue.nilai > 0 ? "warn" : ""} />
-        <Kpi label={t("Overdue")} val={rp(overdue.nilai)} sub={subPiutang(overdue)} tone={overdue.nilai > 0 ? "alert" : ""} />
+        <Kpi label={t("Undue")} val={rp(undue.nilai)} sub={subPiutang(undue)} onClick={bukaPiutang("Undue", t("Undue"))} />
+        <Kpi label={t("Ondue")} val={rp(ondue.nilai)} sub={subPiutang(ondue)} tone={ondue.nilai > 0 ? "warn" : ""} onClick={bukaPiutang("Ondue", t("Ondue"))} />
+        <Kpi label={t("Overdue")} val={rp(overdue.nilai)} sub={subPiutang(overdue)} tone={overdue.nilai > 0 ? "alert" : ""} onClick={bukaPiutang("Overdue", t("Overdue"))} />
       </div>
+      {detail && <DetailKpi {...detail} close={() => setDetail(null)} />}
 
       <SectionTitle id={t("Ringkasan Bulanan")} />
       <Card title={t("Penjualan per Bulan")} note={t("tidak termasuk penawaran")}>
@@ -1246,7 +1288,12 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
             <tbody>
               {jualBulanan.map((b) => (
                 <tr key={b.bulan}>
-                  <td>{bulanLabel(b.bulan, lang)}</td>
+                  <td>
+                    <button type="button" className="namelink" title={t("Lihat rincian")}
+                      onClick={() => bukaPenjualan(`${b.bulan}-01`, akhirBulan(b.bulan))}>
+                      {bulanLabel(b.bulan, lang)}
+                    </button>
+                  </td>
                   <td className="r n">{fmt(b.n)}</td>
                   {GUDANG.map((g) => (
                     <td className="r n" key={g.id}>{fmt(b.perGudang[g.id] || 0)}</td>
@@ -3964,6 +4011,56 @@ const SectionTitle = ({ id, mid, children }) => (
   </div>
 );
 
+/* Rincian di balik satu kartu KPI. Kartunya menjawab "berapa"; yang ditanyakan
+   berikutnya selalu "yang mana", dan sampai sekarang jawabannya menuntut pindah
+   layar. Kolomnya datang dari pemanggil — [judul, rata kanan]. */
+function DetailKpi({ judul, kolom, baris, total, close }) {
+  const { t } = useLang();
+  const box = useDialog(close);
+  const id = useId();
+  const akhir = kolom.length - 1;
+  return (
+    <div className="ov" onClick={close}>
+      <div className="md wide" ref={box} role="dialog" aria-modal="true" aria-labelledby={id} onClick={(e) => e.stopPropagation()}>
+        <div className="md-hd">
+          <h3 id={id}>{judul}</h3>
+          <button className="x" onClick={close} aria-label={t("Tutup dialog")}>×</button>
+        </div>
+        <div className="md-bd">
+          <Scroll max={420}>
+            <table>
+              <thead>
+                <tr>{kolom.map(([nama, kanan]) => <th key={nama} scope="col" className={kanan ? "r" : undefined}>{nama}</th>)}</tr>
+              </thead>
+              <tbody>
+                {baris.map((b) => (
+                  <tr key={b.k}>
+                    {b.sel.map((v, i) => <td key={kolom[i][0]} className={kolom[i][1] ? "r n" : undefined}>{v}</td>)}
+                  </tr>
+                ))}
+                {!baris.length && <tr><td colSpan={kolom.length}><Empty id={t("Tidak ada data.")} /></td></tr>}
+              </tbody>
+              {!!baris.length && (
+                <tfoot>
+                  <tr className="tf-total">
+                    <td><b>{t("Total")}</b></td>
+                    {kolom.slice(1).map(([nama], i) => (
+                      <td key={nama} className="r n strong">{i + 1 === akhir ? total : ""}</td>
+                    ))}
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </Scroll>
+        </div>
+        <div className="md-ft">
+          <button className="btn pri" onClick={close}>{t("Tutup")}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* Bagian yang bisa dilipat, tertutup dulu. Layar Piutang menumpuk tiga tabel;
    yang pertama (umur piutang) adalah ringkasan yang selalu dibaca, dua
    sisanya daftar panjang yang hanya dibuka kalau ada yang dicari. Tertutup,
@@ -4002,13 +4099,21 @@ const Card = ({ title, note, cls, children }) => (
   </section>
 );
 
-const Kpi = ({ label, val, sub, tone }) => (
-  <div className={"kpi " + (tone || "")}>
-    <span className="kl">{label}</span>
-    <b className="kv n">{val}</b>
-    <span className="ks">{sub}</span>
-  </div>
-);
+/* Kartu KPI. Dengan `onClick` ia menjadi tombol sungguhan — angka ringkas
+   selalu memancing pertanyaan "yang mana", dan jawabannya ada di balik klik. */
+const Kpi = ({ label, val, sub, tone, onClick }) => {
+  const isi = (
+    <>
+      <span className="kl">{label}</span>
+      <b className="kv n">{val}</b>
+      <span className="ks">{sub}</span>
+    </>
+  );
+  const kelas = "kpi " + (tone || "");
+  return onClick
+    ? <button type="button" className={kelas + " klik"} onClick={onClick}>{isi}</button>
+    : <div className={kelas}>{isi}</div>;
+};
 
 /* KPI dengan pembanding. Angka telanjang tidak bisa dinilai: "Rp 3.00 miliar"
    baru berarti sesuatu setelah diketahui tahun lalu berapa. Harga rata-rata
@@ -4283,6 +4388,9 @@ function Style() {
 .vk .kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:16px}
 .vk .kpi{background:var(--asm-card); border:1px solid var(--asm-border); border-left:3px solid var(--asm-primary);
   border-radius:var(--asm-radius-lg); padding:12px 14px; container-type:inline-size}
+.vk button.kpi{width:100%; text-align:left; font:inherit; color:inherit; cursor:pointer}
+.vk button.kpi:hover{border-color:var(--asm-primary-40); box-shadow:var(--asm-shadow-md)}
+.vk button.kpi:focus-visible{outline:2px solid var(--asm-primary); outline-offset:2px}
 .vk .kpi.warn{border-left-color:var(--asm-warning)}
 .vk .kpi.alert{border-left-color:var(--asm-danger)}
 .vk .kl{font-size:var(--asm-fs-sm); font-weight:500; color:var(--asm-fg-muted); display:block; margin-bottom:4px}
