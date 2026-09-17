@@ -429,6 +429,12 @@ const KO = {
   "Kode / nama / pemilik / PIC / kota / sales": "코드 / 이름 / 오너 / 담당자 / 도시 / 영업",
   "+ Pelanggan Baru": "+ 새 고객",
   "Kota": "도시",
+  /* ---------- cabang (kota) ---------- */
+  "Surabaya": "수라바야",
+  "Jakarta": "자카르타",
+  "Karawang": "까라왕",
+  "Semarang": "스마랑",
+  "Gudang {kota}": "{kota} 지점",
   "Termin": "결제조건",
   "Limit Kredit": "여신 한도",
   "Omzet": "매출",

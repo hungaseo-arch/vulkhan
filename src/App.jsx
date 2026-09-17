@@ -152,10 +152,43 @@ function terbilang(n) {
   return t.charAt(0).toUpperCase() + t.slice(1) + " rupiah";
 }
 
+/* ---------- cabang (kota) ----------
+   Empat cabang dengan satu ejaan resmi, dipakai di seluruh aplikasi: kode
+   tiga huruf untuk dokumen dan nama kotanya untuk dibaca orang. Semarang
+   memakai SMR — 'SMG' masih tertinggal di baris gudang lama, jadi ejaan itu
+   tetap dikenali sebagai alias, tapi tidak lagi ditampilkan.
+
+   Data lama menulis kota dengan bermacam ejaan ('SEMARANG', 'Semarang'),
+   dan pelanggan bisa saja berkota di luar keempatnya. Karena itu pencarian
+   lewat alias, dan yang tidak dikenali dibiarkan apa adanya — kota pelanggan
+   bukan daftar tertutup. */
+const CABANG = [
+  { kode: "SBY", nama: "Surabaya", alias: ["SBY", "SURABAYA"] },
+  { kode: "JKT", nama: "Jakarta", alias: ["JKT", "JAKARTA"] },
+  { kode: "KRW", nama: "Karawang", alias: ["KRW", "KARAWANG"] },
+  { kode: "SMR", nama: "Semarang", alias: ["SMG", "SMR", "SEMARANG"] },
+];
+const cabangDari = (teks) => {
+  const k = String(teks || "").trim().toUpperCase();
+  return CABANG.find((c) => c.alias.includes(k)) || null;
+};
+/* Nama kota siap tampil: diterjemahkan bila termasuk cabang, apa adanya bila
+   tidak. `t` diminta sebagai argumen karena ini bukan komponen. */
+const namaKota = (teks, t) => {
+  const c = cabangDari(teks);
+  return c ? t(c.nama) : String(teks || "");
+};
+const kodeGudang = (g) => cabangDari(g?.kota || g?.kode)?.kode || String(g?.kode || "");
+const namaGudang = (g, t) => {
+  const c = cabangDari(g?.kota || String(g?.nama || "").replace(/^Gudang\s+/i, "") || g?.kode);
+  return c ? t("Gudang {kota}", { kota: t(c.nama) }) : String(g?.nama || "");
+};
+const opsiGudang = (t) => GUDANG.map((x) => [x.id, `${kodeGudang(x)} · ${namaGudang(x, t)}`]);
+
 /* ---------- data contoh ---------- */
 let GUDANG = [
   { id: "G1", kode: "KRW", nama: "Gudang Karawang", kota: "Karawang" },
-  { id: "G2", kode: "SMG", nama: "Gudang Semarang", kota: "Semarang" },
+  { id: "G2", kode: "SMR", nama: "Gudang Semarang", kota: "Semarang" },
   { id: "G3", kode: "SBY", nama: "Gudang Surabaya", kota: "Surabaya" },
 ];
 
@@ -1251,7 +1284,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, total
                 const val = produk.reduce((a, p) => a + getStok(g.id, p.id) * p.hpp, 0);
                 return (
                   <tr key={g.id}>
-                    <td><span className="chip">{g.kode}</span> {g.nama}</td>
+                    <td><span className="chip">{kodeGudang(g)}</span> {namaGudang(g, t)}</td>
                     <td className={"r n " + (jadi < 0 ? "bad strong" : "")}>{fmt(jadi)}</td>
                     <td className={"r n " + (cs < 0 ? "bad strong" : "")}>{fmt(cs)}</td>
                     <td className={"r n " + (val < 0 ? "bad strong" : "")}>{rp(val)}</td>
@@ -1316,7 +1349,7 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
         mid={
           <div className="filters">
             <Sel label={t("Gudang")} value={g} onChange={setG}
-              opts={[["ALL", t("Semua Gudang")], ...GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])]} />
+              opts={[["ALL", t("Semua Gudang")], ...opsiGudang(t)]} />
             <Sel label={t("Kategori")} value={kat} onChange={setKat}
               opts={[["ALL", t("Semua")], ...Object.entries(KATEGORI).map(([k, v]) => [k, t(v.id)])]} />
             <label className="fld cari">
@@ -1409,7 +1442,7 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
               {mutasiUrut.slice(0, mutasiTampil).map((m) => (
                 <tr key={m.id}>
                   <td className="n">{m.tgl}</td>
-                  <td><span className="chip">{gById(m.gudang).kode}</span></td>
+                  <td><span className="chip">{kodeGudang(gById(m.gudang))}</span></td>
                   <td>{pById(m.produk).nama}</td>
                   <td><Tag t={m.ref === "AWAL" ? "awal" : m.tipe} /></td>
                   <td className={"r n " + (m.qty < 0 ? "bad" : "ok")}>{m.qty > 0 ? "+" : ""}{fmt(m.qty)}</td>
@@ -1458,8 +1491,8 @@ function FormTransfer({ produk, getStok, submit, say, close }) {
   };
   return (
     <Modal title={t("Transfer Antar Gudang")} close={close} onSave={simpan}>
-      <Combo label={t("Dari Gudang")} value={f.dari} onChange={set("dari")} placeholder={t("-- Pilih Gudang --")} opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
-      <Combo label={t("Ke Gudang")} value={f.ke} onChange={set("ke")} placeholder={t("-- Pilih Gudang --")} opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+      <Combo label={t("Dari Gudang")} value={f.dari} onChange={set("dari")} placeholder={t("-- Pilih Gudang --")} opts={opsiGudang(t)} />
+      <Combo label={t("Ke Gudang")} value={f.ke} onChange={set("ke")} placeholder={t("-- Pilih Gudang --")} opts={opsiGudang(t)} />
       <Combo label={t("Barang")} value={f.produk} onChange={set("produk")} placeholder={t("-- Pilih Barang --")} opts={produk.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
       <Inp label={t("Jumlah")} type="number" value={f.qty} onChange={set("qty")} hint={t("Tersedia di gudang asal: {n}", { n: fmt(tersedia) })} />
     </Modal>
@@ -1484,7 +1517,7 @@ function FormAdjust({ produk, getStok, submit, say, close }) {
   };
   return (
     <Modal title={t("Penyesuaian Stok")} close={close} onSave={simpan}>
-      <Combo label={t("Gudang")} value={f.gudang} onChange={set("gudang")} placeholder={t("-- Pilih Gudang --")} opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+      <Combo label={t("Gudang")} value={f.gudang} onChange={set("gudang")} placeholder={t("-- Pilih Gudang --")} opts={opsiGudang(t)} />
       <Combo label={t("Barang")} value={f.produk} onChange={set("produk")} placeholder={t("-- Pilih Barang --")} opts={produk.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
       <Inp label={t("Hitung Fisik")} type="number" value={f.fisik} onChange={set("fisik")} hint={t("Stok sistem: {n}", { n: fmt(sistem) })} />
       <div className="delta">
@@ -1577,7 +1610,7 @@ function FormSaldoAwal({ produk, getStok, submit, online, say, close }) {
     <Modal title={t("Saldo Awal")} close={close} onSave={simpan} wide>
       <p className="mut2">{t("Angka yang diisi adalah stok PEMBUKAAN. Masuk dan keluar yang sudah tercatat tetap dihitung di atasnya.")}</p>
       <Combo label={t("Gudang")} value={gudang} onChange={setGudang} placeholder={t("-- Pilih Gudang --")}
-        opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+        opts={opsiGudang(t)} />
       <label className="fld">
         <span className="lbl">{t("Tanggal")}</span>
         <Tgl value={tgl} onChange={setTgl} />
@@ -1672,7 +1705,7 @@ function DetailProduk({ p, getStok, stokTotal, close }) {
               <tbody>
                 {GUDANG.map((g) => (
                   <tr key={g.id}>
-                    <td><span className="chip">{g.kode}</span> {g.nama}</td>
+                    <td><span className="chip">{kodeGudang(g)}</span> {namaGudang(g, t)}</td>
                     <td className="r n">{fmt(getStok(g.id, p.id))}</td>
                   </tr>
                 ))}
@@ -2095,7 +2128,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
     const aoa = sumbu === "pelanggan"
       ? [
           [t("Peringkat"), t("Pelanggan"), t("Kota"), t("Transaksi|kolom"), t("Ban Jadi"), t("Ban Jasa"), t("Total Qty"), t("Nilai Penjualan"), t("Harga Rata-rata"), t("Piutang")],
-          ...perPelanggan.map((b, i) => [i + 1, b.c.nama, b.c.kota, b.n, b.jadi, b.jasa, b.qty, b.total, b.harga ?? "", tagihanCust.get(b.id)?.nilai || 0]),
+          ...perPelanggan.map((b, i) => [i + 1, b.c.nama, namaKota(b.c.kota, t), b.n, b.jadi, b.jasa, b.qty, b.total, b.harga ?? "", tagihanCust.get(b.id)?.nilai || 0]),
         ]
       : sumbu === "produk"
         ? [
@@ -2105,7 +2138,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
         : [
             [t("No."), t("Tanggal"), t("Pelanggan"), t("PIC"), t("Kota"), t("Gudang"), t("Status"), t("Rincian"), t("Qty"), t("Total")],
             ...list.map((s) => [
-              s.no, s.tgl, cById(s.pelanggan).nama, cById(s.pelanggan).pic, cById(s.pelanggan).kota, gById(s.gudang).kode,
+              s.no, s.tgl, cById(s.pelanggan).nama, cById(s.pelanggan).pic, namaKota(cById(s.pelanggan).kota, t), kodeGudang(gById(s.gudang)),
               t(SO_LABEL[s.status].id),
               s.items.map((i) => `${pById(i.produk).kode} × ${fmt(i.qty)}`).join(", "),
               qtySO(s), totalSO(s),
@@ -2192,7 +2225,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
                       </button>
                       <button type="button" className="namelink strong" title={t("Lihat rincian")}
                         onClick={() => setDetail(b.c)}>{b.c.nama}</button>
-                      <em className="mut2">{b.c.kota || "-"}</em>
+                      <em className="mut2">{namaKota(b.c.kota, t) || "-"}</em>
                     </span>
                   </td>
                   <td className="r n">{fmt(b.n)}</td>
@@ -2478,7 +2511,7 @@ function DaftarGerak({ rows, kepala, kolom, kosong, takJelas, onPilih }) {
             <tr key={r.id} className="klik" onClick={() => onPilih(r.c)}>
               <td>
                 <button type="button" className="namelink" title={t("Lihat rincian")}>{r.c.nama}</button>
-                <em className="mut2">{r.c.kota || "-"}</em>
+                <em className="mut2">{namaKota(r.c.kota, t) || "-"}</em>
               </td>
               {kolom(r)}
             </tr>
@@ -2615,7 +2648,7 @@ function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, on
           <div className="cust-info">
             <div><span className="lbl2">{t("Pelanggan")}</span><b>{c.nama}</b></div>
             <div><span className="lbl2">{t("PIC")}</span><b>{c.pic || "-"}</b></div>
-            <div><span className="lbl2">{t("Gudang")}</span><b>{gById(so.gudang).nama}</b></div>
+            <div><span className="lbl2">{t("Gudang")}</span><b>{namaGudang(gById(so.gudang), t)}</b></div>
             <div><span className="lbl2">{t("Status")}</span><Status s={so.status} map={SO_LABEL} /></div>
             <div><span className="lbl2">{t("Termin")}</span><b>{t("{n} hari", { n: c.termin })}</b></div>
             <div><span className="lbl2">{t("Jatuh Tempo")}</span><b>{addDays(so.tgl, Number(c.termin) || 30)}</b></div>
@@ -2903,7 +2936,7 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
       saveLabel={awal ? t("Simpan Perubahan") : t("Simpan Penawaran")}>
       <div className="row2">
         <Combo label={t("Pelanggan")} value={f.pelanggan} onChange={set("pelanggan")} placeholder={t("-- Pilih Pelanggan --")} opts={pelanggan.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
-        <Combo label={t("Gudang Pengirim")} value={f.gudang} onChange={set("gudang")} placeholder={t("-- Pilih Gudang --")} opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+        <Combo label={t("Gudang Pengirim")} value={f.gudang} onChange={set("gudang")} placeholder={t("-- Pilih Gudang --")} opts={opsiGudang(t)} />
       </div>
 
       {awal && (
@@ -2986,7 +3019,7 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
     const aoa = [
       [t("No."), t("Tanggal"), t("Pemasok"), t("Gudang Tujuan"), t("Status"), t("Rincian"), t("Total")],
       ...list.map((p) => [
-        p.no, p.tgl, sById(p.pemasok).nama, gById(p.gudang).nama, t(PO_LABEL[p.status].id),
+        p.no, p.tgl, sById(p.pemasok).nama, namaGudang(gById(p.gudang), t), t(PO_LABEL[p.status].id),
         p.items.map((i) => `${pById(i.produk).kode} × ${fmt(i.qty)}`).join(", "),
         tot(p),
       ]),
@@ -3082,7 +3115,7 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
                   <td className="n strong">{p.no}</td>
                   <td className="n">{p.tgl}</td>
                   <td>{sById(p.pemasok).nama}<em className="mut2">{KATEGORI[sById(p.pemasok).jenis] ? t(KATEGORI[sById(p.pemasok).jenis].id) : ""}</em></td>
-                  <td><span className="chip">{gById(p.gudang).kode}</span></td>
+                  <td><span className="chip">{kodeGudang(gById(p.gudang))}</span></td>
                   <td className="mut">{p.items.map((i, k) => <div key={k}>{pById(i.produk).kode} × {fmt(i.qty)} {pById(i.produk).satuan}</div>)}</td>
                   <td className="r n strong">{rp(tot(p))}</td>
                   <td><Status s={p.status} map={PO_LABEL} /></td>
@@ -3164,7 +3197,7 @@ function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
     <Modal title={t("Pembelian Baru")} close={close} onSave={kirim} wide saveLabel={t("Simpan Pesanan")}>
       <div className="row2">
         <Combo label={t("Pemasok")} value={f.pemasok} onChange={set("pemasok")} placeholder={t("-- Pilih Pemasok --")} opts={pemasok.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
-        <Combo label={t("Gudang Tujuan")} value={f.gudang} onChange={set("gudang")} placeholder={t("-- Pilih Gudang --")} opts={GUDANG.map((x) => [x.id, `${x.kode} · ${x.nama}`])} />
+        <Combo label={t("Gudang Tujuan")} value={f.gudang} onChange={set("gudang")} placeholder={t("-- Pilih Gudang --")} opts={opsiGudang(t)} />
       </div>
       <div className="lbl mt">{t("Rincian Barang")}</div>
       {items.map((it, i) => (
@@ -3225,8 +3258,11 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
     const q = cari.trim().toLowerCase();
     if (!q) return pelanggan;
     return pelanggan.filter((c) =>
-      [c.kode, c.nama, c.pemilik, c.pic, c.kota, c.sales].some((v) => (v || "").toLowerCase().includes(q)));
-  }, [pelanggan, cari]);
+      /* namaKota ikut dicari: yang terbaca di tabel adalah nama
+         terjemahannya, dan orang mengetikkan apa yang dilihatnya. */
+      [c.kode, c.nama, c.pemilik, c.pic, c.kota, namaKota(c.kota, t), c.sales]
+        .some((v) => (v || "").toLowerCase().includes(q)));
+  }, [pelanggan, cari, t]);
 
   const unduhExcel = () => {
     const aoa = [
@@ -3332,7 +3368,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
                       <b>{c.nama}</b>
                       <em className="mut2">{c.pic} · {c.telp}</em>
                     </td>
-                    <td className="mut">{c.kota}</td>
+                    <td className="mut">{namaKota(c.kota, t)}</td>
                     <td className="c"><span className={"grade g" + c.grade}>{c.grade}</span></td>
                     <td className="r n mut">{t("{n} hari", { n: c.termin })}</td>
                     <td className={"r n strong " + (lewat ? "bad" : "")}>{rp(p)}</td>
@@ -3482,7 +3518,7 @@ function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close, 
             <div><span className="lbl2">{t("Telepon")}</span><b>{c.telp || "-"}</b></div>
             <div><span className="lbl2">{t("Email")}</span><b>{c.email || "-"}</b></div>
             <div><span className="lbl2">{t("NPWP")}</span><b>{c.npwp || "-"}</b></div>
-            <div><span className="lbl2">{t("Kota")}</span><b>{c.kota || "-"}</b></div>
+            <div><span className="lbl2">{t("Kota")}</span><b>{namaKota(c.kota, t) || "-"}</b></div>
             <div className="span3"><span className="lbl2">{t("Alamat")}</span><b>{c.alamat || "-"}</b></div>
           </div>
 
@@ -3525,7 +3561,7 @@ function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, close, 
                         : s.no}
                     </td>
                     <td className="n mut">{s.tgl}</td>
-                    <td><span className="chip">{gById(s.gudang).kode}</span></td>
+                    <td><span className="chip">{kodeGudang(gById(s.gudang))}</span></td>
                     <td className="mut">
                       {s.items.map((i, k) => (
                         <div key={k}>{pById(i.produk).kode} × {fmt(i.qty)}</div>
