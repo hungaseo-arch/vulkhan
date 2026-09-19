@@ -519,6 +519,7 @@ const KO = {
   "Rendah": "낮음",
 
   /* ---------- penagihan lewat pihak lain & PPN ---------- */
+  "Urutkan": "정렬",
   "Penagihan & Pajak": "청구·세금",
   "Ditagih lewat": "청구 경유처",
   "Ditagih ke": "청구처",

@@ -1231,6 +1231,9 @@ const daftarPiutang = (judul, rows, t) => ({
 });
 
 /* grade risiko: kombinasi umur piutang & pemakaian limit kredit — bukan nilai piutang semata */
+/* Urutan risiko sebagai angka: kolom "Grade" diurutkan menurut beratnya,
+   bukan menurut abjad labelnya. */
+const RISIKO_URUT = { Kritis: 3, Tinggi: 2, Sedang: 1, Rendah: 0 };
 const gradePiutang = (x) => {
   if (x.telat > 180 || x.pakai > 100) return ["Kritis", "alert"];
   if (x.telat > 90 || x.pakai >= 90) return ["Tinggi", "alert"];
@@ -3923,15 +3926,29 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
     () => hitungPiutang(penjualan, cById, totalSO),
     [penjualan, cById, totalSO],
   );
-  const berisiko = useMemo(() => {
+  /* Bawaannya piutang terbesar lebih dulu — itu yang dicari orang saat membuka
+     daftar ini; kolom lain tinggal diklik kepalanya. */
+  const { urut, klik, susun } = useUrut("nilai");
+  const nilaiKolom = (x, k) =>
+    k === "nama" ? x.c.nama
+      : k === "telat" ? x.telat
+        : k === "pakai" ? (punyaLimit(x.c) ? x.pakai : null)
+          : k === "risiko" ? RISIKO_URUT[gradePiutang(x)[0]]
+            : x.nilai;
+  const berisiko = (() => {
     const q = cari.trim().toLowerCase();
-    if (!q) return topPelanggan;
-    return topPelanggan.filter((x) => x.c.nama.toLowerCase().includes(q));
-  }, [topPelanggan, cari]);
-  const rincian = useMemo(
-    () => [...piutangRows].sort((a, b) => b.telat - a.telat),
-    [piutangRows],
-  );
+    return susun(q ? topPelanggan.filter((x) => x.c.nama.toLowerCase().includes(q)) : topPelanggan, nilaiKolom);
+  })();
+  /* Rincian invoice dibuka dengan yang paling lama lewat di atas — urutan yang
+     sama seperti sebelum kepala kolomnya bisa diklik. */
+  const urutInv = useUrut("telat");
+  const rincian = urutInv.susun(piutangRows, (r, k) =>
+    k === "no" ? r.so.no
+      : k === "nama" ? r.c.nama
+        : k === "tgl" ? r.so.tgl
+          : k === "tempo" ? r.tempo
+            : k === "nilai" ? r.nilai
+              : r.telat);
 
   /* Kartu di atas memakai tiga status yang sama dengan dasbor — layar ini yang
      merinci, jadi saldo totalnya tetap ditampilkan sebagai garis dasar. */
@@ -4026,11 +4043,11 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
               <table>
                 <thead>
                   <tr>
-                    <th scope="col">{t("Pelanggan")}</th>
-                    <th scope="col" className="r">{t("Piutang")}</th>
-                    <th scope="col" className="r">{t("Telat")}</th>
-                    <th scope="col" className="r">{t("Pakai Limit")}</th>
-                    <th scope="col">{t("Grade")}</th>
+                    <Th k="nama" urut={urut} klik={klik} naik>{t("Pelanggan")}</Th>
+                    <Th k="nilai" urut={urut} klik={klik} cls="r">{t("Piutang")}</Th>
+                    <Th k="telat" urut={urut} klik={klik} cls="r">{t("Telat")}</Th>
+                    <Th k="pakai" urut={urut} klik={klik} cls="r">{t("Pakai Limit")}</Th>
+                    <Th k="risiko" urut={urut} klik={klik}>{t("Grade")}</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -4061,12 +4078,12 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
             <table>
               <thead>
                 <tr>
-                  <th scope="col">{t("No.")}</th>
-                  <th scope="col">{t("Pelanggan")}</th>
-                  <th scope="col">{t("Tanggal")}</th>
-                  <th scope="col">{t("Jatuh Tempo")}</th>
-                  <th scope="col" className="r">{t("Telat")}</th>
-                  <th scope="col" className="r">{t("Nilai")}</th>
+                  <Th k="no" urut={urutInv.urut} klik={urutInv.klik} naik>{t("No.")}</Th>
+                  <Th k="nama" urut={urutInv.urut} klik={urutInv.klik} naik>{t("Pelanggan")}</Th>
+                  <Th k="tgl" urut={urutInv.urut} klik={urutInv.klik} naik>{t("Tanggal")}</Th>
+                  <Th k="tempo" urut={urutInv.urut} klik={urutInv.klik} naik>{t("Jatuh Tempo")}</Th>
+                  <Th k="telat" urut={urutInv.urut} klik={urutInv.klik} cls="r">{t("Telat")}</Th>
+                  <Th k="nilai" urut={urutInv.urut} klik={urutInv.klik} cls="r">{t("Nilai")}</Th>
                 </tr>
               </thead>
               <tbody>
@@ -4347,6 +4364,50 @@ const KpiTren = ({ label, val, delta, sub }) => {
 const Scroll = ({ children, max }) => <div className="scroll" style={max ? { maxHeight: max } : undefined}>{children}</div>;
 
 const Empty = ({ id }) => <div className="empty">{id}</div>;
+
+/* ---------- kepala kolom yang bisa diurutkan ----------
+   Satu kolom aktif pada satu waktu; klik berikutnya pada kolom yang sama
+   membalik arahnya. Arah pertama ditentukan per kolom: nama dibaca A→Z,
+   sedangkan angka hampir selalu ditanya "yang terbesar dulu" — memaksa satu
+   arah awal untuk semua kolom berarti setiap kolom angka perlu dua klik.
+   Baris kosong (limit belum diatur) selalu jatuh ke belakang, ke arah mana pun
+   diurutkan: "—" di puncak daftar tidak menjawab pertanyaan apa pun. */
+const bandingkan = (x, y) => {
+  const kosong = (v) => v == null || v === "";
+  if (kosong(x) || kosong(y)) return kosong(x) && kosong(y) ? 0 : kosong(x) ? 1 : -1;
+  if (typeof x === "number" && typeof y === "number") return x - y;
+  return String(x).localeCompare(String(y), undefined, { numeric: true });
+};
+function useUrut(kunciAwal, naikAwal = false) {
+  const [urut, setUrut] = useState({ k: kunciAwal, naik: naikAwal });
+  const klik = (k, naik) => setUrut((u) => (u.k === k ? { k, naik: !u.naik } : { k, naik }));
+  /* `nilai(baris, kunci)` menyerahkan pembacaan kolom kepada pemanggil: yang
+     diurutkan sering bukan yang ditampilkan (grade dibaca sebagai peringkat,
+     "3 hr" sebagai angka). */
+  const susun = (rows, nilai) => {
+    const arah = urut.naik ? 1 : -1;
+    /* Baris kosong tetap di belakang, jadi pembandingnya tidak ikut dibalik. */
+    return [...rows].sort((a, b) => {
+      const x = nilai(a, urut.k), y = nilai(b, urut.k);
+      const c = bandingkan(x, y);
+      return (x == null || y == null || x === "" || y === "") ? c : c * arah;
+    });
+  };
+  return { urut, klik, susun };
+}
+const Th = ({ k, urut, klik, naik = false, cls = "", children }) => {
+  const { t } = useLang();
+  const aktif = urut.k === k;
+  return (
+    <th scope="col" className={cls + (aktif ? " th-aktif" : "")}
+      aria-sort={aktif ? (urut.naik ? "ascending" : "descending") : "none"}>
+      <button type="button" className="th-urut" onClick={() => klik(k, naik)} title={t("Urutkan")}>
+        <span>{children}</span>
+        <span className="th-arah" aria-hidden="true">{aktif ? (urut.naik ? "▲" : "▼") : "↕"}</span>
+      </button>
+    </th>
+  );
+};
 
 /* "Keluar|mutasi" diberi konteks karena "Keluar" di header berarti logout */
 /* "awal" bukan nilai kolom tipe — baris ref='AWAL' ditampilkan tersendiri
@@ -4768,6 +4829,14 @@ function Style() {
   text-align:left; padding:9px 12px; border-bottom:2px solid var(--asm-primary);
   font-family:var(--fd); font-size:var(--asm-fs-sm); font-weight:500; white-space:nowrap}
 .vk thead th em{font-size:var(--asm-fs-xs); color:var(--asm-fg-muted); font-weight:400}
+/* kepala kolom yang bisa diurutkan: tombol memenuhi selnya supaya sasaran
+   kliknya sama besar dengan kepala kolomnya sendiri */
+.vk thead th .th-urut{all:unset; box-sizing:border-box; cursor:pointer; display:flex; align-items:center; gap:6px; width:100%}
+.vk thead th.r .th-urut{justify-content:flex-end}
+.vk thead th .th-arah{font-size:var(--asm-fs-2xs); opacity:.35}
+.vk thead th .th-urut:hover .th-arah{opacity:.7}
+.vk thead th.th-aktif{color:var(--asm-primary)}
+.vk thead th.th-aktif .th-arah{opacity:1}
 .vk tbody td{height:38px; padding:9px 12px; border-bottom:1px solid var(--asm-border-50); vertical-align:middle}
 .vk tbody tr:hover{background:var(--asm-primary-6)}
 .vk tbody tr.klik{cursor:pointer}
