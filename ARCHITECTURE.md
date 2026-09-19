@@ -114,6 +114,23 @@ BI 색은 바꾸지 않습니다. 글자 크기도 같은 자리의 `--asm-fs-*`
 **매출·고객 순위·월별 요약은 최종 사용자**를 따릅니다(`pelangganSO`). PPN은 매출·미수금 금액에
 포함해 계산합니다(`nilaiSO = subtotalSO + ppnSO`).
 
+### 분할 수금
+
+큰 고객은 한 인보이스를 한 번에 결제하지 않습니다. 그래서 “받았다/못 받았다”만 말할 수 있는 `status`
+대신 **수금 원장**(`penjualan_bayar`)을 두고, 잔액은 언제나 `문서 금액 − 수금 합계`로 계산합니다.
+재고를 `stok_mutasi` 합계로 정의한 것과 같은 방식이고, “이미 받은 금액” 컬럼은 어디에도 없습니다.
+
+- 미수금·연령분석·여신한도는 모두 **잔액**(`sisaSO`)을 씁니다. 절반 받은 인보이스는 절반만 연체합니다.
+- 상태와 원장은 한 트랜잭션 안에서 맞춥니다. 입금 후 잔액이 0이면 `lunas`, 수금을 취소해 잔액이
+  다시 생기면 `tagihan`으로 되돌아갑니다(`tandaiLunas` / `bukaLunas` — 조건을 UPDATE의 WHERE로
+  다시 검사하므로 동시 요청에도 어긋나지 않습니다).
+- “→ Lunas” 버튼은 사라지지 않았습니다. 남은 잔액만큼 `auto` 행 한 줄을 넣어 완납 처리하고,
+  상태를 되돌리면 그 `auto` 행만 지웁니다. 사람이 입력한 수금은 건드리지 않습니다.
+- 돈이 미아가 되지 않게 막습니다: 초과 입금 불가, 수금이 있는 문서는 출고 취소 불가, 수정으로
+  문서 금액을 이미 받은 금액 아래로 줄이는 것도 불가.
+- 화면은 판매 상세 다이얼로그 안에서 처리합니다(수금 이력 · 수금액/잔액 · 등록 폼). 다이얼로그를
+  겹치지 않는다는 규칙 때문에 별도 모달이 아니라 인라인 폼입니다.
+
 ### 폰트
 
 `index.html`에서 `preconnect` + `<link rel="preload" as="style" onload=…>`로 Google Fonts를 비차단 로드합니다.
@@ -151,7 +168,7 @@ Noto Sans KR을 붙이는 방법이 있습니다.
 |---|---|---|
 | GET `/api/health` | 연결 확인 | 인증 불필요 |
 | POST `/api/login` | 토큰 발급 | 인증 불필요 |
-| GET `/api/bootstrap` | 초기 로드 전체 | 쿼리 10개 `Promise.all` |
+| GET `/api/bootstrap` | 초기 로드 전체 | 쿼리 11개 `Promise.all`(수금 원장 포함) |
 | GET `/api/gudang` `/produk` `/pelanggan` `/pemasok` | 마스터 | 개별 조회용으로 유지 |
 | GET `/api/stok`, `/api/stok/total` | `v_stok`, `v_stok_total` | |
 | GET `/api/mutasi` | 최근 500건, 오름차순 | 표시 전용 |
@@ -159,6 +176,8 @@ Noto Sans KR을 붙이는 방법이 있습니다.
 | POST `/api/mutasi/penyesuaian` | 실사 조정 | 차이분 1건 INSERT |
 | GET/POST `/api/mutasi/saldo-awal` | 기초재고 | 저장은 manager. `ref='AWAL'` 한 줄로 기록, 재저장 시 교체 |
 | GET/POST `/api/penjualan`, PATCH `/:id/status`, DELETE `/:id` | 판매 | 생성·삭제는 트랜잭션, 삭제는 admin |
+| POST `/api/penjualan/:id/bayar` | 분할 수금 등록 | 출고·청구 상태만. 금액은 잔액 이하, 일자는 문서일 이후. 입금 후 잔액 0이면 같은 트랜잭션에서 `lunas` |
+| DELETE `/api/penjualan/:id/bayar/:bayar` | 수금 취소 | 문서 수정 권한(`tolakUbahSO`)과 동일. 잔액이 남으면 `lunas` → `tagihan`으로 되돌림 |
 | GET/POST `/api/pembelian`, PATCH `/:id/status`, DELETE `/:id` | 구매 | 동일 |
 | POST `/api/pelanggan`, PUT/DELETE `/:id` | 고객 | 수정은 프로필만 — 한도·결제조건 제외. 판매 이력이 있으면 삭제 거부 |
 | GET/POST/PUT/DELETE `/api/pengguna` | 사용자 | admin. 본인 삭제·본인 역할 변경·마지막 admin 강등 불가 |
@@ -184,6 +203,7 @@ HTTP 요청에 실어 원자적으로 실행합니다. 비대화형이라 중간
 | `gudang`, `produk`, `pelanggan`, `pemasok`, `pengguna` | 마스터. id는 텍스트(`G1`, `P12`, `C3`, `U1`) |
 | `stok_mutasi` | 재고 원장. `tipe ∈ {masuk, keluar, transfer, penyesuaian}`, `qty` 부호 포함, `ref`에 전표 번호. `ref='AWAL'`은 기초재고(창고·품목당 1행, 재저장 시 교체) |
 | `penjualan` + `penjualan_item` | SO 헤더/항목. `tgl_kirim`은 실제 출고일(출고 전·과거 import 행은 NULL). 만기일은 여전히 `tgl` 기준. 문서일보다 이른 출고일은 안정화 기간(`AKHIR_MASA_STABILISASI`, 2026-09-30)까지만 허용 |
+| `penjualan_bayar` | 수금 원장. 한 SO에 여러 행(분할 납부). 잔액은 저장하지 않고 `문서 금액 − SUM(jumlah)`로 계산. `auto`는 “→ Lunas” 버튼이 만든 완납 행 표시 — 상태를 되돌릴 때 이 행만 지웁니다. `cara ∈ {transfer, tunai, giro, potongan}` |
 | `pembelian` + `pembelian_item` | PO 헤더/항목 |
 | `limit_usulan` | 여신한도 기안. 대기 건은 고객당 하나(부분 유니크 인덱스). 기안자/확정자는 FK가 아니라 이름 스냅샷 |
 
@@ -191,8 +211,8 @@ HTTP 요청에 실어 원자적으로 실행합니다. 비대화형이라 중간
 |---|---|
 | `v_stok` | `SUM(qty) GROUP BY gudang, produk` — 재고의 정의 |
 | `v_stok_total` | 제품별 합계 |
-| `v_penjualan` | SO 헤더 + 합계 금액(항목 합계, PPN 제외) |
-| `v_piutang` | 고객별 미수금(출고·청구 상태 SO 합, 문서별 PPN 포함) |
+| `v_penjualan` | SO 헤더 + 합계 금액(항목 합계, PPN 제외) + `dibayar`(수금 합계) |
+| `v_piutang` | 고객별 미수금(출고·청구 상태 SO 합, 문서별 PPN 포함, 수금액 차감 후 잔액) |
 | `t_penjualan_kirim` | 상태가 `kirim`이 되면 항목별 `keluar` 원장 자동 생성. 원장 일자는 `COALESCE(tgl_kirim, wib_today())` |
 | `t_pembelian_terima` | 상태가 `diterima`가 되면 `masuk` 원장 자동 생성 |
 

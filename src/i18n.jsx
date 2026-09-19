@@ -486,6 +486,27 @@ const KO = {
   "Tidak bisa dihapus: pelanggan masih punya transaksi penjualan.":
     "삭제 불가 — 이 고객에게 판매 거래 잔존",
 
+  /* ---------- pembayaran (cicilan) ---------- */
+  "Pembayaran": "수금",
+  "Dibayar": "수금액",
+  "Sisa": "잔액",
+  "Sisa Tagihan": "미수 잔액",
+  "Cara": "수단",
+  "Jumlah|bayar": "금액",
+  "Transfer|bayar": "계좌이체",
+  "Tunai": "현금",
+  "Giro/Cek": "어음/수표",
+  "Potongan": "차감",
+  "Pelunasan otomatis": "일괄 완납 처리",
+  "+ Catat Pembayaran": "+ 수금 등록",
+  "Simpan Pembayaran": "수금 저장",
+  "Batalkan pembayaran ini": "이 수금 내역 취소",
+  "Batalkan pembayaran {tgl} {v}": "{tgl} {v} 수금 내역 취소",
+  "mis. nomor bukti transfer": "예: 이체 증빙 번호",
+  "Pembayaran {no} tercatat.": "{no} 수금이 등록되었습니다.",
+  "Pembayaran dibatalkan.": "수금 내역이 취소되었습니다.",
+  "Pencatatan pembayaran membutuhkan koneksi.": "수금 등록은 온라인 연결이 필요합니다.",
+
   /* ---------- piutang ---------- */
   "acuan: panduan analisis umur piutang": "기준: 미수금 연령분석 지침",
   "{n} invoice belum lunas": "미수 인보이스 {n}건",

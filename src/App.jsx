@@ -281,6 +281,11 @@ const SO_LABEL = {
   tagihan: { id: "Ditagih" },
   lunas: { id: "Lunas" },
 };
+/* Cara uang masuk — harus sama dengan CARA_BAYAR di api-server.js. "Potongan"
+   bukan uang yang benar-benar diterima melainkan tagihan yang dikurangi
+   (retur, klaim, selisih kurs); tetap dicatat di sini supaya sisa tagihan
+   ikut turun tanpa seorang pun mengubah isi dokumennya. */
+const CARA_BAYAR = { transfer: "Transfer|bayar", tunai: "Tunai", giro: "Giro/Cek", potongan: "Potongan" };
 const PO_FLOW = ["order", "diterima", "lunas"];
 const PO_LABEL = {
   order: { id: "Dipesan" },
@@ -409,6 +414,13 @@ const PPN_PERSEN = 11; // tarif PPN Indonesia; dokumen menyimpan angkanya sendir
 const subtotalSO = (s) => s.items.reduce((a, b) => a + b.qty * b.harga, 0);
 const ppnSO = (s) => Math.round(subtotalSO(s) * (Number(s.ppn) || 0) / 100);
 const nilaiSO = (s) => subtotalSO(s) + ppnSO(s);
+/* Cicilan. Pelanggan besar melunasi satu faktur dua atau tiga kali, jadi yang
+   menjadi piutang bukan nilai dokumennya melainkan SISAnya. `dibayar` datang
+   dari v_penjualan — jumlah buku penjualan_bayar di server, bukan angka yang
+   pernah ditulis layar ini; dokumen demo offline tidak punya kolom itu dan
+   terbaca sebagai nol, persis seperti dokumen yang belum menerima apa pun. */
+const dibayarSO = (s) => Number(s.dibayar) || 0;
+const sisaSO = (s) => Math.max(0, nilaiSO(s) - dibayarSO(s));
 const pelangganSO = (s) => s.pelanggan_akhir || s.pelanggan;
 
 function Aplikasi() {
@@ -535,10 +547,12 @@ function Aplikasi() {
 
   const addMutasi = (rows) => setMutasi((m) => [...m, ...rows.map((r) => ({ id: uid("M"), ...r }))]);
 
-  /* piutang per pelanggan: SO sudah dikirim/ditagih tapi belum lunas */
+  /* piutang per pelanggan: SO sudah dikirim/ditagih tapi belum lunas.
+     Yang dijumlahkan sisanya, bukan nilai penuh dokumen — cicilan yang sudah
+     masuk bukan lagi uang yang harus ditagih. */
   const piutang = (cid) =>
-    penjualan.filter((s) => s.pelanggan === cid && ["kirim", "tagihan"].includes(s.status)).reduce((a, s) => a + totalSO(s), 0);
-  const piutangTotal = penjualan.filter((s) => ["kirim", "tagihan"].includes(s.status)).reduce((a, s) => a + totalSO(s), 0);
+    penjualan.filter((s) => s.pelanggan === cid && ["kirim", "tagihan"].includes(s.status)).reduce((a, s) => a + sisaSO(s), 0);
+  const piutangTotal = penjualan.filter((s) => ["kirim", "tagihan"].includes(s.status)).reduce((a, s) => a + sisaSO(s), 0);
 
   /* ---------- aksi ----------
      Online  → tulis ke server, lalu muat ulang (server = sumber kebenaran).
@@ -694,6 +708,24 @@ function Aplikasi() {
     say(t("{nama} diperbarui.", { nama: c.nama }));
   }
 
+  /* ---------- pembayaran cicilan ----------
+     Server yang menghitung sisa dan memutuskan dokumennya menjadi lunas, jadi
+     di sini tidak ada aritmetika sama sekali — hanya kirim lalu muat ulang.
+     Offline tidak punya jalur ini: tanpa server, "sisa" hanya bisa ditebak
+     dari data demo, dan penerimaan uang bukan hal yang boleh ditebak. */
+  async function doBayar(so, b) {
+    if (!online) throw new Error(t("Pencatatan pembayaran membutuhkan koneksi."));
+    await api.bayarPenjualan(so.id, b);
+    await reload();
+    say(t("Pembayaran {no} tercatat.", { no: so.no }));
+  }
+  async function doHapusBayar(so, bayar) {
+    if (!online) throw new Error(t("Pencatatan pembayaran membutuhkan koneksi."));
+    await api.hapusBayarPenjualan(so.id, bayar.id);
+    await reload();
+    say(t("Pembayaran dibatalkan."));
+  }
+
   /* ---------- hapus (admin saja) & usulan hapus (semua peran) ---------- */
   async function doDeletePenjualan(so) {
     if (online) { await api.deletePenjualan(so.id); await reload(); }
@@ -753,7 +785,7 @@ function Aplikasi() {
     piutang, piutangTotal, majuSO, mundurSO, majuPO, mundurPO, say, online,
     doTransfer, doAdjust, doSaldoAwal, doCreatePenjualan, doUpdatePenjualan, doCreatePembelian, doCreatePelanggan,
     doUpdatePelanggan, user, can, minta, doDeletePenjualan, doDeletePembelian, doDeletePelanggan, reload,
-    hapusUsulan, ajukanHapus, putusanHapus, bukaPenjualan,
+    hapusUsulan, ajukanHapus, putusanHapus, bukaPenjualan, doBayar, doHapusBayar,
   };
 
   const TABS = [
@@ -1156,7 +1188,12 @@ const STATUS_UMUR = Object.fromEntries(AGING_DEF.map(([k, , status]) => [k, stat
 
 /* piutang & umur piutang (mengacu panduan analisis AR) — dipakai Dasbor & halaman Piutang.
    SO berstatus "kirim"/"tagihan" = sudah dikirim tapi belum lunas.
-   Jatuh tempo = tanggal SO + termin pelanggan (default 30 hari bila kosong). */
+   Jatuh tempo = tanggal SO + termin pelanggan (default 30 hari bila kosong).
+
+   `nilai` adalah SISA tagihan, dan itu yang masuk ke setiap kartu, kelompok
+   umur dan peringkat di bawah: faktur yang separuhnya sudah dibayar hanya
+   menua sebesar separuh yang belum. Nilai penuh dokumennya tetap dibawa
+   sebagai `penuh` untuk layar yang perlu memperlihatkan keduanya. */
 const hitungPiutang = (penjualan, cById, totalSO) => {
   const hariIni = today(); // WIB — umur piutang ikut acuan yang sama
   const tutupBulan = akhirBulan(hariIni.slice(0, 7)); // batas "jatuh tempo bulan ini"
@@ -1164,13 +1201,20 @@ const hitungPiutang = (penjualan, cById, totalSO) => {
     .filter((s) => ["kirim", "tagihan"].includes(s.status))
     .map((s) => {
       const c = cById(s.pelanggan);
-      const nilai = totalSO(s);
+      const penuh = totalSO(s);
+      const dibayar = dibayarSO(s);
+      const nilai = Math.max(0, penuh - dibayar);
       const tempo = addDays(s.tgl, Number(c.termin) || 30);
       const telat = Math.max(0, diffDays(tempo, hariIni));
       const bucket = telat > 180 ? "180" : telat > 90 ? "90180" : telat > 60 ? "6090" : telat > 30 ? "3060" : telat > 0 ? "130"
         : tempo <= tutupBulan ? "ondue" : "undue";
-      return { so: s, c, nilai, telat, tempo, bucket };
-    });
+      return { so: s, c, nilai, penuh, dibayar, telat, tempo, bucket };
+    })
+    /* Sisa nol berarti sudah tertutup cicilan: server menjadikannya 'lunas'
+       pada saat itu juga, dan baris yang lolos ke sini hanya bisa datang dari
+       data lama. Membiarkannya berarti menampilkan invoice Rp 0 di daftar
+       penagihan. */
+    .filter((r) => r.nilai > 0);
   const piutangF = piutangRows.reduce((a, r) => a + r.nilai, 0);
   /* Yang dihitung per kelompok adalah PELANGGAN, bukan lembar invoice: satu
      pelanggan dengan lima invoice lewat tempo tetap satu telepon penagihan.
@@ -1220,13 +1264,20 @@ const subPiutang = (x, t) => t("{n} pelanggan · {i} invoice", { n: fmt(x.n), i:
    terbaca seperti dua angka yang berbeda pula. */
 const daftarPiutang = (judul, rows, t) => ({
   judul,
-  kolom: [[t("No."), 0], [t("Pelanggan"), 0], [t("Jatuh Tempo"), 0], [t("Lewat (hari)"), 1], [t("Nilai"), 1]],
+  /* "Dibayar" berada tepat sebelum sisanya: angka yang paling sering
+     dipertanyakan bukan sisanya sendiri melainkan mengapa sisanya bukan nilai
+     fakturnya. Kolom totalnya tetap yang paling kanan — yang ditagih. */
+  kolom: [[t("No."), 0], [t("Pelanggan"), 0], [t("Jatuh Tempo"), 0], [t("Lewat (hari)"), 1],
+    [t("Dibayar"), 1], [t("Sisa"), 1]],
   taut: { 0: "so", 1: "c" },
   /* Yang sudah lewat: yang paling lama dulu. Yang belum: yang paling dekat
      jatuh temponya dulu — itu urutan orang menagihnya. */
   baris: [...rows]
     .sort((a, b) => b.telat - a.telat || (a.tempo < b.tempo ? -1 : a.tempo > b.tempo ? 1 : b.nilai - a.nilai))
-    .map((r) => ({ k: r.so.id, so: r.so, c: r.c, sel: [r.so.no, r.c.nama, r.tempo, r.telat ? fmt(r.telat) : "—", rp(r.nilai)] })),
+    .map((r) => ({
+      k: r.so.id, so: r.so, c: r.c,
+      sel: [r.so.no, r.c.nama, r.tempo, r.telat ? fmt(r.telat) : "—", r.dibayar ? rp(r.dibayar) : "—", rp(r.nilai)],
+    })),
   total: rp(rows.reduce((a, r) => a + r.nilai, 0)),
 });
 
@@ -2051,9 +2102,13 @@ const bisaUbahSO = (so, user) =>
     (!!so.dibuat_oleh && so.dibuat_oleh === user.id &&
       String(so.tgl).slice(0, 7) === today().slice(0, 7)));
 
-function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pelanggan, produk, pById, cById, gById, totalSO, majuSO, mundurSO, piutang, say, can, minta, doDeletePenjualan, hapusUsulan, ajukanHapus, putusanHapus }) {
+function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBayar, doHapusBayar, pelanggan, produk, pById, cById, gById, totalSO, majuSO, mundurSO, piutang, say, can, minta, doDeletePenjualan, hapusUsulan, ajukanHapus, putusanHapus }) {
   const { t, lang } = useLang();
   const [rinci, setRinci] = useState(null); // penjualan yang rinciannya dibuka
+  /* Dialog rincian tetap terbuka sesudah pembayaran dicatat, jadi dokumennya
+     diambil ulang dari daftar yang baru dimuat — bukan dari salinan yang
+     tersimpan waktu dialognya dibuka, yang angkanya sudah ketinggalan. */
+  const rinciKini = useMemo(() => (rinci ? penjualan.find((s) => s.id === rinci.id) || rinci : null), [rinci, penjualan]);
   const [baru, setBaru] = useState(false);
   const [dok, setDok] = useState(null);
   const [detail, setDetail] = useState(null); // pelanggan yang dibuka dari peringkat
@@ -2572,10 +2627,10 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
       {/* Tabel ringkas tidak lagi memuat kolom aksi — semua tindakan atas satu
           transaksi pindah ke dialog rinciannya, tempat angkanya juga terbaca. */}
       {rinci && (
-        <RincianPenjualan so={rinci} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
+        <RincianPenjualan so={rinciKini} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
           close={() => setRinci(null)} onCetak={() => { setDok(rinci); setRinci(null); }}
-          onMaju={rinci.status !== "lunas" ? () => { majuSO(rinci); setRinci(null); } : null}
-          onMundur={SO_FLOW.indexOf(rinci.status) > SO_FLOW.indexOf("pesanan") ? () => { mundurSO(rinci); setRinci(null); } : null}
+          onMaju={rinciKini.status !== "lunas" ? () => { majuSO(rinciKini); setRinci(null); } : null}
+          onMundur={SO_FLOW.indexOf(rinciKini.status) > SO_FLOW.indexOf("pesanan") ? () => { mundurSO(rinciKini); setRinci(null); } : null}
           /* Ubah & Hapus langsung dibuka aturan yang sama: admin, atau pembuat
              dokumen selama masih bulan berjalan. Di luar itu tombol hapusnya
              tetap berarti "Usul Hapus" dan tombol ubahnya tidak muncul. */
@@ -2588,7 +2643,13 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, pela
                   () => { doDeletePenjualan(rinci); setRinci(null); })
               /* dialog berurutan, bukan bertumpuk: rincian ditutup dulu */
               : () => { setUsulHapus(rinci); setRinci(null); },
-          }} />
+          }}
+          /* Pembayaran dicatat tanpa menutup dialog: uang masuk sering dua
+             tiga kali berturut-turut, dan sisanya yang baru harus langsung
+             terbaca. Membatalkan pembayaran memakai izin yang sama dengan
+             mengubah dokumen — server memeriksanya lagi. */
+          onBayar={(b) => doBayar(rinciKini, b)}
+          onHapusBayar={bisaUbahSO(rinciKini, user) ? (b) => doHapusBayar(rinciKini, b) : null} />
       )}
       {detail && (
         <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang} cById={cById}
@@ -2769,7 +2830,7 @@ const PENERBIT = {
 /* Rincian satu penjualan: layar tabel hanya memuat kode & qty, sedangkan harga
    satuan dan subtotal per baris baru terbaca di sini — tanpa harus membuka
    dokumen cetak yang formatnya untuk pelanggan, bukan untuk petugas. */
-function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, onMaju, onMundur, onUbah, hapus }) {
+function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, onMaju, onMundur, onUbah, hapus, onBayar, onHapusBayar }) {
   const { t, lang } = useLang();
   const box = useDialog(close);
   const judul = useId();
@@ -2781,6 +2842,32 @@ function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, on
   const ppn = ppnSO(so);
   const total = totalSO(so);
   const qty = so.items.reduce((a, i) => a + i.qty, 0);
+  /* Cicilan. Pelanggan besar jarang melunasi satu faktur sekaligus, dan yang
+     ditanyakan orang di depan dokumen ini bukan "lunas atau belum" melainkan
+     "tinggal berapa". Angkanya milik buku pembayaran (so.bayar), bukan status. */
+  const dibayar = dibayarSO(so);
+  const sisa = Math.max(0, total - dibayar);
+  const riwayat = so.bayar || [];
+  // Uang hanya boleh masuk pada dokumen yang barangnya sudah keluar — sama
+  // dengan syarat di server; kalau sisanya nol tidak ada lagi yang ditagih.
+  const bisaCatat = onBayar && ["kirim", "tagihan"].includes(so.status) && sisa > 0;
+  const [form, setForm] = useState(null); // null = formulir tertutup
+  const [galat, setGalat] = useState("");
+  const [sibuk, setSibuk] = useState(false);
+  /* Galat ditahan di dalam dialog, bukan lewat say(): pesannya menerangkan
+     baris yang sedang diisi, jadi tempatnya di sebelah kolom isian itu. */
+  const jalankan = async (kerja) => {
+    setGalat(""); setSibuk(true);
+    try { await kerja(); return true; }
+    catch (e) { setGalat(e.message); return false; }
+    finally { setSibuk(false); }
+  };
+  const simpanBayar = async () => {
+    const ok = await jalankan(() => onBayar({
+      tgl: form.tgl, jumlah: Number(form.jumlah), cara: form.cara, catatan: form.catatan.trim(),
+    }));
+    if (ok) setForm(null);
+  };
 
   return (
     <div className="ov" onClick={close}>
@@ -2853,6 +2940,80 @@ function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, on
               </tfoot>
             </table>
           </Scroll>
+
+          {/* Buku pembayaran dokumen ini. Baru muncul kalau ada uang masuk
+              atau memang boleh dicatat — dokumen yang masih penawaran tidak
+              perlu diganggu barisnya. */}
+          {(dibayar > 0 || bisaCatat) && (
+            <>
+              <div className="lbl mt">{t("Pembayaran")}</div>
+              {riwayat.length > 0 && (
+                <Scroll max={200}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th scope="col">{t("Tanggal")}</th>
+                        <th scope="col">{t("Cara")}</th>
+                        <th scope="col">{t("Catatan")}</th>
+                        <th scope="col" className="r">{t("Jumlah|bayar")}</th>
+                        {onHapusBayar && <th scope="col" aria-label={t("Hapus")} />}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {riwayat.map((b) => (
+                        <tr key={b.id}>
+                          <td>{b.tgl}</td>
+                          <td><span className="chip">{t(CARA_BAYAR[b.cara] || b.cara)}</span></td>
+                          {/* Baris hasil tombol "→ Lunas" tidak pernah diketik orang:
+                              catatannya kosong, jadi diterangkan apa adanya. */}
+                          <td className="mut2">{b.catatan || (b.auto ? t("Pelunasan otomatis") : "—")}</td>
+                          <td className="r n strong">{rp(b.jumlah)}</td>
+                          {onHapusBayar && (
+                            <td className="r">
+                              <button className="x" disabled={sibuk}
+                                title={t("Batalkan pembayaran ini")}
+                                aria-label={t("Batalkan pembayaran {tgl} {v}", { tgl: b.tgl, v: rp(b.jumlah) })}
+                                onClick={() => jalankan(() => onHapusBayar(b))}>×</button>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Scroll>
+              )}
+              <div className="sum">
+                <div><span>{t("Dibayar")}</span><b className="n">{rp(dibayar)}</b></div>
+                <div><span>{t("Sisa Tagihan")}</span><b className={"n " + (sisa > 0 ? "bad" : "ok")}>{rp(sisa)}</b></div>
+              </div>
+              {bisaCatat && (form ? (
+                <>
+                  <div className="row2 mt">
+                    <Inp label={t("Tanggal")} type="date" value={form.tgl} onChange={(v) => setForm({ ...form, tgl: v })} />
+                    {/* Terisi penuh sisa tagihan karena itu yang paling sering
+                        terjadi; angkanya tinggal dikecilkan saat uangnya sebagian. */}
+                    <Inp label={t("Jumlah|bayar")} type="number" value={form.jumlah} onChange={(v) => setForm({ ...form, jumlah: v })} />
+                  </div>
+                  <div className="row2">
+                    <Sel label={t("Cara")} value={form.cara} onChange={(v) => setForm({ ...form, cara: v })}
+                      opts={Object.entries(CARA_BAYAR).map(([k, v]) => [k, t(v)])} />
+                    <Inp label={t("Catatan")} value={form.catatan} onChange={(v) => setForm({ ...form, catatan: v })}
+                      hint={t("mis. nomor bukti transfer")} />
+                  </div>
+                  <div className="aksi-bayar">
+                    <button className="btn" onClick={() => { setForm(null); setGalat(""); }}>{t("Batal")}</button>
+                    <button className="btn pri" disabled={sibuk} onClick={simpanBayar}>{t("Simpan Pembayaran")}</button>
+                  </div>
+                </>
+              ) : (
+                <button className="btn sm mt" onClick={() => {
+                  setGalat("");
+                  setForm({ tgl: today(), jumlah: String(sisa), cara: "transfer", catatan: "" });
+                }}>{t("+ Catat Pembayaran")}</button>
+              ))}
+              {galat && <p className="peringatan bad-box" role="status">{galat}</p>}
+            </>
+          )}
         </div>
         {/* Tindakan atas transaksi ini. Layar daftar tidak lagi punya kolom
             aksi — tombolnya pindah ke sini, tempat nilai yang sedang diubah
@@ -3069,8 +3230,11 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
      nilai LAMA-nya sudah ada di dalam piutang(c.id). Kalau tidak dikembalikan
      dulu, total baru akan dihitung dua kali dan koreksi kecil pun tertolak
      sebagai "melebihi limit". */
-  const sudahDihitung = awal && ["kirim", "tagihan"].includes(awal.status) ? nilaiSO(awal) : 0;
-  const sisaLimit = adaLimit ? tagih.limit - (piutang(tagih.id) - sudahDihitung) - total : null;
+  const sudahDihitung = awal && ["kirim", "tagihan"].includes(awal.status) ? sisaSO(awal) : 0;
+  /* Cicilan yang sudah diterima ikut bersama dokumennya waktu diubah, jadi yang
+     membebani limit adalah sisa tagihannya — bukan nilai penuh yang baru. */
+  const sisaBaru = Math.max(0, total - (awal ? dibayarSO(awal) : 0));
+  const sisaLimit = adaLimit ? tagih.limit - (piutang(tagih.id) - sudahDihitung) - sisaBaru : null;
   const lewatLimit = sisaLimit !== null && sisaLimit < 0;
   /* Status & tanggal kirim hanya muncul saat mengubah dokumen: penjualan baru
      selalu lahir sebagai penawaran, dan memilih statusnya di sini hanya akan
@@ -3404,12 +3568,16 @@ function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
 }
 
 /* ============================ PELANGGAN ============================ */
-function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan, totalSO, piutang, gById, pById, cById, say, can, minta, doDeletePelanggan, online, reload, hapusUsulan, ajukanHapus, putusanHapus, majuSO, mundurSO }) {
+function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan, user, doBayar, doHapusBayar, totalSO, piutang, gById, pById, cById, say, can, minta, doDeletePelanggan, online, reload, hapusUsulan, ajukanHapus, putusanHapus, majuSO, mundurSO }) {
   const { t } = useLang();
   const [buka, setBuka] = useState(false);
   const [ubah, setUbah] = useState(null);       // pelanggan yang sedang diubah
   const [detail, setDetail] = useState(null);
   const [rinci, setRinci] = useState(null);    // SO yang dibuka dari riwayat pelanggan
+  /* Dialog rincian tetap terbuka sesudah pembayaran dicatat, jadi dokumennya
+     diambil ulang dari daftar yang baru dimuat — bukan dari salinan yang
+     tersimpan waktu dialognya dibuka, yang angkanya sudah ketinggalan. */
+  const rinciKini = useMemo(() => (rinci ? penjualan.find((s) => s.id === rinci.id) || rinci : null), [rinci, penjualan]);
   const [kpi, setKpi] = useState(null);       // kartu ringkasan yang dibuka
   const [cari, setCari] = useState("");
   // Usulan limit dimuat terpisah dari /bootstrap: hanya layar ini yang memakainya.
@@ -3654,10 +3822,16 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
           sering ditemukan lewat pelanggannya, dan tanpa ini orang harus
           mencarinya lagi di layar Penjualan. Ubah & hapus tetap di sana. */}
       {rinci && (
-        <RincianPenjualan so={rinci} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
+        <RincianPenjualan so={rinciKini} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
           close={() => setRinci(null)}
-          onMaju={rinci.status !== "lunas" ? () => { majuSO(rinci); setRinci(null); } : null}
-          onMundur={SO_FLOW.indexOf(rinci.status) > SO_FLOW.indexOf("pesanan") ? () => { mundurSO(rinci); setRinci(null); } : null} />
+          onMaju={rinciKini.status !== "lunas" ? () => { majuSO(rinciKini); setRinci(null); } : null}
+          onMundur={SO_FLOW.indexOf(rinciKini.status) > SO_FLOW.indexOf("pesanan") ? () => { mundurSO(rinciKini); setRinci(null); } : null}
+          /* Pembayaran dicatat tanpa menutup dialog: uang masuk sering dua
+             tiga kali berturut-turut, dan sisanya yang baru harus langsung
+             terbaca. Membatalkan pembayaran memakai izin yang sama dengan
+             mengubah dokumen — server memeriksanya lagi. */
+          onBayar={(b) => doBayar(rinciKini, b)}
+          onHapusBayar={bisaUbahSO(rinciKini, user) ? (b) => doHapusBayar(rinciKini, b) : null} />
       )}
     </>
   );
@@ -3915,11 +4089,15 @@ function FormPutusan({ u, close, say, submit }) {
 }
 
 /* ============================ PIUTANG ============================ */
-function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mundurSO }) {
+function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mundurSO, user, doBayar, doHapusBayar }) {
   const { t } = useLang();
   const [cari, setCari] = useState("");
   const [detail, setDetail] = useState(null); // pelanggan yang dibuka dari nama
   const [rinci, setRinci] = useState(null);   // penjualan yang dibuka dari nomor
+  /* Dialog rincian tetap terbuka sesudah pembayaran dicatat, jadi dokumennya
+     diambil ulang dari daftar yang baru dimuat — bukan dari salinan yang
+     tersimpan waktu dialognya dibuka, yang angkanya sudah ketinggalan. */
+  const rinciKini = useMemo(() => (rinci ? penjualan.find((s) => s.id === rinci.id) || rinci : null), [rinci, penjualan]);
   const [umur, setUmur] = useState(null);     // kelompok umur yang dibuka
   const [kpi, setKpi] = useState(null);       // kartu ringkasan yang dibuka
   const { piutangRows, piutangF, agingRows, statusRows, topPelanggan } = useMemo(
@@ -3948,7 +4126,8 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
         : k === "tgl" ? r.so.tgl
           : k === "tempo" ? r.tempo
             : k === "nilai" ? r.nilai
-              : r.telat);
+              : k === "dibayar" ? r.dibayar
+                : r.telat);
 
   /* Kartu di atas memakai tiga status yang sama dengan dasbor — layar ini yang
      merinci, jadi saldo totalnya tetap ditampilkan sebagai garis dasar. */
@@ -3963,8 +4142,8 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
 
   const unduhExcel = () => {
     const aoa = [
-      [t("No."), t("Pelanggan"), t("Tanggal"), t("Jatuh Tempo"), t("Telat (hari)"), t("Nilai")],
-      ...rincian.map((r) => [r.so.no, r.c.nama, r.so.tgl, r.tempo, r.telat, r.nilai]),
+      [t("No."), t("Pelanggan"), t("Tanggal"), t("Jatuh Tempo"), t("Telat (hari)"), t("Nilai"), t("Dibayar"), t("Sisa")],
+      ...rincian.map((r) => [r.so.no, r.c.nama, r.so.tgl, r.tempo, r.telat, r.penuh, r.dibayar, r.nilai]),
     ];
     downloadXlsx(`piutang_${today()}`, "Piutang", aoa);
   };
@@ -4083,7 +4262,11 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
                   <Th k="tgl" urut={urutInv.urut} klik={urutInv.klik} naik>{t("Tanggal")}</Th>
                   <Th k="tempo" urut={urutInv.urut} klik={urutInv.klik} naik>{t("Jatuh Tempo")}</Th>
                   <Th k="telat" urut={urutInv.urut} klik={urutInv.klik} cls="r">{t("Telat")}</Th>
-                  <Th k="nilai" urut={urutInv.urut} klik={urutInv.klik} cls="r">{t("Nilai")}</Th>
+                  {/* Faktur yang dicicil tidak hilang dari daftar ini sampai
+                      lunas; tanpa kolom "Dibayar" sisanya terbaca seolah tidak
+                      pernah ada uang yang masuk. */}
+                  <Th k="dibayar" urut={urutInv.urut} klik={urutInv.klik} cls="r">{t("Dibayar")}</Th>
+                  <Th k="nilai" urut={urutInv.urut} klik={urutInv.klik} cls="r">{t("Sisa")}</Th>
                 </tr>
               </thead>
               <tbody>
@@ -4099,10 +4282,11 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
                     <td className="n">{r.so.tgl}</td>
                     <td className="n">{r.tempo}</td>
                     <td className={"r n " + (r.telat > 90 ? "bad" : r.telat > 30 ? "warn" : "")}>{r.telat > 0 ? t("{n} hr", { n: fmt(r.telat) }) : "—"}</td>
+                    <td className="r n mut">{r.dibayar ? rp(r.dibayar) : "—"}</td>
                     <td className="r n strong">{rp(r.nilai)}</td>
                   </tr>
                 ))}
-                {rincian.length === 0 && <tr><td colSpan={6}><Empty id={t("Tidak ada piutang berjalan.")} /></td></tr>}
+                {rincian.length === 0 && <tr><td colSpan={7}><Empty id={t("Tidak ada piutang berjalan.")} /></td></tr>}
               </tbody>
             </table>
           </Scroll>
@@ -4127,10 +4311,16 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
           sering ditemukan lewat pelanggannya, dan tanpa ini orang harus
           mencarinya lagi di layar Penjualan. Ubah & hapus tetap di sana. */}
       {rinci && (
-        <RincianPenjualan so={rinci} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
+        <RincianPenjualan so={rinciKini} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
           close={() => setRinci(null)}
-          onMaju={rinci.status !== "lunas" ? () => { majuSO(rinci); setRinci(null); } : null}
-          onMundur={SO_FLOW.indexOf(rinci.status) > SO_FLOW.indexOf("pesanan") ? () => { mundurSO(rinci); setRinci(null); } : null} />
+          onMaju={rinciKini.status !== "lunas" ? () => { majuSO(rinciKini); setRinci(null); } : null}
+          onMundur={SO_FLOW.indexOf(rinciKini.status) > SO_FLOW.indexOf("pesanan") ? () => { mundurSO(rinciKini); setRinci(null); } : null}
+          /* Pembayaran dicatat tanpa menutup dialog: uang masuk sering dua
+             tiga kali berturut-turut, dan sisanya yang baru harus langsung
+             terbaca. Membatalkan pembayaran memakai izin yang sama dengan
+             mengubah dokumen — server memeriksanya lagi. */
+          onBayar={(b) => doBayar(rinciKini, b)}
+          onHapusBayar={bisaUbahSO(rinciKini, user) ? (b) => doHapusBayar(rinciKini, b) : null} />
       )}
     </>
   );
@@ -4162,7 +4352,8 @@ function DaftarUmur({ label, rows, close, onPilih }) {
                   <th scope="col">{t("Tanggal")}</th>
                   <th scope="col">{t("Jatuh Tempo")}</th>
                   <th scope="col" className="r">{t("Telat")}</th>
-                  <th scope="col" className="r">{t("Nilai")}</th>
+                  <th scope="col" className="r">{t("Dibayar")}</th>
+                  <th scope="col" className="r">{t("Sisa")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -4177,13 +4368,14 @@ function DaftarUmur({ label, rows, close, onPilih }) {
                     <td className={"r n " + (r.telat > 90 ? "bad" : r.telat > 30 ? "warn" : "")}>
                       {r.telat > 0 ? t("{n} hr", { n: fmt(r.telat) }) : "—"}
                     </td>
+                    <td className="r n mut">{r.dibayar ? rp(r.dibayar) : "—"}</td>
                     <td className="r n strong">{rp(r.nilai)}</td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr className="tf-total">
-                  <td colSpan={5}><b>{t("Total")}</b></td>
+                  <td colSpan={6}><b>{t("Total")}</b></td>
                   <td className="r n strong">{rp(total)}</td>
                 </tr>
               </tfoot>
@@ -4932,6 +5124,10 @@ function Style() {
 .vk .sum span{font-family:var(--fd); font-size:var(--asm-fs-sm); font-weight:500; color:var(--asm-fg-muted)}
 .vk .sum span em{margin-left:6px; font-size:var(--asm-fs-xs); font-weight:400}
 .vk .sum b{font-size:var(--asm-fs-xl); font-weight:700}
+/* buku pembayaran di dalam rincian penjualan */
+.vk .row2.mt{margin-top:12px}
+.vk .btn.sm.mt{margin-top:12px}
+.vk .aksi-bayar{display:flex; gap:8px; justify-content:flex-end; margin-top:12px}
 .vk .delta{display:flex; justify-content:space-between; padding:9px 12px; background:var(--asm-primary-6); border:1px solid var(--asm-primary-40);
   border-radius:var(--asm-radius-md); margin-bottom:12px; font-family:var(--fd); font-size:var(--asm-fs-sm); font-weight:500}
 .vk .delta b{font-size:var(--asm-fs-lg); font-weight:700}

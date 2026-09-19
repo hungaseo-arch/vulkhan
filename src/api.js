@@ -43,7 +43,11 @@ const normTrx = (t) => ({
   total: t.total != null ? num(t.total) : undefined,
   // NUMERIC → number; dokumen tanpa PPN tetap 0, bukan "0"
   ppn: t.ppn != null ? num(t.ppn) : undefined,
+  // Jumlah cicilan yang sudah masuk (v_penjualan.dibayar). Dokumen yang belum
+  // menerima apa pun tetap 0, jadi layar tidak perlu membedakan nol dari kosong.
+  dibayar: num(t.dibayar),
   items: (t.items || []).map((i) => ({ produk: i.produk, qty: num(i.qty), harga: num(i.harga) })),
+  bayar: (t.bayar || []).map((b) => ({ ...b, jumlah: num(b.jumlah) })),
 });
 
 export const api = {
@@ -96,6 +100,10 @@ export const api = {
   updatePenjualan: (id, s) => j(`/penjualan/${id}`, { method: "PUT", body: s }),
   // tgl hanya dipakai saat status 'kirim' — tanggal barang benar-benar keluar.
   statusPenjualan: (id, status, tgl) => j(`/penjualan/${id}/status`, { method: "PATCH", body: { status, tgl } }),
+  /* Cicilan pelanggan. Server yang memutuskan apakah dokumennya menjadi lunas
+     — sisa tagihan dihitung di sana, bukan dari angka yang dikirim layar. */
+  bayarPenjualan: (id, b) => j(`/penjualan/${id}/bayar`, { method: "POST", body: b }),
+  hapusBayarPenjualan: (id, bayar) => j(`/penjualan/${id}/bayar/${bayar}`, { method: "DELETE" }),
   createPembelian: (p) => j("/pembelian", { method: "POST", body: p }),
   statusPembelian: (id, status) => j(`/pembelian/${id}/status`, { method: "PATCH", body: { status } }),
 
