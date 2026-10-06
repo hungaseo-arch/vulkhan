@@ -1033,21 +1033,20 @@ app.post("/api/mutasi/saldo-awal", requireRole("manager"), wrap(async (req, res)
 // ---------- alur status (harus sama dengan SO_FLOW / PO_FLOW di App.jsx) ----------
 const SO_FLOW = ["penawaran", "pesanan", "kirim", "tagihan", "lunas"];
 
-/* Masa stabilisasi sistem: sampai akhir September 2026 dokumen-dokumen lama
-   masih dimasukkan menyusul, jadi tanggal kirim BOLEH mendahului tanggal
-   dokumen. Sesudah tanggal itu pencatatan berjalan seiring hari, dan tanggal
-   kirim yang lebih tua dari dokumennya hampir pasti salah ketik.
+/* Barang sering berangkat dulu dan dokumennya menyusul beberapa hari kemudian,
+   jadi tanggal kirim boleh lebih tua dari tanggal dokumen — asal masih di
+   bulan yang sama. Mundur lintas bulan ditolak: mutasi stok lahir pada tanggal
+   kirim, dan menggesernya ke bulan lalu mengubah angka bulan yang mungkin
+   sudah dilaporkan. Tanggal kirim sesudah tanggal dokumen selalu boleh.
 
    Perbandingannya dikerjakan Postgres, sama seperti aturan bulan berjalan:
    satu jam saja yang dipercaya, jam Jakarta milik server. */
-const AKHIR_MASA_STABILISASI = "2026-09-30";
-
 async function tolakTglKirim(tglKirim, tglDok) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(tglKirim)) return "Tanggal kirim tidak valid.";
   const [{ ok }] = await sql`
     SELECT ${tglKirim}::date >= ${tglDok}::date
-        OR wib_today() <= ${AKHIR_MASA_STABILISASI}::date AS ok`;
-  return ok ? null : `Tanggal kirim tidak boleh mendahului tanggal dokumen (${tglDok}).`;
+        OR date_trunc('month', ${tglKirim}::date) = date_trunc('month', ${tglDok}::date) AS ok`;
+  return ok ? null : `Tanggal kirim tidak boleh mundur ke bulan sebelum tanggal dokumen (${tglDok}).`;
 }
 const PO_FLOW = ["order", "diterima", "lunas"];
 // Mengembalikan pesan error bila perpindahan tidak sah, atau null bila sah.

@@ -60,13 +60,12 @@ const uid = (p) => p + "-" + Math.random().toString(36).slice(2, 8).toUpperCase(
 const WIB_OFFSET = 7 * 60 * 60 * 1000;
 const today = () => new Date(Date.now() + WIB_OFFSET).toISOString().slice(0, 10);
 
-/* Masa stabilisasi sistem — sama persis dengan AKHIR_MASA_STABILISASI di
-   api-server.js. Selama masa ini dokumen lama masih dimasukkan menyusul,
-   jadi tanggal kirim boleh mendahului tanggal dokumen; sesudahnya tidak.
-   Server tetap yang memutuskan, ini hanya supaya penolakannya terbaca
-   sebelum tombolnya ditekan. */
-const AKHIR_MASA_STABILISASI = "2026-09-30";
-const bolehMundurTgl = () => today() <= AKHIR_MASA_STABILISASI;
+/* Tanggal kirim boleh lebih tua dari tanggal dokumen asal masih di bulan yang
+   sama; sesudah tanggal dokumen selalu boleh — sama persis dengan
+   tolakTglKirim() di api-server.js. Server tetap yang memutuskan, ini hanya
+   supaya penolakannya terbaca sebelum tombolnya ditekan. */
+const tglKirimSah = (kirim, dok) =>
+  String(kirim) >= String(dok) || String(kirim).slice(0, 7) === String(dok).slice(0, 7);
 
 /* Nomor dokumen berurutan: PREFIX-YYMM-### berdasarkan nomor tertinggi yang
    sudah ada pada bulan yang sama — menghindari tabrakan nomor acak. */
@@ -983,15 +982,15 @@ function Konfirmasi({ msg, onYes, close, say, tajuk, labelAksi }) {
 }
 
 /* Tanggal pengiriman — ditanyakan sekali, saat dokumen berpindah ke 'kirim'.
-   Bawaannya hari ini karena itu yang paling sering benar. Selama masa
-   stabilisasi tanggal yang lebih tua dari dokumennya masih diterima. */
+   Bawaannya hari ini karena itu yang paling sering benar. Tanggal yang lebih
+   tua dari dokumennya diterima selama masih di bulan yang sama. */
 function FormTglKirim({ so, submit, say, close }) {
   const { t } = useLang();
   const [tgl, setTgl] = useState(today());
   const kirim = async () => {
     if (!tgl) return say(t("Isi tanggal pengiriman."), true);
-    if (tgl < so.tgl && !bolehMundurTgl())
-      return say(t("Tanggal kirim tidak boleh mendahului tanggal dokumen ({tgl}).", { tgl: so.tgl }), true);
+    if (!tglKirimSah(tgl, so.tgl))
+      return say(t("Tanggal kirim tidak boleh mundur ke bulan sebelum tanggal dokumen ({tgl}).", { tgl: so.tgl }), true);
     try { await submit(tgl); } catch (e) { say(e.message, true); }
   };
   return (
@@ -3251,8 +3250,8 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
     if (valid.some((i) => !i.produk)) return say(t("Pilih barang untuk setiap baris."), true);
     if (valid.some((i) => !(Number(i.harga) >= 0))) return say(t("Harga harus berupa angka."), true);
     if (lewatLimit) return say(t("Melebihi limit kredit {nama} sebesar {v}.", { nama: tagih.nama, v: rp(-sisaLimit) }), true);
-    if (dikirim && f.tglKirim && f.tglKirim < awal.tgl && !bolehMundurTgl())
-      return say(t("Tanggal kirim tidak boleh mendahului tanggal dokumen ({tgl}).", { tgl: awal.tgl }), true);
+    if (dikirim && f.tglKirim && !tglKirimSah(f.tglKirim, awal.tgl))
+      return say(t("Tanggal kirim tidak boleh mundur ke bulan sebelum tanggal dokumen ({tgl}).", { tgl: awal.tgl }), true);
     try {
       const baris = valid.map((i) => ({ produk: i.produk, qty: Number(i.qty), harga: Number(i.harga) }));
       await submit(awal
