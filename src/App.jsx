@@ -485,6 +485,7 @@ function Aplikasi() {
   /* ---------- muat data dari server ---------- */
   const applyData = (d) => {
     if (d.gudang?.length) GUDANG = d.gudang;
+    pakaiPenerbit(d.penerbit);
     setProduk(d.produk);
     setPelanggan(d.pelanggan);
     setPemasok(d.pemasok);
@@ -1173,7 +1174,7 @@ function SandiSementara({ data, close }) {
   );
 }
 
-function PenggunaAdmin({ online, say, user, minta }) {
+function PenggunaAdmin({ online, say, user, minta, reload }) {
   const { t } = useLang();
   const [users, setUsers] = useState(null);
   const [buka, setBuka] = useState(false);
@@ -1270,7 +1271,108 @@ function PenggunaAdmin({ online, say, user, minta }) {
       {buka && <FormPengguna close={() => setBuka(false)} say={say} submit={tambah} />}
       {ubah && <FormPengguna close={() => setUbah(null)} say={say} submit={simpanUbah} awal={ubah} sendiri={ubah.id === user?.id} />}
       {sandiBaru && <SandiSementara data={sandiBaru} close={() => setSandiBaru(null)} />}
+      <PenerbitAdmin online={online} say={say} reload={reload} />
     </>
+  );
+}
+
+/* Identitas yang tercetak di kepala faktur/penawaran. Baris baru dan kode
+   tidak dibuat dari sini (lihat PUT /api/penerbit di server); yang diubah
+   hanya isinya. Simpan → reload() supaya PENERBIT ikut terisi ulang. */
+function PenerbitAdmin({ online, say, reload }) {
+  const { t } = useLang();
+  const [rows, setRows] = useState(null);
+  const [ubah, setUbah] = useState(null);
+  const load = async () => {
+    if (!online) return setRows(Object.values(PENERBIT_CADANGAN));
+    try { setRows(await api.listPenerbit()); } catch (e) { setRows([]); say(e.message, true); }
+  };
+  useEffect(() => { load(); }, [online]); // eslint-disable-line react-hooks/exhaustive-deps
+  const simpan = async (p) => {
+    if (!online) return say(t("Ubah penerbit hanya tersedia saat online."), true);
+    await api.updatePenerbit(p.kode, p);
+    await Promise.all([load(), reload()]);
+    say(t("Penerbit {n} diperbarui.", { n: p.nama }));
+  };
+  const kosong = (r) => ["alamat", "telp", "email", "bank", "no_rek"].filter((k) => !r[k]).length;
+  return (
+    <>
+      <SectionTitle id={t("Penerbit")} />
+      <Card title={t("Penerbit Dokumen")}
+        note={<>
+          {t("Dipakai di kepala faktur dan penawaran. Kolom yang kosong tidak dicetak.")}<br />
+          {t("Klik baris untuk mengubah.")}
+        </>}>
+        <Scroll>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">{t("Nama")}</th>
+                <th scope="col">{t("Telp")}</th>
+                <th scope="col">{t("Rekening")}</th>
+                <th scope="col">PPN</th>
+                <th scope="col">{t("Status")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(rows || []).map((r) => (
+                <tr key={r.kode} className="klik" onClick={() => setUbah(r)}>
+                  <td className="strong">
+                    <button type="button" className="namelink">{r.nama}</button>
+                    {kosong(r) > 0 && <div className="mut2">{t("{n} kolom belum diisi", { n: kosong(r) })}</div>}
+                  </td>
+                  <td>{r.telp || "—"}</td>
+                  <td>{[r.bank, r.no_rek].filter(Boolean).join(" ") || "—"}</td>
+                  <td>{r.ppn ? t("PKP") : t("Non-PKP")}</td>
+                  <td>{r.aktif === false ? t("Nonaktif") : t("Aktif")}</td>
+                </tr>
+              ))}
+              {rows === null && <tr><td colSpan={5}><Empty id={t("Memuat…")} /></td></tr>}
+            </tbody>
+          </table>
+        </Scroll>
+      </Card>
+      {ubah && <FormPenerbit awal={ubah} close={() => setUbah(null)} say={say} submit={simpan} />}
+    </>
+  );
+}
+
+function FormPenerbit({ awal, close, say, submit }) {
+  const { t } = useLang();
+  const [f, setF] = useState({
+    ...Object.fromEntries(["nama", "sub", "alamat", "telp", "email", "npwp", "bank", "no_rek", "atas_nama", "logo_url"]
+      .map((k) => [k, awal[k] || ""])),
+    ppn: awal.ppn ? "ya" : "tidak",
+    aktif: awal.aktif === false ? "tidak" : "ya",
+  });
+  const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
+  const kirim = async () => {
+    if (!f.nama.trim()) return say(t("Nama penerbit wajib diisi."), true);
+    if (f.logo_url.trim() && !/^https:\/\//.test(f.logo_url.trim())) return say(t("URL logo harus diawali https://."), true);
+    try {
+      await submit({ ...f, kode: awal.kode, ppn: f.ppn === "ya", aktif: f.aktif === "ya" });
+      close();
+    } catch (e) { say(e.message, true); }
+  };
+  return (
+    <Modal title={t("Ubah Penerbit")} close={close} onSave={kirim} saveLabel={t("Simpan")} wide>
+      <div className="row2">
+        <Inp label={t("Nama Perusahaan")} value={f.nama} onChange={set("nama")} />
+        <Inp label={t("Keterangan Usaha")} value={f.sub} onChange={set("sub")} />
+      </div>
+      <Inp label={t("Alamat")} value={f.alamat} onChange={set("alamat")} />
+      <div className="row2">
+        <Inp label={t("Telp")} value={f.telp} onChange={set("telp")} type="tel" />
+        <Inp label={t("Email")} value={f.email} onChange={set("email")} type="email" />
+        <Inp label="NPWP" value={f.npwp} onChange={set("npwp")} />
+        <Inp label={t("URL Logo")} value={f.logo_url} onChange={set("logo_url")} hint={t("Opsional, https://…")} />
+        <Inp label={t("Bank")} value={f.bank} onChange={set("bank")} />
+        <Inp label={t("No. Rekening")} value={f.no_rek} onChange={set("no_rek")} />
+        <Inp label={t("Atas Nama")} value={f.atas_nama} onChange={set("atas_nama")} hint={t("Kosong = nama perusahaan")} />
+        <Sel label="PPN" value={f.ppn} onChange={set("ppn")} opts={[["ya", t("PKP — faktur ber-PPN")], ["tidak", t("Non-PKP — tanpa PPN")]]} />
+        <Sel label={t("Status")} value={f.aktif} onChange={set("aktif")} opts={[["ya", t("Aktif")], ["tidak", t("Nonaktif — tidak muncul di dokumen")]]} />
+      </div>
+    </Modal>
   );
 }
 
@@ -3037,11 +3139,18 @@ function GrafBulanan({ data, lang, pilih, onPilih }) {
 }
 
 
-/* penerbit dokumen — PPN mengikuti perusahaan penerbit */
-const PENERBIT = {
-  spb: { nama: "CV. Sinar Perkasa Ban", ppn: false, sub: "Ban Vulkanisir" },
-  dfj: { nama: "PT. Daimond Fajar Jaya", ppn: true, sub: "Ban Vulkanisir" },
-  asc: { nama: "PT ASCENDO INTERNATIONAL", ppn: true, sub: "Ban Vulkanisir" },
+/* penerbit dokumen — PPN mengikuti perusahaan penerbit.
+   Isinya diganti dari tabel `penerbit` saat data dimuat (pakaiPenerbit, sama
+   seperti GUDANG); nilai di bawah hanya cadangan untuk build demo/luring. */
+const PENERBIT_CADANGAN = {
+  spb: { kode: "spb", nama: "CV. Sinar Perkasa Ban", ppn: false, sub: "Ban Vulkanisir" },
+  dfj: { kode: "dfj", nama: "PT. Daimond Fajar Jaya", ppn: true, sub: "Ban Vulkanisir" },
+  asc: { kode: "asc", nama: "PT ASCENDO INTERNATIONAL", ppn: true, sub: "Ban Vulkanisir" },
+};
+let PENERBIT = PENERBIT_CADANGAN;
+const pakaiPenerbit = (rows) => {
+  const aktif = (rows || []).filter((r) => r.aktif !== false);
+  PENERBIT = aktif.length ? Object.fromEntries(aktif.map((r) => [r.kode, r])) : PENERBIT_CADANGAN;
 };
 
 /* Rincian satu penjualan: layar tabel hanya memuat kode & qty, sedangkan harga
@@ -3303,7 +3412,12 @@ function DokumenPenjualan({ so, pById, cById, gById, close }) {
   const box = useDialog(close);
   const judul = useId();
   const isFaktur = jenis === "faktur";
-  const firm = PENERBIT[terbit];
+  // penerbit yang dinonaktifkan admin tidak lagi ada di PENERBIT
+  const firm = PENERBIT[terbit] || Object.values(PENERBIT)[0];
+  /* Kolom kosong tidak dicetak sama sekali — "Telp —" di kertas terbaca
+     seperti perusahaan tanpa telepon, bukan data yang belum diisi. */
+  const kontak = [firm.telp && `Telp ${firm.telp}`, firm.email && `Email ${firm.email}`].filter(Boolean).join(" · ");
+  const rekening = [firm.bank, firm.no_rek].filter(Boolean).join(" ");
   /* Dokumen ditujukan kepada PEMAKAI barang: pihak yang menagih justru yang
      menerbitkan dokumen ini, jadi menulis namanya di "Kepada Yth." berarti
      menagih diri sendiri. */
@@ -3345,11 +3459,13 @@ function DokumenPenjualan({ so, pById, cById, gById, close }) {
             style={skala < 1 ? { width: KERTAS_W, maxWidth: "none", transform: `scale(${skala})`, transformOrigin: "top left" } : undefined}>
             <div className="doc-hd">
               <div className="doc-co">
-                <TreadMark />
+                {firm.logo_url ? <img className="doc-logo" src={firm.logo_url} alt="" /> : <TreadMark />}
                 <div>
                   <div className="doc-issuer">{firm.nama.toUpperCase()}</div>
-                  <p>{firm.sub}</p>
-                  <p className="doc-addr">Indonesia · Telp — · Email —</p>
+                  {firm.sub && <p>{firm.sub}</p>}
+                  {firm.alamat && <p className="doc-addr">{firm.alamat}</p>}
+                  {kontak && <p className="doc-addr">{kontak}</p>}
+                  {firm.npwp && <p className="doc-addr">NPWP {firm.npwp}</p>}
                 </div>
               </div>
               <div className="doc-title">
@@ -3416,7 +3532,8 @@ function DokumenPenjualan({ so, pById, cById, gById, close }) {
             {isFaktur && (
               <div className="doc-pay">
                 <span className="doc-lbl">Pembayaran</span>
-                <p>Transfer ke rekening a.n. {firm.nama}. Termin {Number(c.termin) || 30} hari sejak faktur.</p>
+                {rekening && <p>Transfer ke rekening {rekening} a.n. {firm.atas_nama || firm.nama}.</p>}
+                <p>Termin {Number(c.termin) || 30} hari sejak faktur.</p>
               </div>
             )}
 
@@ -5591,6 +5708,7 @@ function Style() {
 .vk .doc-co .doc-issuer{font-family:var(--fd); font-size:17px; font-weight:700; letter-spacing:.06em; color:#0062C6}
 .vk .doc-co p{margin:2px 0 0; font-size:11px; color:#666666}
 .vk .doc-addr{font-size:10px !important; color:#666666 !important}
+.vk .doc-logo{width:44px; height:44px; object-fit:contain; flex:none}
 .vk .doc-title{text-align:right}
 .vk .doc-title h2{font-family:var(--fd); font-size:20px; font-weight:700; letter-spacing:-.01em; color:#333333}
 .vk .doc-title em{display:block; font-size:12px; color:#666666; margin-top:2px}

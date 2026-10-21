@@ -74,6 +74,13 @@
   정수 `#,##0`, `YYYY-MM-DD` 문자열은 날짜 셀(`yyyy-mm-dd`, 정렬·필터 가능), 1행 고정, 자동 필터. 모든 화면의 내보내기에 적용됩니다.
   판매 내보내기는 시트 2 "Item"(SO×품목: No·Tanggal·Pelanggan·Kode·Nama·Qty·Harga·Subtotal)을 추가하고,
   파일 이름에 필터를 넣습니다(`penjualan_2025-01-01_2025-12-31.xlsx`, 분석 축이 있으면 `_pelanggan` 등).
+- **발행처(penerbit) 마스터.** 인보이스·견적서 머리글의 회사 정보가 코드에 고정돼 있어 주소·전화·계좌를 넣을 수
+  없었고, 종이에는 "Telp — · Email —" 가 그대로 찍혔습니다. `penerbit` 테이블(ensure 로 생성 — 기존 데이터는 건드리지 않음)에
+  세 회사를 처음 한 번만 넣고(`ON CONFLICT DO NOTHING`, 관리자가 고친 값은 이후 배포가 덮어쓰지 않음), Pengguna 탭 아래
+  "Penerbit" 칸에서 admin이 이름·업종·주소·전화·이메일·NPWP·은행·계좌번호·예금주·로고 URL·PKP 여부·사용 여부를 고칩니다
+  (`GET /api/penerbit`, `PUT /api/penerbit/:kode` admin 전용, `/bootstrap` 에도 포함). 인쇄 문서는 빈 항목의 줄을 아예
+  찍지 않고, 계좌가 입력된 경우에만 "Transfer ke rekening …" 줄이 나옵니다. 데모·오프라인에서는 기존 상수가 대신 쓰입니다.
+  외부 로고를 쓸 수 있도록 CSP `img-src` 에 `https:` 를 추가했습니다(이미지만, 스크립트는 그대로 `self`).
 
 ### Added
 - **판매 화면 연도 선택 (2026-10-21).** 판매 필터를 연도 · 고객 · 기간 세 묶음으로 나누고, 연도를 고르면

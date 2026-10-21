@@ -82,8 +82,13 @@ export const api = {
       mutasiLimit: d.mutasiLimit,
       penjualan: d.penjualan.map(normTrx),
       pembelian: d.pembelian.map(normTrx),
+      penerbit: d.penerbit || [],
     };
   },
+
+  // penerbit dokumen — baca semua yang login, ubah hanya admin
+  listPenerbit: () => j("/penerbit"),
+  updatePenerbit: (kode, p) => j(`/penerbit/${kode}`, { method: "PUT", body: p }),
 
   // tulis
   createPelanggan: (c) => j("/pelanggan", { method: "POST", body: c }),

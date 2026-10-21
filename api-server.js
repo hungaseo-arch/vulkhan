@@ -77,7 +77,7 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }));
    dihitung; kalau mengubah helper semacam itu, ubah juga KUNCI_SKEMA. */
 const KUNCI_SKEMA = "1";
 const SIDIK_SKEMA = crypto.createHash("sha1")
-  .update([KUNCI_SKEMA, ensureUsers, ensureUsulan, ensureHapus, ensurePelanggan, ensurePenjualan, ensureWaktu]
+  .update([KUNCI_SKEMA, ensureUsers, ensureUsulan, ensureHapus, ensurePelanggan, ensurePenjualan, ensureWaktu, ensurePenerbit]
     .map(String).join("\n"))
   .digest("hex").slice(0, 16);
 async function skemaSudahPasang() {
@@ -88,7 +88,7 @@ async function skemaSudahPasang() {
 }
 const pasangSkema = () => ensureUsers()
   // ensurePenjualan() punya FK ke pengguna, jadi tabel itu harus ada lebih dulu.
-  .then(() => Promise.all([ensureUsulan(), ensureHapus(), ensurePelanggan(), ensurePenjualan()]))
+  .then(() => Promise.all([ensureUsulan(), ensureHapus(), ensurePelanggan(), ensurePenjualan(), ensurePenerbit()]))
   // ensureWaktu() membuat wib_today(), lalu memakainya di DEFAULT kolom dan di
   // badan trigger — jadi ia harus jalan sesudah tabel-tabelnya ada.
   .then(() => ensureWaktu())
@@ -275,6 +275,37 @@ async function ensureHapus() {
     CREATE UNIQUE INDEX IF NOT EXISTS hapus_usulan_menunggu
     ON hapus_usulan (jenis, sasaran) WHERE status = 'menunggu'`;
   await sql`CREATE INDEX IF NOT EXISTS idx_hapus_usulan_status ON hapus_usulan (status, diusulkan DESC)`;
+}
+
+/* Identitas perusahaan penerbit faktur/penawaran. Dulu tertanam di kode
+   (PENERBIT di App.jsx), jadi alamat, telepon dan rekening tidak pernah bisa
+   tercetak. Tiga baris awal hanya diisi bila belum ada (DO NOTHING): isian
+   admin tidak pernah ditimpa oleh deploy berikutnya. Kolom kosong = barisnya
+   tidak dicetak sama sekali. */
+async function ensurePenerbit() {
+  await sql`
+    CREATE TABLE IF NOT EXISTS penerbit (
+      kode      TEXT PRIMARY KEY,
+      nama      TEXT NOT NULL,
+      sub       TEXT NOT NULL DEFAULT '',
+      alamat    TEXT NOT NULL DEFAULT '',
+      telp      TEXT NOT NULL DEFAULT '',
+      email     TEXT NOT NULL DEFAULT '',
+      npwp      TEXT NOT NULL DEFAULT '',
+      bank      TEXT NOT NULL DEFAULT '',
+      no_rek    TEXT NOT NULL DEFAULT '',
+      atas_nama TEXT NOT NULL DEFAULT '',
+      logo_url  TEXT NOT NULL DEFAULT '',
+      ppn       BOOLEAN NOT NULL DEFAULT false,
+      aktif     BOOLEAN NOT NULL DEFAULT true,
+      urut      INTEGER NOT NULL DEFAULT 0
+    )`;
+  await sql`
+    INSERT INTO penerbit (kode, nama, sub, ppn, urut) VALUES
+      ('spb', 'CV. Sinar Perkasa Ban',    'Ban Vulkanisir', false, 1),
+      ('dfj', 'PT. Daimond Fajar Jaya',   'Ban Vulkanisir', true,  2),
+      ('asc', 'PT ASCENDO INTERNATIONAL', 'Ban Vulkanisir', true,  3)
+    ON CONFLICT (kode) DO NOTHING`;
 }
 
 /* Tabel pelanggan sudah ada sejak awal, jadi kolom profil ditambahkan lewat
@@ -717,7 +748,7 @@ const mutasiTerbaru = () => sql`
 // 7 invokasi fungsi (masing-masing bisa cold start + ensureUsers). Sekarang satu
 // invokasi, kueri dijalankan paralel di sisi server.
 app.get("/api/bootstrap", wrap(async (_req, res) => {
-  const [gudang, produk, pelanggan, pemasok, stok, mutasi, soHead, soItem, soBayar, poHead, poItem] = await Promise.all([
+  const [gudang, produk, pelanggan, pemasok, stok, mutasi, soHead, soItem, soBayar, poHead, poItem, penerbit] = await Promise.all([
     sql`SELECT * FROM gudang ORDER BY kode`,
     sql`SELECT * FROM produk ORDER BY kode`,
     sql`
@@ -736,13 +767,39 @@ app.get("/api/bootstrap", wrap(async (_req, res) => {
     sql`SELECT * FROM penjualan_bayar ORDER BY tgl, dibuat`,
     sql`SELECT * FROM pembelian ORDER BY tgl DESC, no DESC`,
     sql`SELECT * FROM pembelian_item`,
+    sql`SELECT * FROM penerbit ORDER BY urut, kode`,
   ]);
   res.json({
-    gudang, produk, pelanggan, pemasok, stok, mutasi,
+    gudang, produk, pelanggan, pemasok, stok, mutasi, penerbit,
     mutasiLimit: MUTASI_LIMIT,
     penjualan: gabungItem(gabungItem(soHead, soItem, "penjualan"), soBayar, "penjualan", "bayar"),
     pembelian: gabungItem(poHead, poItem, "pembelian"),
   });
+}));
+
+// ---------- penerbit ----------
+// Semua yang login boleh membaca (dokumen cetak memakainya); hanya admin mengubah.
+// Kode dan baris baru tidak dibuat dari layar: penerbit = badan usaha, jumlahnya
+// tetap, dan kodenya dirujuk oleh logika PPN di layar penjualan.
+const KOLOM_PENERBIT = ["nama", "sub", "alamat", "telp", "email", "npwp", "bank", "no_rek", "atas_nama", "logo_url"];
+app.get("/api/penerbit", wrap(async (_req, res) => {
+  res.json(await sql`SELECT * FROM penerbit ORDER BY urut, kode`);
+}));
+app.put("/api/penerbit/:kode", requireRole("admin"), wrap(async (req, res) => {
+  const b = req.body || {};
+  const v = Object.fromEntries(KOLOM_PENERBIT.map((k) => [k, String(b[k] ?? "").trim()]));
+  if (!v.nama) return res.status(400).json({ error: "Nama penerbit wajib diisi." });
+  if (v.logo_url && !/^https:\/\//.test(v.logo_url))
+    return res.status(400).json({ error: "URL logo harus diawali https://." });
+  const [row] = await sql`
+    UPDATE penerbit SET
+      nama = ${v.nama}, sub = ${v.sub}, alamat = ${v.alamat}, telp = ${v.telp}, email = ${v.email},
+      npwp = ${v.npwp}, bank = ${v.bank}, no_rek = ${v.no_rek}, atas_nama = ${v.atas_nama},
+      logo_url = ${v.logo_url}, ppn = ${!!b.ppn}, aktif = ${b.aktif !== false}
+    WHERE kode = ${req.params.kode}
+    RETURNING *`;
+  if (!row) return res.status(404).json({ error: "Penerbit tidak ditemukan." });
+  res.json(row);
 }));
 
 // ---------- master ----------
