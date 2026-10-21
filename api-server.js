@@ -1,5 +1,5 @@
 // ============================================================
-// VULKANISIR — API Server (Express + Neon serverless)
+// VULKHAN — API Server (Express + Neon serverless)
 // ------------------------------------------------------------
 // Jalankan:  DATABASE_URL="postgres://..." AUTH_SECRET="rahasia-panjang" node api-server.js
 // Env: DATABASE_URL (wajib), AUTH_SECRET (produksi), CORS_ORIGIN (opsional), PORT (opsional).
@@ -1723,7 +1723,7 @@ app.delete("/api/pelanggan/:id", requireRole("admin"), wrap(async (req, res) => 
 // Entry lokal: listen hanya bila dijalankan langsung (bukan saat di-import Vercel).
 if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
   const PORT = process.env.PORT || 3001;
-  app.listen(PORT, () => console.log(`VULKANISIR API → http://localhost:${PORT}`));
+  app.listen(PORT, () => console.log(`VULKHAN API → http://localhost:${PORT}`));
 }
 
 // Handler serverless (Vercel) — app Express bisa langsung jadi (req,res) handler.

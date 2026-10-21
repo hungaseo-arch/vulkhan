@@ -22,9 +22,18 @@ const rp = (n) => "Rp " + fmt(n);
    satuannya dilewati: "Rp 0.85 juta" lebih sulit dibaca daripada Rp 850,000.
    Ambang batasnya pada nilai mutlak, supaya retur bertanda minus ikut ringkas. */
 const d2 = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/* Mode Korea memakai satuan Korea (억 = 10⁸, 만 = 10⁴): "182.88 juta" tidak
+   terbaca oleh pembaca Korea, "1.83억" terbaca. Bahasa layar diset oleh
+   Aplikasi setiap render, sebelum anak-anaknya menghitung teks. */
+let bahasaAngka = "id";
 const satuan = (n) => {
   const v = Number(n) || 0;
   const a = Math.abs(v);
+  if (bahasaAngka === "ko") {
+    if (a >= 1e8) return d2.format(v / 1e8) + "억";
+    if (a >= 1e4) return fmt(v / 1e4) + "만";
+    return fmt(v);
+  }
   if (a >= 1e9) return d2.format(v / 1e9) + " miliar";
   if (a >= 1e6) return d2.format(v / 1e6) + " juta";
   return fmt(v);
@@ -386,7 +395,8 @@ const bacaHalaman = () => new URLSearchParams(window.location.search).get("page"
 const JUDUL_ASLI = typeof document === "undefined" ? "VULKHAN" : document.title;
 
 function Aplikasi() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  bahasaAngka = lang;
   const [tab, setTabState] = useState(bacaHalaman);
   const setTab = (k, extra) => {
     const q = new URLSearchParams(extra);
@@ -3409,7 +3419,7 @@ function DokumenPenjualan({ so, pById, cById, gById, close }) {
                 ? "Faktur ini sah tanpa tanda tangan basah dan diproses oleh komputer."
                 : "Penawaran berlaku 14 hari sejak tanggal terbit. Harga belum termasuk ongkos kirim."}
               {firm.ppn ? " · Harga belum termasuk PPN." : " · Non-PKP, tanpa PPN."}
-              {" · "}Dicetak dari VULKANISIR
+              {" · "}Dicetak dari VULKHAN
             </p>
           </div>
           </div>

@@ -65,6 +65,11 @@
   숨긴 모듈(`stok`·`beli`)이나 권한 없는 `admin`, 알 수 없는 값은 Ringkasan으로 갑니다. 대시보드에서 판매로 넘어가는
   링크도 이제 히스토리에 남습니다. 브라우저 탭 제목은 `Penjualan · VULKHAN` / `판매 · VULKHAN`.
   상세 대화상자 딥링크(`&so=`·`&plg=`)는 선택 항목이라 이번에는 넣지 않았습니다.
+- **브랜딩 · 메타.** 인보이스 하단 "Dicetak dari VULKANISIR" → VULKHAN(로그인 제목은 위 로그인 항목), 서버 로그·주석도 VULKHAN.
+  재고·구매 모듈이 숨겨져 있는 동안 `<title>`·description·og 문구에서 "Stok/Pembelian"을 빼고
+  "Manajemen Penjualan & Piutang Ban Vulkanisir"로 바꿨습니다(모듈을 열 때 다시 넣도록 주석). 푸터 `Copyright © ASEOA` 는 그대로.
+- **한국어 금액 단위.** 한국어 화면에서는 요약 금액이 억·만 단위입니다(`Rp 1.83억`, `Rp 203만/pcs`, 1만 미만은 전체 숫자).
+  인도네시아어는 지금처럼 juta/miliar. Excel·인쇄·문서는 언어와 상관없이 전체 숫자입니다.
 
 ### Added
 - **판매 화면 연도 선택 (2026-10-21).** 판매 필터를 연도 · 고객 · 기간 세 묶음으로 나누고, 연도를 고르면

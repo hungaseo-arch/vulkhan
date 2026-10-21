@@ -1,5 +1,5 @@
 // ============================================================
-// VULKANISIR — Data layer (fetch → api-server.js → Neon)
+// VULKHAN — Data layer (fetch → api-server.js → Neon)
 // ------------------------------------------------------------
 // Base URL: set VITE_API_URL untuk override, mis. saat deploy.
 // Default: http://localhost:3001/api (lihat PORT di api-server.js)
