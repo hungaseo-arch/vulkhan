@@ -1134,7 +1134,7 @@ function Konfirmasi({ msg, onYes, close, say, tajuk, labelAksi, alasan: pakaiAla
         onClick={(e) => e.stopPropagation()}>
         <div className="md-hd">
           <h3 id={judul}>{tajuk || t("Konfirmasi Hapus")}</h3>
-          <button className="x" onClick={close} aria-label={t("Tutup dialog")}>×</button>
+          <button type="button" className="x" onClick={close} aria-label={t("Tutup dialog")}>×</button>
         </div>
         <div className="md-bd">
           {msg}
@@ -1146,8 +1146,8 @@ function Konfirmasi({ msg, onYes, close, say, tajuk, labelAksi, alasan: pakaiAla
           )}
         </div>
         <div className="md-ft">
-          <button className="btn" onClick={close}>{t("Batal")}</button>
-          <button className="btn danger" onClick={ya} disabled={busy || (pakaiAlasan && alasan.trim().length < 3)}>{busy ? "…" : labelAksi || t("Hapus")}</button>
+          <button type="button" className="btn" onClick={close}>{t("Batal")}</button>
+          <button type="button" className="btn danger" onClick={ya} disabled={busy || (pakaiAlasan && alasan.trim().length < 3)}>{busy ? "…" : labelAksi || t("Hapus")}</button>
         </div>
       </div>
     </div>
@@ -3958,7 +3958,7 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
 
   return (
     <Modal title={awal ? t("Ubah Penjualan {no}", { no: awal.no }) : t("Penawaran Baru")}
-      close={close} onSave={() => kirim()} wide
+      close={close} onSave={() => kirim()} wide form
       saveLabel={awal ? t("Simpan Perubahan") : t("Simpan Penawaran")}>
       <div className="row2">
         <Combo label={t("Pelanggan")} value={f.pelanggan} onChange={set("pelanggan")} placeholder={t("-- Pilih Pelanggan --")} opts={pelanggan.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
@@ -4004,10 +4004,10 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
           <input type="number" min="0" inputMode="numeric" placeholder={t("Harga")} aria-label={t("Harga baris {i}", { i: i + 1 })}
             value={it.harga} onChange={(e) => ubah(i, "harga", e.target.value)} title={rp(it.harga)} />
           <span className="stokinfo">{jadi.find((p) => p.id === it.produk)?.satuan}</span>
-          <button className="x" aria-label={t("Hapus baris {i}", { i: i + 1 })} onClick={() => setItems((l) => l.filter((_, n) => n !== i))} disabled={items.length === 1}>×</button>
+          <button type="button" className="x" aria-label={t("Hapus baris {i}", { i: i + 1 })} onClick={() => setItems((l) => l.filter((_, n) => n !== i))} disabled={items.length === 1}>×</button>
         </div>
       ))}
-      <button className="btn sm" onClick={() => setItems((l) => [...l, { produk: "", qty: "", harga: "" }])}>{t("+ Tambah Baris")}</button>
+      <button type="button" className="btn sm" onClick={() => setItems((l) => [...l, { produk: "", qty: "", harga: "" }])}>{t("+ Tambah Baris")}</button>
 
       <div className="sum">
         {persenPpn > 0 && <div><span>{t("Subtotal")}</span><b className="n">{rp(subtotal)}</b></div>}
@@ -4264,10 +4264,10 @@ function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
           <input type="number" min="0" inputMode="numeric" placeholder={t("Harga")} aria-label={t("Harga baris {i}", { i: i + 1 })}
             value={it.harga} onChange={(e) => ubah(i, "harga", e.target.value)} title={rp(it.harga)} />
           <span className="stokinfo">{produk.find((p) => p.id === it.produk)?.satuan}</span>
-          <button className="x" aria-label={t("Hapus baris {i}", { i: i + 1 })} onClick={() => setItems((l) => l.filter((_, n) => n !== i))} disabled={items.length === 1}>×</button>
+          <button type="button" className="x" aria-label={t("Hapus baris {i}", { i: i + 1 })} onClick={() => setItems((l) => l.filter((_, n) => n !== i))} disabled={items.length === 1}>×</button>
         </div>
       ))}
-      <button className="btn sm" onClick={() => setItems((l) => [...l, { produk: "", qty: "", harga: "" }])}>{t("+ Tambah Baris")}</button>
+      <button type="button" className="btn sm" onClick={() => setItems((l) => [...l, { produk: "", qty: "", harga: "" }])}>{t("+ Tambah Baris")}</button>
       <div className="sum"><div><span>{t("Total")}</span><b className="n">{rp(total)}</b></div></div>
     </Modal>
   );
@@ -4632,7 +4632,7 @@ function FormPelanggan({ c, pelanggan = [], close, say, submit }) {
     } catch (e) { say(e.message, true); }
   };
   return (
-    <Modal title={c ? t("Ubah Pelanggan") : t("Pelanggan Baru")} close={close} onSave={kirim} wide>
+    <Modal title={c ? t("Ubah Pelanggan") : t("Pelanggan Baru")} close={close} onSave={kirim} wide form>
       <h4 className="mut2">{t("Identitas Faktur")}</h4>
       <Inp label={t("Nama Perusahaan")} value={f.nama} onChange={set("nama")} required
         hint={t("Satu perusahaan didaftarkan sekali. Per cabang: \"Nama - Cabang\".")} />
@@ -5577,25 +5577,32 @@ const Combo = ({ label, ariaLabel, value, onChange, opts, placeholder, bare }) =
 /* wajib: dialog yang tidak boleh ditutup (ganti sandi sementara). Tanpa ×,
    tanpa Batal, Esc dan klik latar diabaikan — satu-satunya jalan keluar adalah
    tombol simpan atau tombol yang ditaruh pemanggil di dalam isinya. */
-const Modal = ({ title, close, onSave, children, wide, saveLabel, wajib }) => {
+/* form: dialog dibungkus <form> supaya Enter di kolom isian ikut menyimpan
+   (Combo yang daftarnya terbuka menahan Enter-nya sendiri). Hanya dipasang
+   pada dialog yang semua tombol di dalamnya sudah ber-type="button" — tombol
+   tanpa type di dalam <form> menjadi tombol kirim. noValidate: pesan
+   kesalahan tetap dari onSave (lewat t()), bukan gelembung bawaan peramban. */
+const Modal = ({ title, close, onSave, children, wide, saveLabel, wajib, form }) => {
   const { t } = useLang();
   const tutup = wajib ? () => {} : close;
   const box = useDialog(tutup);
   const judul = useId();
+  const Kotak = form ? "form" : "div";
+  const kirim = form ? { noValidate: true, onSubmit: (e) => { e.preventDefault(); onSave(); } } : {};
   return (
     <div className="ov" onClick={tutup}>
-      <div className={"md" + (wide ? " wide" : "")} ref={box} role="dialog" aria-modal="true" aria-labelledby={judul}
-        onClick={(e) => e.stopPropagation()}>
+      <Kotak className={"md" + (wide ? " wide" : "")} ref={box} role="dialog" aria-modal="true" aria-labelledby={judul}
+        onClick={(e) => e.stopPropagation()} {...kirim}>
         <div className="md-hd">
           <h3 id={judul}>{title}</h3>
-          {!wajib && <button className="x" onClick={close} aria-label={t("Tutup dialog")}>×</button>}
+          {!wajib && <button type="button" className="x" onClick={close} aria-label={t("Tutup dialog")}>×</button>}
         </div>
         <div className="md-bd">{children}</div>
         <div className="md-ft">
-          {!wajib && <button className="btn" onClick={close}>{t("Batal")}</button>}
-          <button className="btn pri" onClick={onSave}>{saveLabel || t("Simpan")}</button>
+          {!wajib && <button type="button" className="btn" onClick={close}>{t("Batal")}</button>}
+          <button type={form ? "submit" : "button"} className="btn pri" onClick={form ? undefined : onSave}>{saveLabel || t("Simpan")}</button>
         </div>
-      </div>
+      </Kotak>
     </div>
   );
 };
