@@ -94,8 +94,13 @@ if (!process.env.AUTH_SECRET)
   console.warn("⚠  AUTH_SECRET tak diset — token jadi tak valid tiap restart. Set AUTH_SECRET untuk produksi.");
 const TOKEN_TTL = 12 * 3600 * 1000; // 12 jam
 
+// `mc` = must_change: sesi sandi sementara. Selama itu hanya /ganti-sandi
+// yang terbuka — lihat requireRole. Ditaruh di token, bukan dibaca dari DB per
+// permintaan, supaya penjaga global tidak menambah satu kueri di setiap rute.
 const signToken = (u) => {
-  const body = Buffer.from(JSON.stringify({ id: u.id, username: u.username, peran: u.peran, exp: Date.now() + TOKEN_TTL })).toString("base64url");
+  const body = Buffer.from(JSON.stringify({
+    id: u.id, username: u.username, peran: u.peran, mc: !!u.must_change, exp: Date.now() + TOKEN_TTL,
+  })).toString("base64url");
   const sig = crypto.createHmac("sha256", AUTH_SECRET).update(body).digest("base64url");
   return body + "." + sig;
 };
@@ -118,6 +123,8 @@ const RANK = { staff: 1, manager: 2, admin: 3 };
 const requireRole = (min) => (req, res, next) => {
   const auth = verifyToken((req.headers.authorization || "").replace(/^Bearer /, ""));
   if (!auth) return res.status(401).json({ error: "Sesi tidak valid. Silakan login ulang." });
+  if (auth.mc && req.path !== "/api/ganti-sandi")
+    return res.status(403).json({ error: "Ganti kata sandi sementara lebih dulu.", must_change: true });
   if ((RANK[auth.peran] || 0) < RANK[min])
     return res.status(403).json({ error: `Akses ditolak: butuh peran ${min} ke atas.` });
   req.user = auth;
@@ -454,6 +461,18 @@ async function ensureUsers() {
       peran TEXT NOT NULL CHECK (peran IN ('admin','manager','staff')),
       sandi_hash TEXT NOT NULL, dibuat TIMESTAMPTZ NOT NULL DEFAULT now()
     )`;
+  /* Sandi sementara (hasil reset atau akun baru) wajib diganti saat login
+     berikutnya. Baris lama dapat false: mereka sudah memakai sandinya sendiri. */
+  await sql`ALTER TABLE pengguna ADD COLUMN IF NOT EXISTS must_change BOOLEAN NOT NULL DEFAULT false`;
+  /* Catatan login gagal untuk pembatasan percobaan. Disimpan di basis data,
+     bukan di memori, karena di Vercel setiap permintaan bisa jatuh ke
+     instans yang berbeda — penghitung di memori akan mulai dari nol lagi. */
+  await sql`
+    CREATE TABLE IF NOT EXISTS login_gagal (
+      username TEXT NOT NULL,
+      waktu    TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_login_gagal ON login_gagal (username, waktu)`;
   const [{ n }] = await sql`SELECT COUNT(*)::int AS n FROM pengguna`;
   if (n === 0) {
     for (const u of DEFAULT_USERS) {
@@ -466,12 +485,37 @@ async function ensureUsers() {
   await bootstrapAdmin();
 }
 
+/* Pembatasan percobaan login: 5 kali gagal untuk satu username dalam 10 menit
+   → 429 sampai jendela itu lewat. Dihitung per username, bukan per IP: di
+   kantor banyak orang keluar lewat satu IP, sedangkan yang dilindungi adalah
+   akunnya. Setiap kegagalan juga ditahan 1 detik supaya tebakan beruntun
+   lambat. Login yang berhasil menghapus catatan gagal username itu. */
+const LOGIN_MAKS = 5;
+const tunda = (ms) => new Promise((r) => setTimeout(r, ms));
+
 app.post("/api/login", wrap(async (req, res) => {
-  const { username, sandi } = req.body || {};
+  const username = String(req.body?.username || "").trim();
+  const sandi = String(req.body?.sandi || "");
+  const [{ n }] = await sql`
+    SELECT COUNT(*)::int AS n FROM login_gagal
+    WHERE username = ${username} AND waktu > now() - interval '10 minutes'`;
+  if (n >= LOGIN_MAKS) {
+    await tunda(1000);
+    return res.status(429).json({ error: "Terlalu banyak percobaan. Coba lagi 10 menit lagi." });
+  }
   const [u] = await sql`SELECT * FROM pengguna WHERE username = ${username}`;
-  if (!u || !verifyPw(sandi || "", u.sandi_hash))
+  if (!u || !verifyPw(sandi, u.sandi_hash)) {
+    await sql`INSERT INTO login_gagal (username) VALUES (${username})`;
+    // Catatan lama tidak berguna lagi sesudah jendelanya lewat.
+    await sql`DELETE FROM login_gagal WHERE waktu < now() - interval '1 day'`;
+    await tunda(1000);
     return res.status(401).json({ error: "Username atau kata sandi salah." });
-  res.json({ id: u.id, username: u.username, nama: u.nama, peran: u.peran, token: signToken(u) });
+  }
+  await sql`DELETE FROM login_gagal WHERE username = ${username}`;
+  res.json({
+    id: u.id, username: u.username, nama: u.nama, peran: u.peran,
+    must_change: !!u.must_change, token: signToken(u),
+  });
 }));
 
 app.get("/api/pengguna", requireRole("admin"), wrap(async (_req, res) => {
@@ -480,24 +524,40 @@ app.get("/api/pengguna", requireRole("admin"), wrap(async (_req, res) => {
 
 app.post("/api/pengguna", requireRole("admin"), wrap(async (req, res) => {
   const u = req.body;
+  const tolak = tolakSandi(u.sandi, u.username);
+  if (tolak) return res.status(400).json({ error: tolak });
+  // Sandi akun baru dibuat admin, jadi sifatnya sementara seperti hasil reset.
   const [row] = await sql`
-    INSERT INTO pengguna (id, username, nama, peran, sandi_hash)
-    VALUES (${u.id}, ${u.username}, ${u.nama}, ${u.peran}, ${hashPw(u.sandi)})
+    INSERT INTO pengguna (id, username, nama, peran, sandi_hash, must_change)
+    VALUES (${u.id}, ${u.username}, ${u.nama}, ${u.peran}, ${hashPw(u.sandi)}, true)
     RETURNING id, username, nama, peran, dibuat`;
   res.status(201).json(row);
 }));
 
+/* Aturan sandi — sama dengan pemeriksaan di GantiSandi (src/App.jsx). */
+const tolakSandi = (baru, username) => {
+  const s = String(baru || "");
+  if (s.length < 8) return "Kata sandi minimal 8 karakter.";
+  if (username && s.toLowerCase().includes(String(username).toLowerCase()))
+    return "Kata sandi tidak boleh memuat username.";
+  return null;
+};
+
 // Ganti kata sandi sendiri — semua peran yang login. Memakai id dari token
 // yang terverifikasi, jadi pengguna hanya bisa mengubah sandi miliknya.
+// Mengembalikan token baru: token lama membawa mc=true bila sesinya sesi sandi
+// sementara, dan tanpa token baru pengguna tetap terkunci sampai login ulang.
 app.post("/api/ganti-sandi", wrap(async (req, res) => {
   const { lama, baru } = req.body || {};
-  if (!baru || String(baru).length < 6)
-    return res.status(400).json({ error: "Kata sandi baru minimal 6 karakter." });
-  const [u] = await sql`SELECT sandi_hash FROM pengguna WHERE id = ${req.user.id}`;
+  const tolak = tolakSandi(baru, req.user.username);
+  if (tolak) return res.status(400).json({ error: tolak });
+  const [u] = await sql`SELECT * FROM pengguna WHERE id = ${req.user.id}`;
   if (!u || !verifyPw(lama || "", u.sandi_hash))
     return res.status(400).json({ error: "Kata sandi lama salah." });
-  await sql`UPDATE pengguna SET sandi_hash = ${hashPw(baru)} WHERE id = ${req.user.id}`;
-  res.json({ ok: true });
+  if (verifyPw(String(baru), u.sandi_hash))
+    return res.status(400).json({ error: "Kata sandi baru harus berbeda dari yang lama." });
+  await sql`UPDATE pengguna SET sandi_hash = ${hashPw(baru)}, must_change = false WHERE id = ${req.user.id}`;
+  res.json({ ok: true, token: signToken({ ...u, must_change: false }) });
 }));
 
 // Ubah nama & peran pengguna (admin). Username tidak ikut diubah: dipakai untuk
@@ -529,24 +589,31 @@ app.put("/api/pengguna/:id", requireRole("admin"), wrap(async (req, res) => {
   res.json(row);
 }));
 
-// Reset kata sandi pengguna lain ke SANDI_AWAL (admin) — untuk pengguna yang
-// lupa sandinya, tanpa perlu menjalankan scripts/buat-admin.mjs dari terminal.
-// Sandi awal sengaja konstan dan ditampilkan di layar admin supaya bisa
-// disampaikan ke pengguna yang bersangkutan; nilainya digandakan di
-// SANDI_AWAL pada src/App.jsx — kalau diubah, ubah keduanya bersamaan.
+// Reset kata sandi pengguna lain (admin) — untuk pengguna yang lupa sandinya,
+// tanpa perlu menjalankan scripts/buat-admin.mjs dari terminal.
 //
-// Akun sendiri dikecualikan: admin yang masih bisa login tidak perlu reset,
-// dan mengubah sandi sendiri ke nilai yang diketahui semua orang justru
-// memperlemah akun dengan hak akses tertinggi.
-const SANDI_AWAL = "ascendo123";
+// Sandinya acak dan hanya dikirim di respons ini: layar admin menampilkannya
+// sekali untuk disampaikan, lalu pengguna wajib menggantinya saat masuk
+// (must_change). Dulu sandinya konstan dan tertulis di layar serta di bundel
+// JS, jadi siapa pun yang pernah melihatnya bisa masuk ke akun yang baru direset.
+//
+// Akun sendiri dikecualikan: admin yang masih bisa login tidak perlu reset.
+// Huruf/angka yang mudah tertukar saat didikte (0/o, 1/l/i) tidak dipakai.
+const HURUF_SEMENTARA = "abcdefghjkmnpqrstuvwxyz23456789";
+const sandiSementara = (n = 10) =>
+  Array.from({ length: n }, () => HURUF_SEMENTARA[crypto.randomInt(HURUF_SEMENTARA.length)]).join("");
 
 app.post("/api/pengguna/:id/reset-sandi", requireRole("admin"), wrap(async (req, res) => {
   if (req.params.id === req.user.id)
     return res.status(400).json({ error: "Tidak bisa mereset sandi akun sendiri — pakai menu Ganti Kata Sandi." });
   const [u] = await sql`SELECT username FROM pengguna WHERE id = ${req.params.id}`;
   if (!u) return res.status(404).json({ error: "Pengguna tidak ditemukan." });
-  await sql`UPDATE pengguna SET sandi_hash = ${hashPw(SANDI_AWAL)} WHERE id = ${req.params.id}`;
-  res.json({ ok: true, username: u.username, sandi: SANDI_AWAL });
+  const sandi = sandiSementara();
+  await sql`UPDATE pengguna SET sandi_hash = ${hashPw(sandi)}, must_change = true WHERE id = ${req.params.id}`;
+  // Catatan gagal ikut dibersihkan: pengguna yang terkunci 429 karena lupa
+  // sandi harus bisa langsung masuk dengan sandi sementaranya.
+  await sql`DELETE FROM login_gagal WHERE username = ${u.username}`;
+  res.set("Cache-Control", "no-store").json({ ok: true, username: u.username, sandi });
 }));
 
 // Hapus pengguna (admin) — tak boleh menghapus akun sendiri, agar selalu

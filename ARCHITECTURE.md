@@ -181,8 +181,8 @@ Noto Sans KR을 붙이는 방법이 있습니다.
 | GET/POST `/api/pembelian`, PATCH `/:id/status`, DELETE `/:id` | 구매 | 동일 |
 | POST `/api/pelanggan`, PUT/DELETE `/:id` | 고객 | 수정은 프로필만 — 한도·결제조건 제외. 판매 이력이 있으면 삭제 거부 |
 | GET/POST/PUT/DELETE `/api/pengguna` | 사용자 | admin. 본인 삭제·본인 역할 변경·마지막 admin 강등 불가 |
-| POST `/api/pengguna/:id/reset-sandi` | 비밀번호 초기화 | admin. `ascendo123`으로. 본인은 제외 |
-| POST `/api/ganti-sandi` | 비밀번호 변경 | 토큰의 id로만 |
+| POST `/api/pengguna/:id/reset-sandi` | 비밀번호 초기화 | admin. 무작위 10자 임시 비밀번호 1회 반환, `must_change=true`. 본인은 제외 |
+| POST `/api/ganti-sandi` | 비밀번호 변경 | 토큰의 id로만. 8자 이상·아이디 포함 불가. 새 토큰 반환(`must_change` 해제) |
 | GET/POST `/api/limit-usulan` | 여신한도·결제조건 기안 | 기안은 staff 이상. 대기 건 중복이면 409 |
 | POST `/api/limit-usulan/:id/putusan` | 여신한도 확정 | admin. 승인 시 한도·결제조건 반영까지 한 트랜잭션 |
 | GET/POST `/api/hapus-usulan` | 삭제 기안 | 기안은 staff 이상. 대기 건 중복이면 409 |

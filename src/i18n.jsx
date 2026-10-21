@@ -95,12 +95,24 @@ const KO = {
   /* ---------- ganti kata sandi ---------- */
   "Ganti Kata Sandi": "비밀번호 변경",
   "Kata Sandi Lama": "기존 비밀번호",
+  "Kata Sandi Sementara": "임시 비밀번호",
+  "Minimal 8 karakter, tanpa username": "최소 8자, 아이디 포함 불가",
+  "Kata sandi baru minimal 8 karakter.": "새 비밀번호는 최소 8자입니다.",
+  "Kata sandi tidak boleh memuat username.": "비밀번호에 아이디를 넣을 수 없습니다.",
+  "Kata sandi baru harus berbeda dari yang lama.": "새 비밀번호는 기존 비밀번호와 달라야 합니다.",
+  "Anda masuk dengan kata sandi sementara. Ganti dulu sebelum melanjutkan.": "임시 비밀번호로 로그인했습니다. 계속하려면 먼저 비밀번호를 바꾸세요.",
+  "Minimal 8 karakter, tanpa username. Pengguna wajib menggantinya saat pertama masuk.": "최소 8자, 아이디 포함 불가. 첫 로그인 때 변경해야 함",
+  "Reset kata sandi \"{u}\"? Kata sandi sementara akan dibuat dan pengguna wajib menggantinya saat masuk.": "\"{u}\" 비밀번호를 초기화할까요? 임시 비밀번호가 만들어지고, 사용자는 로그인할 때 바꿔야 합니다.",
+  "Sampaikan kata sandi ini kepada {u}. Hanya tampil sekali.": "이 비밀번호를 {u}에게 전달하세요. 한 번만 표시됩니다.",
+  "Pengguna wajib menggantinya saat pertama masuk.": "사용자는 첫 로그인 때 변경해야 합니다.",
+  "Reset menghasilkan kata sandi sementara yang tampil sekali.": "초기화하면 임시 비밀번호가 1회 표시됨",
+  "Salin": "복사",
+  "Tersalin ✓": "복사됨 ✓",
+  "Selesai": "완료",
   "Kata Sandi Baru": "새 비밀번호",
   "Ulangi Kata Sandi Baru": "새 비밀번호 확인",
-  "Minimal 6 karakter": "최소 6자",
   "Ganti sandi hanya tersedia saat online.": "비밀번호 변경 — 온라인 상태에서만 가능",
   "Isi kata sandi lama dan baru.": "기존 비밀번호·새 비밀번호 입력 필요",
-  "Kata sandi baru minimal 6 karakter.": "새 비밀번호 최소 6자",
   "Konfirmasi kata sandi tidak cocok.": "비밀번호 확인 불일치",
   "Kata sandi berhasil diganti.": "비밀번호 변경 완료",
 
@@ -211,11 +223,7 @@ const KO = {
   "Reset Sandi": "비밀번호 초기화",
   "Reset": "초기화",
   "Konfirmasi Reset Kata Sandi": "비밀번호 초기화 확인",
-  "Kata sandi awal setelah reset: {s}": "초기화 후 비밀번호: {s}",
   "Reset kata sandi hanya tersedia saat online.": "비밀번호 초기화 — 온라인 상태에서만 가능",
-  "Reset kata sandi \"{u}\" menjadi {s}? Pengguna harus menggantinya setelah masuk.":
-    "사용자 \"{u}\" 비밀번호를 {s}(으)로 초기화 — 로그인 후 변경 안내 필요. 진행?",
-  "Kata sandi {u} direset menjadi {s}.": "{u} 비밀번호 {s}(으)로 초기화 완료",
 
   /* ---------- dasbor ---------- */
   "Ringkasan Operasi": "운영 요약",

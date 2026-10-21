@@ -433,6 +433,14 @@ function Aplikasi() {
     try { localStorage.setItem("vk_user", JSON.stringify(u)); } catch { /* noop */ }
     say(t("Selamat datang, {nama}.", { nama: u.nama }));
   };
+  /* Server menerbitkan token baru setelah ganti sandi: token lama membawa
+     tanda mc (must_change) dan akan terus ditolak. */
+  const pakaiToken = (token) => {
+    const u = { ...user, token, must_change: false };
+    setUser(u);
+    api.setToken(token);
+    try { localStorage.setItem("vk_user", JSON.stringify(u)); } catch { /* noop */ }
+  };
   const logout = () => {
     setUser(null);
     api.setToken(null);
@@ -479,7 +487,7 @@ function Aplikasi() {
       });
   };
   useEffect(() => {
-    if (!user || conn !== "online") return;
+    if (!user || user.must_change || conn !== "online") return;
     let hidup = true;
     muatData(() => hidup);
     return () => { hidup = false; };
@@ -836,7 +844,10 @@ function Aplikasi() {
 
       <footer className="ft">Copyright © ASEOA</footer>
 
-      {gantiSandi && <GantiSandi online={online} say={say} close={() => setGantiSandi(false)} />}
+      {(gantiSandi || user?.must_change) && (
+        <GantiSandi online={online} say={say} user={user} wajib={!!user?.must_change}
+          pakaiToken={pakaiToken} logout={logout} close={() => setGantiSandi(false)} />
+      )}
       {tanyaKirim && (
         <FormTglKirim so={tanyaKirim} say={say} close={() => setTanyaKirim(null)}
           submit={(tgl) => { const so = tanyaKirim; setTanyaKirim(null); return majuSO(so, tgl); }} />
@@ -1017,7 +1028,7 @@ function FormTglKirim({ so, submit, say, close }) {
 }
 
 /* ganti kata sandi sendiri */
-function GantiSandi({ close, say, online }) {
+function GantiSandi({ close, say, online, user, wajib, pakaiToken, logout }) {
   const { t } = useLang();
   const [f, setF] = useState({ lama: "", baru: "", ulang: "" });
   const [busy, setBusy] = useState(false);
@@ -1025,36 +1036,67 @@ function GantiSandi({ close, say, online }) {
   const kirim = async () => {
     if (!online) return say(t("Ganti sandi hanya tersedia saat online."), true);
     if (!f.lama || !f.baru) return say(t("Isi kata sandi lama dan baru."), true);
-    if (f.baru.length < 6) return say(t("Kata sandi baru minimal 6 karakter."), true);
+    // aturan yang sama diperiksa ulang server (tolakSandi)
+    if (f.baru.length < 8) return say(t("Kata sandi baru minimal 8 karakter."), true);
+    if (user?.username && f.baru.toLowerCase().includes(user.username.toLowerCase()))
+      return say(t("Kata sandi tidak boleh memuat username."), true);
+    if (f.baru === f.lama) return say(t("Kata sandi baru harus berbeda dari yang lama."), true);
     if (f.baru !== f.ulang) return say(t("Konfirmasi kata sandi tidak cocok."), true);
     setBusy(true);
     try {
-      await api.gantiSandi(f.lama, f.baru);
+      const r = await api.gantiSandi(f.lama, f.baru);
+      if (r?.token) pakaiToken(r.token);
       say(t("Kata sandi berhasil diganti."));
       close();
     } catch (e) { say(e.message, true); }
     finally { setBusy(false); }
   };
   return (
-    <Modal title={t("Ganti Kata Sandi")} close={close} onSave={kirim} saveLabel={busy ? "…" : t("Simpan")}>
-      <Inp label={t("Kata Sandi Lama")} type="password" value={f.lama} onChange={set("lama")} />
-      <Inp label={t("Kata Sandi Baru")} type="password" value={f.baru} onChange={set("baru")} hint={t("Minimal 6 karakter")} />
+    <Modal title={t("Ganti Kata Sandi")} close={close} onSave={kirim} wajib={wajib}
+      saveLabel={busy ? "…" : t("Simpan")}>
+      {wajib && (
+        <p className="sandi-wajib">
+          {t("Anda masuk dengan kata sandi sementara. Ganti dulu sebelum melanjutkan.")}{" "}
+          <button type="button" className="btn sm" onClick={logout}>{t("Keluar")}</button>
+        </p>
+      )}
+      <Inp label={wajib ? t("Kata Sandi Sementara") : t("Kata Sandi Lama")} type="password" value={f.lama} onChange={set("lama")} />
+      <Inp label={t("Kata Sandi Baru")} type="password" value={f.baru} onChange={set("baru")}
+        hint={t("Minimal 8 karakter, tanpa username")} />
       <Inp label={t("Ulangi Kata Sandi Baru")} type="password" value={f.ulang} onChange={set("ulang")} />
     </Modal>
   );
 }
 
 /* ============================ PENGGUNA (admin) ============================ */
-// Sandi yang dipasang server saat admin mereset akun. Ditampilkan di layar
-// supaya admin bisa menyampaikannya ke pengguna. Digandakan dari SANDI_AWAL di
-// api-server.js — kalau diubah, ubah keduanya bersamaan.
-const SANDI_AWAL = "ascendo123";
+/* Kata sandi sementara hasil reset dibuat acak oleh server dan hanya dikirim
+   sekali. Ia ditampilkan di dialog sendiri (bukan toast yang hilang dalam tiga
+   detik) supaya admin sempat menyalinnya; setelah ditutup tidak bisa dilihat
+   lagi — lupa menyalin berarti reset sekali lagi. */
+function SandiSementara({ data, close }) {
+  const { t } = useLang();
+  const [tersalin, setTersalin] = useState(false);
+  const salin = async () => {
+    try { await navigator.clipboard.writeText(data.sandi); setTersalin(true); } catch { /* noop */ }
+  };
+  return (
+    <Modal title={t("Kata Sandi Sementara")} close={close} onSave={close} saveLabel={t("Selesai")}>
+      <p>{t("Sampaikan kata sandi ini kepada {u}. Hanya tampil sekali.", { u: data.username })}</p>
+      <div className="sandi-box">
+        <code>{data.sandi}</code>
+        <button type="button" className="btn sm" onClick={salin}>{tersalin ? t("Tersalin ✓") : t("Salin")}</button>
+      </div>
+      <p className="hint">{t("Pengguna wajib menggantinya saat pertama masuk.")}</p>
+    </Modal>
+  );
+}
 
 function PenggunaAdmin({ online, say, user, minta }) {
   const { t } = useLang();
   const [users, setUsers] = useState(null);
   const [buka, setBuka] = useState(false);
   const [ubah, setUbah] = useState(null); // pengguna yang sedang diubah
+  const [sandiBaru, setSandiBaru] = useState(null); // { username, sandi } — tampil sekali
   const load = async () => {
     if (online) { try { setUsers(await api.listPengguna()); } catch (e) { setUsers([]); say(e.message, true); } }
     else setUsers([]);
@@ -1074,10 +1116,10 @@ function PenggunaAdmin({ online, say, user, minta }) {
   const reset = (u) => {
     if (!online) return say(t("Reset kata sandi hanya tersedia saat online."), true);
     minta(
-      t('Reset kata sandi "{u}" menjadi {s}? Pengguna harus menggantinya setelah masuk.', { u: u.username, s: SANDI_AWAL }),
+      t('Reset kata sandi "{u}"? Kata sandi sementara akan dibuat dan pengguna wajib menggantinya saat masuk.', { u: u.username }),
       async () => {
         const r = await api.resetSandi(u.id);
-        say(t("Kata sandi {u} direset menjadi {s}.", { u: u.username, s: r.sandi }));
+        setSandiBaru({ username: r.username || u.username, sandi: r.sandi });
       },
       { tajuk: t("Konfirmasi Reset Kata Sandi"), labelAksi: t("Reset") },
     );
@@ -1103,7 +1145,7 @@ function PenggunaAdmin({ online, say, user, minta }) {
         note={<>
           {t("admin: akses penuh · manager: + hapus · staff: input & ubah")}<br />
           {t("Klik baris untuk mengubah nama dan peran.")}<br />
-          {t("Kata sandi awal setelah reset: {s}", { s: SANDI_AWAL })}
+          {t("Reset menghasilkan kata sandi sementara yang tampil sekali.")}
         </>}>
         <Scroll>
           <table>
@@ -1145,6 +1187,7 @@ function PenggunaAdmin({ online, say, user, minta }) {
       </Card>
       {buka && <FormPengguna close={() => setBuka(false)} say={say} submit={tambah} />}
       {ubah && <FormPengguna close={() => setUbah(null)} say={say} submit={simpanUbah} awal={ubah} sendiri={ubah.id === user?.id} />}
+      {sandiBaru && <SandiSementara data={sandiBaru} close={() => setSandiBaru(null)} />}
     </>
   );
 }
@@ -1177,7 +1220,8 @@ function FormPengguna({ close, say, submit, awal, sendiri }) {
       <Sel label={t("Peran")} value={f.peran} onChange={set("peran")} disabled={sendiri}
         hint={sendiri ? t("Peran akun sendiri tidak bisa diubah.") : undefined}
         opts={[["staff", t("Staf — input & ubah")], ["manager", t("Manajer — + hapus")], ["admin", t("Admin — akses penuh")]]} />
-      {!edit && <Inp label={t("Kata Sandi")} type="password" value={f.sandi} onChange={set("sandi")} />}
+      {!edit && <Inp label={t("Kata Sandi")} type="password" value={f.sandi} onChange={set("sandi")}
+        hint={t("Minimal 8 karakter, tanpa username. Pengguna wajib menggantinya saat pertama masuk.")} />}
     </Modal>
   );
 }
@@ -4738,21 +4782,25 @@ const Combo = ({ label, ariaLabel, value, onChange, opts, placeholder, bare }) =
   );
 };
 
-const Modal = ({ title, close, onSave, children, wide, saveLabel }) => {
+/* wajib: dialog yang tidak boleh ditutup (ganti sandi sementara). Tanpa ×,
+   tanpa Batal, Esc dan klik latar diabaikan — satu-satunya jalan keluar adalah
+   tombol simpan atau tombol yang ditaruh pemanggil di dalam isinya. */
+const Modal = ({ title, close, onSave, children, wide, saveLabel, wajib }) => {
   const { t } = useLang();
-  const box = useDialog(close);
+  const tutup = wajib ? () => {} : close;
+  const box = useDialog(tutup);
   const judul = useId();
   return (
-    <div className="ov" onClick={close}>
+    <div className="ov" onClick={tutup}>
       <div className={"md" + (wide ? " wide" : "")} ref={box} role="dialog" aria-modal="true" aria-labelledby={judul}
         onClick={(e) => e.stopPropagation()}>
         <div className="md-hd">
           <h3 id={judul}>{title}</h3>
-          <button className="x" onClick={close} aria-label={t("Tutup dialog")}>×</button>
+          {!wajib && <button className="x" onClick={close} aria-label={t("Tutup dialog")}>×</button>}
         </div>
         <div className="md-bd">{children}</div>
         <div className="md-ft">
-          <button className="btn" onClick={close}>{t("Batal")}</button>
+          {!wajib && <button className="btn" onClick={close}>{t("Batal")}</button>}
           <button className="btn pri" onClick={onSave}>{saveLabel || t("Simpan")}</button>
         </div>
       </div>
@@ -5140,6 +5188,10 @@ function Style() {
 .vk input.err{border-color:var(--asm-danger); background:var(--asm-danger-soft)}
 .vk input.qty{width:7rem; text-align:right}
 .vk .awal-aksi{display:flex; justify-content:flex-start; gap:.75rem; margin:.5rem 0}
+.vk .sandi-box{display:flex; align-items:center; gap:8px; margin:10px 0; padding:10px 12px;
+  border:1px solid var(--asm-border); border-radius:6px}
+.vk .sandi-box code{flex:1; font-size:1.25rem; letter-spacing:.08em; user-select:all}
+.vk .sandi-wajib{display:flex; align-items:center; justify-content:space-between; gap:8px; margin:0 0 10px}
 .vk .hint{display:block; font-size:var(--asm-fs-xs); color:var(--asm-fg-muted); margin-top:3px}
 .vk .row2{display:grid; grid-template-columns:1fr 1fr; gap:12px}
 @media (max-width:560px){.vk .row2{grid-template-columns:1fr}}
