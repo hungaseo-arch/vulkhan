@@ -233,6 +233,8 @@ const KO = {
   "tidak termasuk penawaran": "견적 제외",
   "Stok per Gudang": "창고별 재고",
   "Bulan": "월",
+  "Tahun": "연도",
+  "Periode": "기간",
   "Transaksi": "거래",
   "Qty": "수량",
   /* kolom kuantitas peringkat pelanggan: kategori produk disingkat karena

@@ -112,6 +112,22 @@ const akhirBulan = (ym) => {
    dihitung sebagai teks YYYY-MM-DD, bukan objek Date — seluruh penyaringan di
    layar ini membandingkan teks. */
 const rentangBawaan = (acuan) => [`${acuan.slice(0, 4)}-01-01`, acuan];
+/* Pemilih Tahun hanyalah jalan pintas untuk mengisi dua kotak tanggal dengan
+   setahun penuh — tidak punya keadaan sendiri. Tahun berjalan berhenti di hari
+   ini, sama seperti rentangBawaan, supaya pembanding "tahun lalu" memakai
+   potongan yang sama panjang. */
+const rentangTahun = (y, acuan) => {
+  const d0 = `${y}-01-01`, d1 = `${y}-12-31`;
+  return [d0, d0 <= acuan && acuan < d1 ? acuan : d1];
+};
+/* Kebalikannya: rentang yang persis satu tahun dibaca kembali jadi pilihan
+   Tahun; rentang lain (diisi tangan) memberi "". */
+const tahunDariRentang = (d0, d1, acuan) => {
+  if (!d0 || !d1) return "";
+  const y = d0.slice(0, 4);
+  const [a, b] = rentangTahun(y, acuan);
+  return a === d0 && b === d1 ? y : "";
+};
 /* Periode yang sama setahun sebelumnya. Cukup menukar empat angka pertama:
    29 Februari pada tahun kabisat menjadi batas yang tanggalnya tidak ada, dan
    sebagai batas perbandingan teks itu tetap sah — tidak ada yang hilang. */
@@ -2122,6 +2138,17 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
   const daftarCust = useId();
   const hariIni = today();
   const d0 = dari, d1 = sampai;
+  const tahun = tahunDariRentang(dari, sampai, hariIni);
+  const daftarTahun = useMemo(() => {
+    const s = new Set([hariIni.slice(0, 4)]);
+    for (const p of penjualan) if (p.tgl) s.add(String(p.tgl).slice(0, 4));
+    return [...s].sort().reverse();
+  }, [penjualan, hariIni]);
+  const pilihTahun = (y) => {
+    if (!y) return;
+    const [a, b] = rentangTahun(y, hariIni);
+    ubah({ dari: a, sampai: b });
+  };
 
   useEffect(() => {
     const q = new URLSearchParams();
@@ -2470,22 +2497,36 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
       <SectionTitle id={t("Penjualan")}
         mid={
           <div className="filters jual-filter">
-            <label className="fld">
-              <span className="lbl">{t("Dari")}</span>
-              <Tgl value={dari} onChange={(v) => ubah({ dari: v })} max={sampai || undefined} />
-            </label>
-            <label className="fld">
-              <span className="lbl">{t("Sampai")}</span>
-              <Tgl value={sampai} onChange={(v) => ubah({ sampai: v })} min={dari || undefined} />
-            </label>
-            <label className="fld cari">
-              <span className="lbl">{t("Pelanggan")}</span>
-              <input type="search" list={daftarCust} value={cust} placeholder={t("Cari nama pelanggan")}
-                onChange={(e) => ubah({ cust: e.target.value })} />
-              <datalist id={daftarCust}>
-                {pelanggan.map((c) => <option key={c.id} value={c.nama} />)}
-              </datalist>
-            </label>
+            {/* tiga kelompok: tahun, pelanggan, rentang tanggal */}
+            <div className="f-grp" role="group" aria-label={t("Tahun")}>
+              <label className="fld periode">
+                <span className="lbl">{t("Tahun")}</span>
+                <select value={tahun} onChange={(e) => pilihTahun(e.target.value)}>
+                  {!tahun && <option value="" disabled>—</option>}
+                  {daftarTahun.map((y) => <option key={y} value={y}>{lang === "ko" ? `${y}년` : y}</option>)}
+                </select>
+              </label>
+            </div>
+            <div className="f-grp" role="group" aria-label={t("Pelanggan")}>
+              <label className="fld cari">
+                <span className="lbl">{t("Pelanggan")}</span>
+                <input type="search" list={daftarCust} value={cust} placeholder={t("Cari nama pelanggan")}
+                  onChange={(e) => ubah({ cust: e.target.value })} />
+                <datalist id={daftarCust}>
+                  {pelanggan.map((c) => <option key={c.id} value={c.nama} />)}
+                </datalist>
+              </label>
+            </div>
+            <div className="f-grp" role="group" aria-label={t("Periode")}>
+              <label className="fld">
+                <span className="lbl">{t("Dari")}</span>
+                <Tgl value={dari} onChange={(v) => ubah({ dari: v })} max={sampai || undefined} />
+              </label>
+              <label className="fld">
+                <span className="lbl">{t("Sampai")}</span>
+                <Tgl value={sampai} onChange={(v) => ubah({ sampai: v })} min={dari || undefined} />
+              </label>
+            </div>
           </div>
         }>
         <button className="btn" onClick={unduhExcel}>↓ Excel</button>
@@ -4896,6 +4937,12 @@ function Style() {
 .vk .chip-b.on{background:var(--pl-utama); border-color:var(--asm-primary); color:var(--asm-primary); font-weight:500}
 .vk .jual-filter{align-items:flex-end; gap:12px}
 .vk .jual-filter .fld{min-width:170px}
+.vk .jual-filter .fld.periode{min-width:0}
+.vk .sect-l .jual-filter .periode select{min-width:104px}
+/* pemisah antarkelompok filter penjualan; di layar sempit tiap kelompok satu baris */
+.vk .jual-filter{align-items:center}
+.vk .jual-filter .f-grp{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+.vk .jual-filter .f-grp + .f-grp{border-left:1px solid var(--asm-border); padding-left:14px}
 
 /* KPI dengan pembanding: ukuran huruf mengikuti .kpi biasa (label 12px,
    nilai clamp, keterangan 11px) supaya tab penjualan tidak tampak "lain" */
@@ -5325,6 +5372,8 @@ function Style() {
   .vk .acts{width:100%}
   .vk .acts .btn{flex:1 1 auto; text-align:center}
   .vk .filters,.vk .sect-l .flow{width:100%}
+  .vk .jual-filter .f-grp{width:100%}
+  .vk .jual-filter .f-grp + .f-grp{border-left:0; padding-left:0}
   .vk .step{min-width:92px; padding:7px 9px}
   .vk .step b{font-size:var(--asm-fs-lg)}
   .vk .kpis{grid-template-columns:1fr 1fr}
