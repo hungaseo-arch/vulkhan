@@ -1382,7 +1382,7 @@ function PenggunaAdmin({ online, say, user, minta, reload }) {
    membatasi penerima (kosong = semua). Teks kunci bahasa Indonesia, KO di i18n. */
 const PENGUMUMAN = [
   {
-    id: "2026-10-21-cek-data", tgl: "2026-10-21", peran: "admin",
+    id: "2026-10-21-cek-data", tgl: "2026-10-21",
     judul: "Perlu Diperiksa: Data Pelanggan",
     isi: [
       "Sales PUTRA dan PUTRA LUBIS mungkin orang yang sama. Bila benar, pelanggan PUTRA akan dipindah ke PUTRA LUBIS — mohon dipastikan.",
