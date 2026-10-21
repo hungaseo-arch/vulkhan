@@ -2568,6 +2568,12 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
     };
   }, [perNama, d0, d1, perPelanggan, cById, totalSO, hariIni]);
 
+  /* Bulan pertama yang tercatat. Periode yang dimulai di bulan itu (atau
+     sebelumnya) tidak punya riwayat pembanding, jadi SEMUA pelanggannya
+     terbaca "baru" — kartunya memberi tahu itu, bukan menyembunyikannya. */
+  const awalData = useMemo(() => penjualan.reduce((m, s) => (!m || s.tgl < m ? s.tgl : m), ""), [penjualan]);
+  const baruSemu = !!(awalData && d0 && d0.slice(0, 7) <= awalData.slice(0, 7));
+
   /* Penyaring berganti berarti susunan barisnya berganti pula, jadi keadaan
      buka/tutup dan bulan pilihan yang lama tidak lagi berarti apa-apa. */
   const kunci = `${d0}|${d1}|${cust.trim()}`;
@@ -2847,7 +2853,10 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
           </Card>
 
           <div className="grid2 gerak">
-            <Card title={t("Pelanggan Baru")} note={t("transaksi pertamanya jatuh di dalam periode ini")}>
+            <Card title={t("Pelanggan Baru")} note={baruSemu
+              ? <>{t("transaksi pertamanya jatuh di dalam periode ini")}<br />
+                  {t("* data mulai {b} — semua pelanggan pada periode ini terhitung baru", { b: awalData.slice(0, 7) })}</>
+              : t("transaksi pertamanya jatuh di dalam periode ini")}>
               <DaftarGerak rows={gerak?.baru} kosong={t("Belum ada pelanggan baru pada periode ini.")}
                 takJelas={!gerak} onPilih={setDetail}
                 kolom={(r) => <><td className="n">{r.tgl}</td><td className="r n strong">{satuan(r.total)}</td></>}

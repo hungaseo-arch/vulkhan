@@ -371,6 +371,7 @@ const KO = {
   "{n} produk": "{n}개 품목",
   "Pelanggan Hilang": "이탈 고객",
   "transaksi pertamanya jatuh di dalam periode ini": "이 기간에 첫 거래가 발생한 고객",
+  "* data mulai {b} — semua pelanggan pada periode ini terhitung baru": "* 데이터 시작 {b} — 이 기간의 고객은 모두 신규로 집계됨",
   "ada penjualan pada periode yang sama tahun lalu, tidak ada sekarang": "전년 동기에는 거래가 있었으나 이번 기간에는 없는 고객",
   "Transaksi Pertama": "첫 거래",
   "Nilai Tahun Lalu": "전년 매출",
