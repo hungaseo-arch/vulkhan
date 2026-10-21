@@ -681,6 +681,8 @@ const KO = {
     "지정하면 이 고객의 판매는 해당 업체로 청구되고, PPN은 그 업체의 과세 구분을 따릅니다.",
   "Ditagih lewat {nama}.": "{nama} 경유 청구.",
   "Ditagih lewat {nama} · PPN {p}% sudah termasuk dalam total.": "{nama} 경유 청구 · 합계에 PPN {p}% 포함.",
+  /* ---------- tindak lanjut pemeriksaan (VK-WEB-2026-1021-02) ---------- */
+  "Pilih dari daftar": "목록에서 선택하세요",
 };
 
 const KAMUS = { id: {}, ko: KO };

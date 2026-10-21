@@ -5348,12 +5348,20 @@ const Sel = ({ label, value, onChange, opts, placeholder, hint, disabled }) => (
   </label>
 );
 
-/* dropdown pencarian: ketik kata kunci untuk menyaring opsi, klik untuk memilih */
+/* dropdown pencarian: ketik kata kunci untuk menyaring opsi, klik untuk memilih.
+   Papan ketik mengikuti pola WAI-ARIA combobox (listbox): ↑↓ memindah sorotan
+   (melingkar), Home/End ke ujung, Enter memilih, Esc menutup daftar tanpa
+   mengubah nilai, Tab memilih yang disorot lalu pindah kolom. Sorotan dibaca
+   pembaca layar lewat aria-activedescendant — fokus tetap di input.
+   Daftar diberi tabIndex=-1: Chrome menjadikan elemen yang bisa digulir sebagai
+   tujuan Tab, lalu daftarnya hilang saat input blur dan fokus jatuh ke body. */
 const Combo = ({ label, ariaLabel, value, onChange, opts, placeholder, bare }) => {
   const { t } = useLang();
   const domId = useId();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [aktif, setAktif] = useState(-1);
+  const [salah, setSalah] = useState(false);
   const selected = opts.find(([v]) => v === value);
   const selectedLabel = selected ? selected[1] : "";
 
@@ -5361,29 +5369,79 @@ const Combo = ({ label, ariaLabel, value, onChange, opts, placeholder, bare }) =
 
   const q = query.trim().toLowerCase();
   const filtered = q ? opts.filter(([, t]) => t.toLowerCase().includes(q)) : opts;
+  const optId = (i) => `${domId}-opt-${i}`;
 
-  const pilih = (v, t) => { onChange(v); setQuery(t); setOpen(false); };
+  useEffect(() => {
+    if (open && aktif >= 0) document.getElementById(optId(aktif))?.scrollIntoView({ block: "nearest" });
+  }, [open, aktif]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pilih = (v, t) => { onChange(v); setQuery(t); setOpen(false); setAktif(-1); setSalah(false); };
+
+  const onKeyDown = (e) => {
+    const n = filtered.length;
+    const geser = (ke) => { e.preventDefault(); setOpen(true); setAktif(n ? ke : -1); };
+    switch (e.key) {
+      case "ArrowDown": return geser(!open || aktif < 0 ? 0 : (aktif + 1) % n);
+      case "ArrowUp": return geser(!open || aktif <= 0 ? n - 1 : aktif - 1);
+      case "Home": if (open) geser(0); return;
+      case "End": if (open) geser(n - 1); return;
+      case "Enter": {
+        if (!open) return; // daftar tertutup → biarkan form dikirim
+        e.preventDefault(); e.stopPropagation();
+        const o = aktif >= 0 ? filtered[aktif] : n === 1 ? filtered[0] : null;
+        if (o) pilih(o[0], o[1]);
+        return;
+      }
+      case "Escape":
+        if (open) { e.preventDefault(); e.stopPropagation(); setOpen(false); setAktif(-1); }
+        return;
+      case "Tab":
+        if (open && aktif >= 0 && filtered[aktif]) pilih(filtered[aktif][0], filtered[aktif][1]);
+        return;
+      default:
+    }
+  };
+
+  /* keluar dari kolom: teks yang persis sama dengan satu opsi dianggap memilihnya;
+     teks lain dibuang (nilai lama tetap) dan diberi tanda "Pilih dari daftar" */
+  const onBlur = () => {
+    if (open && q && q !== selectedLabel.toLowerCase()) {
+      const pas = opts.find(([, t]) => t.toLowerCase() === q);
+      if (pas) pilih(pas[0], pas[1]);
+      else setSalah(true);
+    }
+    setOpen(false); setAktif(-1);
+  };
 
   const body = (
     <div className="combo-wrap">
       <input
         type="text" autoComplete="off" role="combobox" aria-expanded={open} aria-controls={`${domId}-list`}
+        aria-autocomplete="list" aria-activedescendant={open && aktif >= 0 ? optId(aktif) : undefined}
+        aria-invalid={salah || undefined} aria-describedby={salah ? `${domId}-salah` : undefined}
         aria-label={!label ? ariaLabel : undefined} aria-labelledby={label ? `${domId}-lbl` : undefined}
         value={query} placeholder={placeholder}
-        onFocus={() => { setOpen(true); setQuery(""); }}
-        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-        onBlur={() => setOpen(false)}
+        onFocus={() => {
+          setOpen(true); setQuery(""); setSalah(false);
+          setAktif(opts.findIndex(([v]) => v === value));
+        }}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); setAktif(-1); }}
+        onKeyDown={onKeyDown}
+        onBlur={onBlur}
       />
       {open && (
-        <ul className="combo-list" id={`${domId}-list`} role="listbox">
+        <ul className="combo-list" id={`${domId}-list`} role="listbox" tabIndex={-1}
+          aria-label={label || ariaLabel}>
           {filtered.length === 0
-            ? <li className="combo-empty">{t("Tidak ditemukan")}</li>
-            : filtered.map(([v, t]) => (
-              <li key={v} role="option" aria-selected={v === value}
+            ? <li className="combo-empty" role="presentation">{t("Tidak ditemukan")}</li>
+            : filtered.map(([v, t], i) => (
+              <li key={v} id={optId(i)} role="option" aria-selected={i === aktif}
+                className={(i === aktif ? "aktif" : "") + (v === value ? " pilih" : "")}
                 onMouseDown={(e) => { e.preventDefault(); pilih(v, t); }}>{t}</li>
             ))}
         </ul>
       )}
+      {salah && <span className="hint combo-salah" id={`${domId}-salah`} role="status">{t("Pilih dari daftar")}</span>}
     </div>
   );
 
@@ -5841,7 +5899,9 @@ function Style() {
   max-height:220px; overflow:auto; box-shadow:var(--asm-shadow-md)}
 .vk .combo-list li{padding:8px 12px; font-size:var(--asm-fs-base); cursor:pointer; border-radius:var(--asm-radius-sm)}
 .vk .combo-list li:hover{background:var(--asm-secondary)}
-.vk .combo-list li[aria-selected="true"]{background:var(--asm-primary-10); color:var(--asm-primary); font-weight:700}
+.vk .combo-list li.pilih{color:var(--asm-primary); font-weight:700}
+.vk .combo-list li.aktif{background:var(--asm-primary-10); outline:2px solid var(--asm-primary); outline-offset:-2px}
+.vk .combo-salah{color:var(--asm-danger)}
 .vk .combo-empty{color:var(--asm-fg-muted); cursor:default}
 .vk .combo-empty:hover{background:none}
 
