@@ -6,14 +6,7 @@
     <link rel="apple-touch-icon" href="/ascendo-symbol.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0062C6" />
-    <!-- Font: <link> biasa, bukan preload+onload — CSP script-src 'self' memblokir
-         handler onload inline, sehingga trik preload tidak pernah menjadi stylesheet. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap"
-    />
+    <!-- Font di-self-host lewat @fontsource (src/main.jsx) — tidak ada permintaan ke Google. -->
     <!-- Aplikasi internal: jangan diindeks (lihat juga public/robots.txt dan X-Robots-Tag). -->
     <meta name="robots" content="noindex, nofollow" />
     <title>VULKHAN — Manajemen Stok & Penjualan Ban Vulkanisir</title>

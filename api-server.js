@@ -65,13 +65,41 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 // Seed pengguna bawaan sekali (memoized) — berjalan di lokal & serverless.
 // Reset ke null bila gagal agar dicoba lagi pada request berikutnya.
-let ready;
-const ensureReady = () => (ready ||= ensureUsers()
+/* Gerbang versi skema. Rangkaian ensure* di bawah berisi puluhan DDL yang
+   dijalankan berurutan — tiap satunya satu perjalanan HTTP ke Neon — dan dulu
+   SETIAP cold start serverless membayarnya sebelum permintaan pertama dijawab
+   (bootstrap dingin ~7 detik). Sekarang sidik jari kode ensure* disimpan di
+   skema_versi; bila sama, cold start cukup satu SELECT.
+
+   Sidik jarinya dihitung dari teks fungsi-fungsi itu sendiri, jadi mengubah
+   isi ensure* otomatis memicu jalannya lagi — tidak ada nomor versi yang bisa
+   lupa dinaikkan. Pengecualian: helper yang dipanggil dari dalamnya tidak ikut
+   dihitung; kalau mengubah helper semacam itu, ubah juga KUNCI_SKEMA. */
+const KUNCI_SKEMA = "1";
+const SIDIK_SKEMA = crypto.createHash("sha1")
+  .update([KUNCI_SKEMA, ensureUsers, ensureUsulan, ensureHapus, ensurePelanggan, ensurePenjualan, ensureWaktu]
+    .map(String).join("\n"))
+  .digest("hex").slice(0, 16);
+async function skemaSudahPasang() {
+  try {
+    const [r] = await sql`SELECT versi FROM skema_versi WHERE id = 1`;
+    return r?.versi === SIDIK_SKEMA;
+  } catch { return false; } // tabelnya belum ada → pasang
+}
+const pasangSkema = () => ensureUsers()
   // ensurePenjualan() punya FK ke pengguna, jadi tabel itu harus ada lebih dulu.
   .then(() => Promise.all([ensureUsulan(), ensureHapus(), ensurePelanggan(), ensurePenjualan()]))
   // ensureWaktu() membuat wib_today(), lalu memakainya di DEFAULT kolom dan di
   // badan trigger — jadi ia harus jalan sesudah tabel-tabelnya ada.
   .then(() => ensureWaktu())
+  .then(() => sql`CREATE TABLE IF NOT EXISTS skema_versi (
+      id INTEGER PRIMARY KEY, versi TEXT NOT NULL, waktu TIMESTAMPTZ NOT NULL DEFAULT now())`)
+  .then(() => sql`
+    INSERT INTO skema_versi (id, versi) VALUES (1, ${SIDIK_SKEMA})
+    ON CONFLICT (id) DO UPDATE SET versi = EXCLUDED.versi, waktu = now()`);
+let ready;
+const ensureReady = () => (ready ||= skemaSudahPasang()
+  .then((sudah) => (sudah ? null : pasangSkema()))
   .catch((e) => { ready = null; throw e; }));
 app.use((req, res, next) => ensureReady().then(() => next()).catch(next));
 
@@ -211,6 +239,7 @@ async function ensureUsulan() {
   await sql`
     CREATE UNIQUE INDEX IF NOT EXISTS limit_usulan_menunggu
     ON limit_usulan (pelanggan) WHERE status = 'menunggu'`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_limit_usulan_status ON limit_usulan (status, diusulkan DESC)`;
 }
 
 // Usulan penghapusan data. Menghapus penjualan/pembelian membuang juga mutasi
@@ -245,6 +274,7 @@ async function ensureHapus() {
   await sql`
     CREATE UNIQUE INDEX IF NOT EXISTS hapus_usulan_menunggu
     ON hapus_usulan (jenis, sasaran) WHERE status = 'menunggu'`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_hapus_usulan_status ON hapus_usulan (status, diusulkan DESC)`;
 }
 
 /* Tabel pelanggan sudah ada sejak awal, jadi kolom profil ditambahkan lewat
@@ -299,6 +329,13 @@ async function ensurePenjualan() {
     oleh_nama TEXT,
     waktu TIMESTAMPTZ NOT NULL DEFAULT now())`;
   await sql`CREATE INDEX IF NOT EXISTS idx_log_status_penjualan ON log_status (penjualan, waktu)`;
+  // Kolom yang dipakai join/filter bootstrap, v_penjualan, v_piutang dan v_stok.
+  await sql`CREATE INDEX IF NOT EXISTS idx_penjualan_tgl ON penjualan (tgl DESC, no DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_penjualan_pelanggan ON penjualan (pelanggan)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_penjualan_item_penjualan ON penjualan_item (penjualan)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_penjualan_bayar_penjualan ON penjualan_bayar (penjualan)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_stok_mutasi_gudang_produk ON stok_mutasi (gudang, produk)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_stok_mutasi_ref ON stok_mutasi (ref)`;
   await sql`ALTER TABLE penjualan ADD COLUMN IF NOT EXISTS dibuat_oleh TEXT
     REFERENCES pengguna(id) ON DELETE SET NULL`;
   /* Tanggal barang benar-benar keluar, terpisah dari tanggal dokumen: barang
@@ -766,10 +803,15 @@ app.put("/api/pelanggan/:id", wrap(async (req, res) => {
 // login mengajukan angkanya, dan hanya admin yang mengesahkan. Angka di tabel
 // pelanggan baru berubah pada saat usulan disetujui — dalam satu transaksi
 // dengan pencatatan keputusannya, agar keduanya tidak pernah terpisah.
-app.get("/api/limit-usulan", wrap(async (_req, res) => {
+/* Bawaannya: semua yang menunggu + yang diputuskan 30 hari terakhir — kartu
+   usulan menampilkan riwayat putusan, tapi tidak perlu membawa seluruh
+   sejarahnya di setiap muat. ?all=1 untuk semuanya (maks. 200). */
+app.get("/api/limit-usulan", wrap(async (req, res) => {
+  const semua = req.query.all === "1";
   res.json(await sql`
     SELECT u.*, p.kode AS pelanggan_kode, p.nama AS pelanggan_nama
     FROM limit_usulan u JOIN pelanggan p ON p.id = u.pelanggan
+    WHERE ${semua} OR u.status = 'menunggu' OR u.diputuskan >= now() - interval '30 days'
     ORDER BY (u.status = 'menunggu') DESC, u.diusulkan DESC
     LIMIT 200`);
 }));
@@ -891,9 +933,12 @@ const SASARAN = {
   },
 };
 
-app.get("/api/hapus-usulan", wrap(async (_req, res) => {
+// Sama dengan /api/limit-usulan: menunggu + 30 hari terakhir, ?all=1 untuk semua.
+app.get("/api/hapus-usulan", wrap(async (req, res) => {
+  const semua = req.query.all === "1";
   res.json(await sql`
     SELECT * FROM hapus_usulan
+    WHERE ${semua} OR status = 'menunggu' OR diputuskan >= now() - interval '30 days'
     ORDER BY (status = 'menunggu') DESC, diusulkan DESC
     LIMIT 200`);
 }));

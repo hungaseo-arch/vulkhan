@@ -37,6 +37,13 @@
   (ensure 로 생성, FK 없음 — 삭제 뒤에도 남음)에 남깁니다. 앞으로 가는 단계도 사유 없이 기록됩니다.
   판매 전표번호는 서버가 advisory lock 안에서 매기고(동시 저장 시 같은 번호 방지), DB UNIQUE 제약은
   [migrations/2026-10-21-audit/](migrations/2026-10-21-audit/) 로 사용자가 실행합니다. 단가 0인 줄이 있으면 저장 전에 한 번 묻습니다.
+- **콜드 스타트 · 리전 · 폰트.** 서버는 콜드 스타트마다 `ensure*` DDL 수십 개를 차례로 돌린 뒤에야 첫 요청에
+  답했습니다(bootstrap 콜드 ~7초의 주원인). 이제 `ensure*` 함수 본문의 해시를 `skema_versi` 에 저장해 두고, 같으면
+  SELECT 1번으로 넘어갑니다. 함수 내용이 바뀌면 해시가 달라져 자동으로 다시 돕니다(내부 helper 만 바꿀 때는
+  `KUNCI_SKEMA` 를 올림). 조회 인덱스 추가(penjualan tgl·pelanggan, item·bayar의 penjualan, stok_mutasi gudang·produk·ref,
+  usulan status). `/api/hapus-usulan`·`/api/limit-usulan` 은 대기 건 전부와 최근 30일 결재 건만 주고 `?all=1` 이면 전체.
+  Vercel 함수 리전 `sin1`(DB가 ap-southeast-1). 폰트는 Google Fonts 대신 `@fontsource-variable/noto-sans-kr`
+  self-host(unicode-range 분할, 폰트 CSS gzip 약 27KB). CSP에서 Google 도메인 제거.
 
 ### Added
 - **판매 화면 연도 선택 (2026-10-21).** 판매 필터를 연도 · 고객 · 기간 세 묶음으로 나누고, 연도를 고르면

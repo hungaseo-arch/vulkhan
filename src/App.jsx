@@ -4899,8 +4899,8 @@ function Style() {
   --muted:var(--asm-fg-muted); --line:var(--asm-border);
   --ok:var(--asm-success); --warn:var(--asm-warning); --alert:var(--asm-danger);
 
-  --fd:'Noto Sans KR','Noto Sans','Apple SD Gothic Neo',system-ui,sans-serif;
-  --fb:'Noto Sans KR','Noto Sans','Apple SD Gothic Neo',system-ui,-apple-system,sans-serif;
+  --fd:'Noto Sans KR Variable','Noto Sans KR','Noto Sans','Apple SD Gothic Neo',system-ui,sans-serif;
+  --fb:'Noto Sans KR Variable','Noto Sans KR','Noto Sans','Apple SD Gothic Neo',system-ui,-apple-system,sans-serif;
   --fm:var(--fb);
 
   background:var(--asm-bg); color:var(--asm-fg); font-family:var(--fb);
