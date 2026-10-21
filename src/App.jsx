@@ -258,6 +258,16 @@ const PO_LABEL = {
 const USULAN_LABEL = { menunggu: "Menunggu", disetujui: "Disetujui", ditolak: "Ditolak" };
 // Jenis data yang bisa diusulkan penghapusannya — sama dengan CHECK di tabel hapus_usulan.
 const HAPUS_LABEL = { penjualan: "Penjualan", pembelian: "Pembelian", pelanggan: "Pelanggan" };
+/* Keterangan sasaran disimpan server sebagai teks jadi ("Nama · KOTA"). Untuk
+   pelanggan, bagian terakhirnya kota mentah dari data lama — ditampilkan
+   sebagai nama cabang supaya tidak muncul "Semarang" di layar berbahasa Korea. */
+const ketSasaran = (u, t) => {
+  const ket = String(u.sasaran_ket || "");
+  if (u.jenis !== "pelanggan") return ket;
+  const bagian = ket.split(" · ");
+  if (bagian.length > 1 && cabangDari(bagian.at(-1))) bagian[bagian.length - 1] = namaCabang(bagian.at(-1), t);
+  return bagian.join(" · ");
+};
 /* Sasaran yang usulan hapusnya sedang menunggu. Dipakai untuk mematikan tombol
    usul kedua atas baris yang sama — server menolaknya dengan 409, tapi tombol
    yang jelas-jelas mati lebih baik daripada pesan galat setelah ditekan. */
@@ -1627,7 +1637,7 @@ function FormPenerbit({ awal, close, say, submit }) {
   return (
     <Modal title={t("Ubah Penerbit")} close={close} onSave={kirim} saveLabel={t("Simpan")} wide>
       <div className="row2">
-        <Inp label={t("Nama Perusahaan")} value={f.nama} onChange={set("nama")} />
+        <Inp label={t("Nama Perusahaan")} value={f.nama} onChange={set("nama")} required />
         <Inp label={t("Keterangan Usaha")} value={f.sub} onChange={set("sub")} />
       </div>
       <Inp label={t("Alamat")} value={f.alamat} onChange={set("alamat")} />
@@ -2483,7 +2493,7 @@ function KartuUsulHapus({ jenis, hapusUsulan, can, user, posisi, satuTempat, onP
           <tbody>
             {(semua ? rows : rows.slice(0, PERINGKAT_N)).map((u) => (
               <tr key={u.id}>
-                <td><span className="chip">{u.sasaran_no}</span><em className="mut2">{u.sasaran_ket}</em></td>
+                <td><span className="chip">{u.sasaran_no}</span><em className="mut2">{ketSasaran(u, t)}</em></td>
                 {/* pelanggan tidak punya nilai transaksi — nol berarti "tidak berlaku" */}
                 <td className="r n mut">{Number(u.nilai) ? rp(Number(u.nilai)) : "—"}</td>
                 <td className="mut">{u.alasan || "—"}</td>
@@ -2563,7 +2573,7 @@ function FormPutusanHapus({ u, close, say, submit }) {
   };
   return (
     <Modal title={t("Putusan Permintaan Hapus")} close={close} onSave={kirim}>
-      <p className="note">{t(HAPUS_LABEL[u.jenis])} · <b>{u.sasaran_no}</b> · {u.sasaran_ket}</p>
+      <p className="note">{t(HAPUS_LABEL[u.jenis])} · <b>{u.sasaran_no}</b> · {ketSasaran(u, t)}</p>
       {Number(u.nilai) > 0 && <p className="note">{t("Nilai")}: <b className="n">{rp(Number(u.nilai))}</b></p>}
       <p className="note">{t("Diajukan oleh {u}", { u: u.pengusul_nama })}</p>
       {u.alasan && <p className="note">{t("Alasan")}: {u.alasan}</p>}
@@ -4482,7 +4492,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
       {putusan && <FormPutusan u={putusan} close={() => setPutusan(null)} say={say} submit={putuskan} />}
       {usulHapus && (
         <FormUsulHapus jenis="pelanggan" sasaran={usulHapus.id} judul={usulHapus.nama}
-          ket={[usulHapus.kode, usulHapus.kota].filter(Boolean).join(" · ")}
+          ket={[usulHapus.kode, usulHapus.kota && namaCabang(usulHapus.kota, t)].filter(Boolean).join(" · ")}
           close={() => setUsulHapus(null)} say={say} submit={ajukanHapus} />
       )}
       {putusanH && (
@@ -4532,18 +4542,40 @@ function GradeBadge({ c, tgl }) {
   );
 }
 
+/* Cabang dan sales dipilih dari daftar, bukan diketik bebas: data lama
+   menulis "Semarang"/"SEMARANG" dan "PUTRA"/"PUTRA LUBIS" sebagai nilai
+   berbeda sehingga laporan per cabang/per sales terpecah. Disimpan huruf
+   besar (server juga menormalkan). Nilai di luar daftar tetap bisa dipakai
+   lewat "Lainnya…" — kota pelanggan bukan daftar tertutup. */
+const LAIN = "__lain";
+const hurufBesar = (v) => String(v || "").trim().replace(/\s+/g, " ").toUpperCase();
+
 function FormPelanggan({ c, pelanggan = [], close, say, submit }) {
   const { t } = useLang();
+  const kotaAwal = cabangDari(c?.kota) ? cabangDari(c.kota).nama.toUpperCase() : hurufBesar(c?.kota);
+  const daftarSales = [...new Set(pelanggan.map((x) => hurufBesar(x.sales)).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
   const [f, setF] = useState({
     nama: c?.nama || "", pemilik: c?.pemilik || "", pic: c?.pic || "", telp: c?.telp || "",
-    email: c?.email || "", alamat: c?.alamat || "", kota: c?.kota || "", npwp: c?.npwp || "",
-    sales: c?.sales || "", catatan: c?.catatan || "",
+    email: c?.email || "", alamat: c?.alamat || "", kota: kotaAwal, npwp: c?.npwp || "",
+    sales: hurufBesar(c?.sales), catatan: c?.catatan || "",
     // "" = belum dinilai; grade lama tanpa tanggal penilaian tidak ditampilkan sebagai hasil nilai
     grade: gradeDinilai(c) ? c.grade : "",
     limit: String(c?.limit ?? 100000000), termin: String(c?.termin ?? 30),
     via: c?.via || "", ppn: c?.ppn ? "1" : "0",
   });
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
+  const [kotaLain, setKotaLain] = useState(false);
+  const [salesLain, setSalesLain] = useState(false);
+  const opsiKota = CABANG.map((x) => [x.nama.toUpperCase(), t(x.nama)]);
+  if (f.kota && !kotaLain && !opsiKota.some(([v]) => v === f.kota)) opsiKota.push([f.kota, f.kota]);
+  opsiKota.push([LAIN, t("Lainnya…")]);
+  const opsiSales = daftarSales.map((v) => [v, v]);
+  if (f.sales && !salesLain && !daftarSales.includes(f.sales)) opsiSales.push([f.sales, f.sales]);
+  opsiSales.push([LAIN, t("Sales baru…")]);
+  const pilih = (k, setLain) => (v) => {
+    if (v === LAIN) { setLain(true); set(k)(""); } else { setLain(false); set(k)(v); }
+  };
   /* Rantai penagihan hanya boleh satu tingkat: pihak penagih tidak boleh
      sendiri ditagih lewat orang lain, dan tidak ada yang menagih dirinya
      sendiri. Server menolak hal yang sama — ini supaya tidak sampai terpilih. */
@@ -4553,13 +4585,15 @@ function FormPelanggan({ c, pelanggan = [], close, say, submit }) {
   const gantiNama = !c || normNama(c.nama) !== normNama(f.nama);
   const kirim = async () => {
     if (!f.nama.trim()) return say(t("Nama pelanggan wajib diisi."), true);
+    if (f.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim()))
+      return say(t("Format email tidak valid."), true);
     const persis = gantiNama && kembar.find((k) => k.sama);
     if (persis)
       return say(t("Nama ini sudah terdaftar ({kode}). Bila cabang lain, pakai \"Nama - Cabang\".", { kode: persis.x.kode }), true);
     const isi = {
       nama: f.nama.trim(), pemilik: f.pemilik.trim(), pic: f.pic.trim(), telp: f.telp.trim(),
-      email: f.email.trim(), alamat: f.alamat.trim(), kota: f.kota.trim(), npwp: f.npwp.trim(),
-      sales: f.sales.trim(), catatan: f.catatan.trim(),
+      email: f.email.trim(), alamat: f.alamat.trim(), kota: hurufBesar(f.kota), npwp: f.npwp.trim(),
+      sales: hurufBesar(f.sales), catatan: f.catatan.trim(),
       // kolom grade tidak boleh kosong; "belum dinilai" disimpan sebagai grade lama + dinilai=false
       grade: f.grade || c?.grade || "B", dinilai: !!f.grade,
       grade_tgl: !f.grade ? null : (c?.grade_tgl && c.grade === f.grade ? c.grade_tgl : today()),
@@ -4576,7 +4610,7 @@ function FormPelanggan({ c, pelanggan = [], close, say, submit }) {
   return (
     <Modal title={c ? t("Ubah Pelanggan") : t("Pelanggan Baru")} close={close} onSave={kirim} wide>
       <h4 className="mut2">{t("Identitas Faktur")}</h4>
-      <Inp label={t("Nama Perusahaan")} value={f.nama} onChange={set("nama")}
+      <Inp label={t("Nama Perusahaan")} value={f.nama} onChange={set("nama")} required
         hint={t("Satu perusahaan didaftarkan sekali. Per cabang: \"Nama - Cabang\".")} />
       {kembar.length > 0 && (
         <div className="note warn" role="status">
@@ -4595,12 +4629,16 @@ function FormPelanggan({ c, pelanggan = [], close, say, submit }) {
       </div>
       <Inp label={t("Alamat")} value={f.alamat} onChange={set("alamat")} hint={t("Alamat penagihan lengkap.")} />
       <div className="row2">
-        <Inp label={t("Cabang")} value={f.kota} onChange={set("kota")} />
-        <Inp label={t("Email")} value={f.email} onChange={set("email")} />
+        <div>
+          <Sel label={t("Cabang")} value={kotaLain ? LAIN : f.kota} onChange={pilih("kota", setKotaLain)}
+            opts={[["", t("-- Belum ditentukan --")], ...opsiKota]} />
+          {kotaLain && <Inp label={t("Cabang lain")} value={f.kota} onChange={set("kota")} />}
+        </div>
+        <Inp label={t("Email")} type="email" value={f.email} onChange={set("email")} autoComplete="email" />
       </div>
       <div className="row2">
         <Inp label={t("PIC")} value={f.pic} onChange={set("pic")} hint={t("Penanggung jawab di tempat pelanggan.")} />
-        <Inp label={t("Telepon")} value={f.telp} onChange={set("telp")} />
+        <Inp label={t("Telepon")} type="tel" inputMode="tel" value={f.telp} onChange={set("telp")} autoComplete="tel" />
       </div>
 
       <h4 className="mut2">{t("Penagihan & Pajak")}</h4>
@@ -4619,7 +4657,11 @@ function FormPelanggan({ c, pelanggan = [], close, say, submit }) {
 
       <h4 className="mut2">{t("Data Penjualan")}</h4>
       <div className="row2">
-        <Inp label={t("Sales")} value={f.sales} onChange={set("sales")} hint={t("Petugas penjualan penanggung akun.")} />
+        <div>
+          <Sel label={t("Sales")} value={salesLain ? LAIN : f.sales} onChange={pilih("sales", setSalesLain)}
+            opts={[["", t("-- Belum ditentukan --")], ...opsiSales]} hint={t("Petugas penjualan penanggung akun.")} />
+          {salesLain && <Inp label={t("Nama sales baru")} value={f.sales} onChange={set("sales")} />}
+        </div>
         <Sel label={t("Grade")} value={f.grade} onChange={set("grade")}
           opts={[["", t("Belum dinilai")], ["A", "A"], ["B", "B"], ["C", "C"]]}
           hint={gradeDinilai(c) && f.grade === c.grade ? t("Dinilai {tgl}", { tgl: c.grade_tgl }) : undefined} />
@@ -5367,10 +5409,11 @@ const Tgl = ({ value, onChange, min, max }) => {
   );
 };
 
-const Inp = ({ label, value, onChange, type = "text", hint, disabled }) => (
+const Inp = ({ label, value, onChange, type = "text", hint, disabled, required, inputMode, autoComplete }) => (
   <label className="fld">
-    <span className="lbl">{label}</span>
-    <input type={type} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} />
+    <span className="lbl">{label}{required && <span className="wajib" aria-hidden="true"> *</span>}</span>
+    <input type={type} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled}
+      required={required} aria-required={required || undefined} inputMode={inputMode} autoComplete={autoComplete} />
     {hint && <span className="hint">{hint}</span>}
   </label>
 );
@@ -5909,6 +5952,7 @@ function Style() {
 
 /* fields (Bab 11 .form-control / .form-label) */
 .vk .fld{display:block; margin-bottom:12px}
+.vk .fld .wajib{color:var(--asm-danger)}
 .vk .fld.alasan{margin:12px 0 0}
 .vk textarea{resize:vertical; font:inherit}
 .vk .lbl{font-family:var(--fd); font-size:var(--asm-fs-sm); font-weight:500; color:var(--asm-fg); display:block; margin-bottom:6px}

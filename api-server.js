@@ -110,6 +110,9 @@ app.use((req, _res, next) => (req.user ? sentuhAktif(req.user.id) : Promise.reso
 // Kolom teks pelanggan NOT NULL DEFAULT '' — undefined/null dari klien lama
 // harus jadi string kosong, bukan NULL yang ditolak basis data.
 const teks = (v) => String(v ?? "").trim();
+// Cabang (kolom kota) dan sales dipakai sebagai kunci pengelompokan laporan:
+// "Semarang"/"SEMARANG" tidak boleh menjadi dua kelompok.
+const besar = (v) => teks(v).replace(/\s+/g, " ").toUpperCase();
 
 const wrap = (fn) => (req, res) =>
   Promise.resolve(fn(req, res)).catch((e) => {
@@ -971,15 +974,17 @@ app.get("/api/pelanggan", wrap(async (_req, res) => {
 }));
 
 app.post("/api/pelanggan", wrap(async (req, res) => {
-  const c = req.body;
+  const c = req.body || {};
+  if (!teks(c.nama))
+    return res.status(400).json({ error: "Nama pelanggan wajib diisi." });
   const salahRute = await tolakRute(c.id, c.via);
   if (salahRute) return res.status(400).json({ error: salahRute });
   const [row] = await sql`
     INSERT INTO pelanggan (id, kode, nama, pemilik, pic, telp, email, alamat, kota, npwp,
                            sales, catatan, grade, grade_tgl, limit_kredit, termin, via, ppn)
-    VALUES (${c.id}, ${c.kode}, ${c.nama}, ${teks(c.pemilik)}, ${teks(c.pic)}, ${teks(c.telp)},
-            ${teks(c.email)}, ${teks(c.alamat)}, ${teks(c.kota)}, ${teks(c.npwp)},
-            ${teks(c.sales)}, ${teks(c.catatan)}, ${c.grade},
+    VALUES (${c.id}, ${c.kode}, ${teks(c.nama)}, ${teks(c.pemilik)}, ${teks(c.pic)}, ${teks(c.telp)},
+            ${teks(c.email)}, ${teks(c.alamat)}, ${besar(c.kota)}, ${teks(c.npwp)},
+            ${besar(c.sales)}, ${teks(c.catatan)}, ${c.grade},
             CASE WHEN ${!!c.dinilai} THEN wib_today() END, ${c.limit}, ${c.termin},
             ${c.via || null}, ${!!c.ppn})
     RETURNING *`;
@@ -998,7 +1003,7 @@ app.put("/api/pelanggan/:id", wrap(async (req, res) => {
     UPDATE pelanggan SET
       nama = ${String(c.nama).trim()}, pemilik = ${teks(c.pemilik)}, pic = ${teks(c.pic)},
       telp = ${teks(c.telp)}, email = ${teks(c.email)}, alamat = ${teks(c.alamat)},
-      kota = ${teks(c.kota)}, npwp = ${teks(c.npwp)}, sales = ${teks(c.sales)},
+      kota = ${besar(c.kota)}, npwp = ${teks(c.npwp)}, sales = ${besar(c.sales)},
       catatan = ${teks(c.catatan)}, grade = ${c.grade},
       -- tanggal penilaian hanya bergeser bila grade-nya memang berubah
       -- (atau baru pertama kali dinilai), bukan setiap kali form disimpan
