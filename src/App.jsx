@@ -475,6 +475,7 @@ function Aplikasi() {
   const minta = (msg, onYes, opsi) => setKonfirmasi({ msg, onYes, ...opsi });
   const [gantiSandi, setGantiSandi] = useState(false); // modal ganti kata sandi
   const [cekData, setCekData] = useState(null); // pemberitahuan data belum lengkap
+  const [umum, setUmum] = useState(null); // pengumuman yang belum ditandai selesai
 
   useEffect(() => { api.setToken(user?.token || null); }, [user]);
   api.setPenerjemah(t); // pesan galat server mengikuti bahasa yang sedang dipilih
@@ -559,6 +560,21 @@ function Aplikasi() {
     }).catch(() => {});
     return () => { batal = true; };
   }, [loaded, online, user?.username, user?.must_change]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Pengumuman saat masuk: tampil tiap kali aplikasi dibuka sampai pengguna
+     menandainya "sudah diperiksa" (per pengguna, per perangkat). */
+  useEffect(() => {
+    if (!loaded || !user || user.must_change) return;
+    const ada = PENGUMUMAN.filter((p) => {
+      if (p.peran && p.peran !== user.peran) return false;
+      try { return !localStorage.getItem(`vk_umum:${user.username}:${p.id}`); } catch { return true; }
+    });
+    setUmum(ada.length ? ada : null);
+  }, [loaded, user?.username, user?.peran, user?.must_change]); // eslint-disable-line react-hooks/exhaustive-deps
+  const selesaiUmum = () => {
+    try { umum.forEach((p) => localStorage.setItem(`vk_umum:${user.username}:${p.id}`, today())); } catch { /* noop */ }
+    setUmum(null);
+  };
 
   /* 1) cek koneksi saja — data tidak lagi terbuka untuk anonim. Bila sesi
         tersimpan, /health dilewati: /bootstrap sendiri yang membuktikan server
@@ -971,7 +987,8 @@ function Aplikasi() {
         <GantiSandi online={online} say={say} user={user} wajib={!!user?.must_change}
           pakaiToken={pakaiToken} logout={logout} close={() => setGantiSandi(false)} />
       )}
-      {cekData && (
+      {umum && <PengumumanModal daftar={umum} close={() => setUmum(null)} selesai={selesaiUmum} />}
+      {cekData && !umum && (
         <CekDataModal d={cekData} close={() => setCekData(null)}
           buka={() => { setCekData(null); setTab("mitra"); }} />
       )}
@@ -1357,6 +1374,34 @@ function PenggunaAdmin({ online, say, user, minta, reload }) {
       <PenerbitAdmin online={online} say={say} reload={reload} />
       <LaporanDataAdmin online={online} say={say} />
     </>
+  );
+}
+
+/* Pengumuman saat masuk. Daftar statis — tambah entri baru di sini; `id`
+   harus unik karena tanda "sudah diperiksa" disimpan per id. `peran`
+   membatasi penerima (kosong = semua). Teks kunci bahasa Indonesia, KO di i18n. */
+const PENGUMUMAN = [
+  {
+    id: "2026-10-21-cek-data", tgl: "2026-10-21", peran: "admin",
+    judul: "Perlu Diperiksa: Data Pelanggan",
+    isi: [
+      "Sales PUTRA dan PUTRA LUBIS mungkin orang yang sama. Bila benar, pelanggan PUTRA akan dipindah ke PUTRA LUBIS — mohon dipastikan.",
+      "PLG-114 dan PLG-393 (AFIF MA'ARUF FEBIANTO NURKHOLIQ) diduga pelanggan yang sama; namanya hanya berbeda spasi. Mohon diperiksa, lalu ajukan hapus untuk salah satunya.",
+    ],
+  },
+];
+function PengumumanModal({ daftar, close, selesai }) {
+  const { t } = useLang();
+  return (
+    <Modal title={t("Pengumuman")} close={close} onSave={selesai} saveLabel={t("Sudah diperiksa")} batalLabel={t("Nanti")}>
+      {daftar.map((p) => (
+        <section key={p.id} className="umum">
+          <h4>{t(p.judul)} <span className="mut2">{p.tgl}</span></h4>
+          <ol>{p.isi.map((x) => <li key={x}>{t(x)}</li>)}</ol>
+        </section>
+      ))}
+      <p className="mut2">{t("Pengumuman ini muncul setiap kali masuk sampai ditandai sudah diperiksa.")}</p>
+    </Modal>
   );
 }
 
@@ -5590,7 +5635,7 @@ const Combo = ({ label, ariaLabel, value, onChange, opts, placeholder, bare }) =
    pada dialog yang semua tombol di dalamnya sudah ber-type="button" — tombol
    tanpa type di dalam <form> menjadi tombol kirim. noValidate: pesan
    kesalahan tetap dari onSave (lewat t()), bukan gelembung bawaan peramban. */
-const Modal = ({ title, close, onSave, children, wide, saveLabel, wajib, form }) => {
+const Modal = ({ title, close, onSave, children, wide, saveLabel, batalLabel, wajib, form }) => {
   const { t } = useLang();
   const tutup = wajib ? () => {} : close;
   const box = useDialog(tutup);
@@ -5607,7 +5652,7 @@ const Modal = ({ title, close, onSave, children, wide, saveLabel, wajib, form })
         </div>
         <div className="md-bd">{children}</div>
         <div className="md-ft">
-          {!wajib && <button type="button" className="btn" onClick={close}>{t("Batal")}</button>}
+          {!wajib && <button type="button" className="btn" onClick={close}>{batalLabel || t("Batal")}</button>}
           <button type={form ? "submit" : "button"} className="btn pri" onClick={form ? undefined : onSave}>{saveLabel || t("Simpan")}</button>
         </div>
       </Kotak>
@@ -5773,6 +5818,10 @@ function Style() {
 .vk .card-hd h3{font-size:var(--asm-fs-lg); font-weight:700; letter-spacing:-.01em}
 .vk .card-hd h3 em{font-size:var(--asm-fs-xs); letter-spacing:0; color:var(--asm-fg-muted); margin-left:7px; font-weight:400}
 .vk .note{margin:3px 0 0; font-size:var(--asm-fs-xs); color:var(--asm-fg-muted)}
+.vk .umum + .umum{margin-top:16px}
+.vk .umum h4{margin:0 0 8px}
+.vk .umum ol{margin:0 0 12px; padding-left:20px}
+.vk .umum li + li{margin-top:8px}
 .vk .card-bd{padding:0}
 .vk .card-bd>.scroll{border-radius:0 0 var(--asm-radius-lg) var(--asm-radius-lg)}
 .vk .grid2{display:grid; grid-template-columns:1fr 1fr; gap:16px}
