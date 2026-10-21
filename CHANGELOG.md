@@ -20,6 +20,13 @@
   바꾸면 서버가 새 토큰을 발급합니다. 새 비밀번호 규칙: 8자 이상, 아이디 포함 불가, 기존과 달라야 함(서버·화면 모두 검사).
   같은 아이디로 10분 안에 5번 틀리면 429(`login_gagal` 테이블, 실패마다 1초 지연). 비밀번호 해시는
   이미 scrypt+salt 라서 bcrypt 전환은 하지 않았습니다.
+- **보안 헤더 · API 캐시 금지 · CORS · 검색엔진 차단.** `vercel.json` 에 CSP(`script-src 'self'`,
+  `frame-ancestors 'none'` 등) · nosniff · X-Frame-Options · Referrer-Policy · Permissions-Policy ·
+  `X-Robots-Tag: noindex` 를 전역으로, `/api/*` 에 `Cache-Control: no-store, private` 를 붙였습니다(Express도
+  같은 헤더를 직접 붙임). `x-powered-by` 제거. CORS 허용 목록은 코드에 고정(운영 주소, 이 프로젝트의 프리뷰
+  `vulkhan-*.vercel.app`, localhost)하고 `CORS_ORIGIN` 은 추가만 가능하며 `*` 는 무시합니다.
+  `public/robots.txt`(`Disallow: /`) · `<meta name="robots">` 추가, og:image 절대 URL.
+  CSP가 인라인 `onload` 를 막기 때문에 폰트 preload 트릭은 일반 `<link rel="stylesheet">` 로 바꿨습니다.
 
 ### Added
 - **판매 화면 연도 선택 (2026-10-21).** 판매 필터를 연도 · 고객 · 기간 세 묶음으로 나누고, 연도를 고르면

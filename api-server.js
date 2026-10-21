@@ -32,12 +32,25 @@ if (!/^postgres(ql)?:\/\/[^:@/]+:[^@]*@[^/]+\/.+/.test(DB_URL || ""))
 const sql = neon(DB_URL);
 const app = express();
 
-// CORS dibatasi ke origin yang diizinkan (set CORS_ORIGIN, dipisah koma).
-// Default: port dev Vite lokal.
-const ORIGINS = (process.env.CORS_ORIGIN || "http://localhost:5173,http://localhost:5174")
-  .split(",").map((s) => s.trim()).filter(Boolean);
-app.use(cors({ origin: ORIGINS }));
+app.disable("x-powered-by");
+
+/* CORS dibatasi ke origin yang diizinkan. Aplikasinya sendiri memanggil /api
+   dari origin yang sama, jadi daftar ini hanya untuk dev lokal (Vite di port
+   lain) dan pratinjau Vercel proyek ini. CORS_ORIGIN boleh menambah origin
+   (dipisah koma), tapi "*" diabaikan: dulu nilai itu membuat API terbuka untuk
+   halaman mana pun. */
+const ORIGINS = [
+  "https://vulkhan.vercel.app",
+  /^https:\/\/vulkhan(-[a-z0-9-]+)?\.vercel\.app$/,
+  "http://localhost:5173",
+  "http://localhost:5174",
+  ...(process.env.CORS_ORIGIN || "").split(",").map((s) => s.trim()).filter((s) => s && s !== "*"),
+];
+app.use(cors({ origin: ORIGINS, credentials: false }));
 app.use(express.json());
+// Jawaban API berisi data perusahaan per pengguna — jangan disimpan cache mana pun.
+// vercel.json juga memasangnya; ini untuk server lokal dan sebagai cadangan.
+app.use("/api", (_req, res, next) => { res.set("Cache-Control", "no-store, private"); next(); });
 
 // Seluruh /api butuh sesi login — baca maupun tulis. Data pelanggan, harga,
 // dan transaksi tidak boleh terbuka untuk anonim. Pemeriksaan can() di App.jsx
