@@ -558,6 +558,9 @@ function Aplikasi() {
     if (i >= SO_FLOW.length - 1) return;
     const next = SO_FLOW[i + 1];
     if (next === "kirim" && !tglKirim) return setTanyaKirim(so);
+    // server menolak juga (400); dicegah di sini supaya pesannya langsung terbaca
+    if (next === "lunas" && sisaSO(so) > 0)
+      return say(t("Sisa {v} — catat pembayaran dulu.", { v: rp(sisaSO(so)) }), true);
     // Pengelolaan stok tidak dipakai lagi: pengiriman tidak pernah ditahan
     // oleh jumlah stok. Mutasi keluar tetap dicatat (boleh minus) agar
     // riwayat pengiriman tidak berubah.
@@ -580,13 +583,22 @@ function Aplikasi() {
      (kirim → pesanan), yang di server menghapus lagi mutasi keluar dokumen
      ini dan mengosongkan tanggal kirimnya. Batas bawahnya 'pesanan':
      penawaran yang terlanjur jadi pesanan tetap hanya bisa dihapus. */
-  async function mundurSO(so) {
+  /* Setiap langkah mundur wajib beralasan (server mencatatnya di log_status),
+     jadi selalu lewat dialog konfirmasi dengan kolom alasan. */
+  function mundurSO(so) {
     const i = SO_FLOW.indexOf(so.status);
     if (i <= SO_FLOW.indexOf("pesanan")) return;
     const prev = SO_FLOW[i - 1];
+    minta(
+      t("Kembalikan {no} dari {dari} ke {ke}?", { no: so.no, dari: t(SO_LABEL[so.status].id), ke: t(SO_LABEL[prev].id) }),
+      (alasan) => jalankanMundurSO(so, prev, alasan),
+      { tajuk: t("Kembalikan Status"), labelAksi: t("Kembalikan"), alasan: true },
+    );
+  }
+  async function jalankanMundurSO(so, prev, alasan) {
     try {
       if (online) {
-        await api.statusPenjualan(so.id, prev);
+        await api.statusPenjualan(so.id, prev, undefined, alasan);
         await reload();
       } else {
         if (so.status === "kirim") setMutasi((m) => m.filter((x) => !(x.ref === so.no && x.tipe === "keluar")));
@@ -665,9 +677,11 @@ function Aplikasi() {
     return { ...so, pelanggan: tagih.id || so.pelanggan, pelanggan_akhir: c.via ? c.id : null, ppn: tagih.ppn ? PPN_PERSEN : 0 };
   };
   async function doCreatePenjualan(so) {
-    if (online) { await api.createPenjualan(so); await reload(); }
+    // Nomor final dari server — bisa beda dari pratinjau form bila ada yang menyimpan lebih dulu.
+    let no = so.no;
+    if (online) { no = (await api.createPenjualan(so))?.no || no; await reload(); }
     else setPenjualan((l) => [...l, ruteSO(so)]);
-    say(t("{no} dibuat sebagai Penawaran.", { no: so.no }));
+    say(t("{no} dibuat sebagai Penawaran.", { no }));
   }
 
   /* Ubah isi SO yang sudah ada. Nomor & status tidak ikut: nomor menaut buku
@@ -717,8 +731,8 @@ function Aplikasi() {
   }
 
   /* ---------- hapus (admin saja) & usulan hapus (semua peran) ---------- */
-  async function doDeletePenjualan(so) {
-    if (online) { await api.deletePenjualan(so.id); await reload(); }
+  async function doDeletePenjualan(so, alasan) {
+    if (online) { await api.deletePenjualan(so.id, alasan); await reload(); }
     else { setPenjualan((l) => l.filter((x) => x.id !== so.id)); setMutasi((m) => m.filter((x) => x.ref !== so.no)); }
     say(t("{no} dihapus.", { no: so.no }));
   }
@@ -980,14 +994,18 @@ function useDialog(close) {
 }
 
 /* konfirmasi tindakan — bawaannya hapus; tajuk & label bisa diganti lewat minta() */
-function Konfirmasi({ msg, onYes, close, say, tajuk, labelAksi }) {
+/* alasan: true → kolom alasan wajib (min. 3 huruf) yang diteruskan ke onYes.
+   Dipakai untuk tindakan yang membatalkan sesuatu: hapus SO, status mundur. */
+function Konfirmasi({ msg, onYes, close, say, tajuk, labelAksi, alasan: pakaiAlasan }) {
   const { t } = useLang();
   const [busy, setBusy] = useState(false);
+  const [alasan, setAlasan] = useState("");
   const box = useDialog(close);
   const judul = useId();
   const ya = async () => {
+    if (pakaiAlasan && alasan.trim().length < 3) return say(t("Tulis alasannya (minimal 3 huruf)."), true);
     setBusy(true);
-    try { await onYes(); close(); }
+    try { await onYes(alasan.trim()); close(); }
     catch (e) { say(e.message, true); close(); }
     finally { setBusy(false); }
   };
@@ -999,10 +1017,18 @@ function Konfirmasi({ msg, onYes, close, say, tajuk, labelAksi }) {
           <h3 id={judul}>{tajuk || t("Konfirmasi Hapus")}</h3>
           <button className="x" onClick={close} aria-label={t("Tutup dialog")}>×</button>
         </div>
-        <div className="md-bd">{msg}</div>
+        <div className="md-bd">
+          {msg}
+          {pakaiAlasan && (
+            <label className="fld alasan">
+              <span className="lbl">{t("Alasan")} <span className="req">*</span></span>
+              <textarea rows={2} value={alasan} onChange={(e) => setAlasan(e.target.value)} />
+            </label>
+          )}
+        </div>
         <div className="md-ft">
           <button className="btn" onClick={close}>{t("Batal")}</button>
-          <button className="btn danger" onClick={ya} disabled={busy}>{busy ? "…" : labelAksi || t("Hapus")}</button>
+          <button className="btn danger" onClick={ya} disabled={busy || (pakaiAlasan && alasan.trim().length < 3)}>{busy ? "…" : labelAksi || t("Hapus")}</button>
         </div>
       </div>
     </div>
@@ -2724,8 +2750,12 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
             label: bisaUbahSO(rinci, user) ? t("Hapus") : t("Usul Hapus"),
             tunggu: tungguHapus.has(rinci.id),
             aksi: bisaUbahSO(rinci, user)
-              ? () => minta(t("Hapus penjualan {no}? Data & mutasi stoknya ikut terhapus.", { no: rinci.no }),
-                  () => { doDeletePenjualan(rinci); setRinci(null); })
+              ? () => {
+                  const so = rinci;
+                  setRinci(null);
+                  minta(t("Hapus penjualan {no}? Data & mutasi stoknya ikut terhapus.", { no: so.no }),
+                    (alasan) => doDeletePenjualan(so, alasan), { alasan: true });
+                }
               /* dialog berurutan, bukan bertumpuk: rincian ditutup dulu */
               : () => { setUsulHapus(rinci); setRinci(null); },
           }}
@@ -3119,11 +3149,16 @@ function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, on
               ← {t(SO_LABEL[SO_FLOW[SO_FLOW.indexOf(so.status) - 1]].id)}
             </button>
           )}
-          {onMaju && (
+          {onMaju && (SO_FLOW[SO_FLOW.indexOf(so.status) + 1] === "lunas" && sisa > 0 ? (
+            /* span pembawa title: tombol disabled tidak memunculkan tooltip di semua peramban */
+            <span title={t("Sisa {v} — catat pembayaran dulu.", { v: rp(sisa) })}>
+              <button className="btn" disabled>→ {t(SO_LABEL.lunas.id)}</button>
+            </span>
+          ) : (
             <button className="btn" onClick={onMaju}>
               → {t(SO_LABEL[SO_FLOW[SO_FLOW.indexOf(so.status) + 1]].id)}
             </button>
-          )}
+          ))}
           {onCetak && <button className="btn" title={t("Cetak dokumen")} onClick={onCetak}>{t("Cetak")}</button>}
           <button className="btn pri" onClick={close}>{t("Tutup")}</button>
         </div>
@@ -3326,7 +3361,8 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
      membuat langkah pertamanya bisa dilewati tanpa sengaja. */
   const dikirim = awal && SO_FLOW.indexOf(f.status) >= SO_FLOW.indexOf("kirim");
 
-  const kirim = async () => {
+  const [tanyaNol, setTanyaNol] = useState(0); // jumlah baris berharga 0 yang menunggu konfirmasi
+  const kirim = async (lanjutNol = false) => {
     if (!f.pelanggan) return say(t("Pilih pelanggan terlebih dahulu."), true);
     if (!f.gudang) return say(t("Pilih gudang pengirim terlebih dahulu."), true);
     const salah = items.find((i) => String(i.qty).trim() !== "" && !(Number(i.qty) > 0));
@@ -3338,6 +3374,9 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
     if (lewatLimit) return say(t("Melebihi limit kredit {nama} sebesar {v}.", { nama: tagih.nama, v: rp(-sisaLimit) }), true);
     if (dikirim && f.tglKirim && !tglKirimSah(f.tglKirim, awal.tgl))
       return say(t("Tanggal kirim tidak boleh mundur ke bulan sebelum tanggal dokumen ({tgl}).", { tgl: awal.tgl }), true);
+    // Harga 0 sah (barang bonus/garansi) tapi lebih sering lupa diisi — tanya sekali.
+    const nol = valid.filter((i) => Number(i.harga) === 0).length;
+    if (nol && !lanjutNol) return setTanyaNol(nol);
     try {
       const baris = valid.map((i) => ({ produk: i.produk, qty: Number(i.qty), harga: Number(i.harga) }));
       await submit(awal
@@ -3357,7 +3396,7 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
 
   return (
     <Modal title={awal ? t("Ubah Penjualan {no}", { no: awal.no }) : t("Penjualan Baru")}
-      close={close} onSave={kirim} wide
+      close={close} onSave={() => kirim()} wide
       saveLabel={awal ? t("Simpan Perubahan") : t("Simpan Penawaran")}>
       <div className="row2">
         <Combo label={t("Pelanggan")} value={f.pelanggan} onChange={set("pelanggan")} placeholder={t("-- Pilih Pelanggan --")} opts={pelanggan.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
@@ -3417,6 +3456,12 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
         <p className="peringatan bad-box" role="status">
           {t("Melebihi limit kredit {nama} sebesar {v} — penawaran tidak bisa disimpan.", { nama: tagih.nama, v: rp(-sisaLimit) })}
         </p>
+      )}
+      {tanyaNol > 0 && (
+        <Konfirmasi say={say} close={() => setTanyaNol(0)}
+          tajuk={t("Harga 0")} labelAksi={t("Lanjutkan")}
+          msg={t("{n} baris berharga 0 — lanjutkan menyimpan?", { n: tanyaNol })}
+          onYes={() => kirim(true)} />
       )}
     </Modal>
   );
@@ -5178,14 +5223,16 @@ function Style() {
 
 /* fields (Bab 11 .form-control / .form-label) */
 .vk .fld{display:block; margin-bottom:12px}
+.vk .fld.alasan{margin:12px 0 0}
+.vk textarea{resize:vertical; font:inherit}
 .vk .lbl{font-family:var(--fd); font-size:var(--asm-fs-sm); font-weight:500; color:var(--asm-fg); display:block; margin-bottom:6px}
 .vk .lbl em{margin-left:6px; font-size:var(--asm-fs-xs); font-weight:400; color:var(--asm-fg-muted)}
 .vk .lbl .req{color:var(--asm-danger)}
 .vk .lbl.mt{margin-top:16px}
-.vk input,.vk select{width:100%; min-height:36px; padding:.375rem .75rem; border:1px solid var(--asm-border); border-radius:var(--asm-radius-md);
+.vk input,.vk select,.vk textarea{width:100%; min-height:36px; padding:.375rem .75rem; border:1px solid var(--asm-border); border-radius:var(--asm-radius-md);
   background:var(--asm-white); font-family:var(--fb); font-size:var(--asm-fs-base); color:var(--asm-fg); box-shadow:none}
 .vk input::placeholder{color:var(--asm-fg-muted)}
-.vk input:focus,.vk select:focus{outline:none; border-color:var(--asm-primary); box-shadow:0 0 0 3px var(--asm-primary-40)}
+.vk input:focus,.vk select:focus,.vk textarea:focus{outline:none; border-color:var(--asm-primary); box-shadow:0 0 0 3px var(--asm-primary-40)}
 .vk input:disabled,.vk select:disabled{background:var(--asm-secondary); opacity:.6}
 .vk input.err{border-color:var(--asm-danger); background:var(--asm-danger-soft)}
 .vk input.qty{width:7rem; text-align:right}

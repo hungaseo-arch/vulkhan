@@ -284,6 +284,21 @@ async function ensurePelanggan() {
    REPLACE VIEW hanya boleh MENAMBAH kolom di URUTAN PALING BELAKANG, jadi
    dibuat_oleh ditaruh sesudah total, bukan mengikuti urutan tabelnya. */
 async function ensurePenjualan() {
+  /* Jejak perpindahan status dan penghapusan langsung SO. Tanpa FK ke
+     penjualan: baris 'hapus' justru harus bertahan setelah dokumennya hilang,
+     jadi nomor dokumennya ikut disalin. Penghapusan lewat usulan sudah punya
+     jejak sendiri di hapus_usulan. */
+  await sql`CREATE TABLE IF NOT EXISTS log_status (
+    id BIGSERIAL PRIMARY KEY,
+    penjualan TEXT NOT NULL,
+    no TEXT,
+    dari TEXT,
+    ke TEXT NOT NULL,
+    catatan TEXT NOT NULL DEFAULT '',
+    oleh TEXT,
+    oleh_nama TEXT,
+    waktu TIMESTAMPTZ NOT NULL DEFAULT now())`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_log_status_penjualan ON log_status (penjualan, waktu)`;
   await sql`ALTER TABLE penjualan ADD COLUMN IF NOT EXISTS dibuat_oleh TEXT
     REFERENCES pengguna(id) ON DELETE SET NULL`;
   /* Tanggal barang benar-benar keluar, terpisah dari tanggal dokumen: barang
@@ -1164,10 +1179,24 @@ app.post("/api/penjualan", wrap(async (req, res) => {
     return res.status(400).json({ error: "Minimal satu baris barang." });
   // Header + semua item dalam satu transaksi & satu perjalanan HTTP ke Neon:
   // tidak ada SO tanpa item bila salah satu insert gagal.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(s.tgl || "")))
+    return res.status(400).json({ error: "Tanggal dokumen tidak valid." });
   const rute = await ruteTagih(s.pelanggan);
-  const [[row]] = await sql.transaction([
+  /* Nomor dokumen ditentukan server, bukan klien: dua orang yang membuka form
+     bersamaan dulu sama-sama menghitung "tertinggi + 1" dari daftar di
+     layarnya dan menyimpan nomor yang sama. Kunci advisory menahan pembuat SO
+     berikutnya sampai transaksi ini selesai, dan karena tiap pernyataan di
+     READ COMMITTED membaca snapshot baru, subkueri MAX-nya sudah melihat nomor
+     yang baru tersimpan. Nomor ber-akhiran "-2" dst. (data lama) tidak cocok
+     dengan pola dan diabaikan, sama seperti nomorBaru() di klien. */
+  const awalan = `SO-${s.tgl.slice(2, 4)}${s.tgl.slice(5, 7)}-`;
+  const [, [row]] = await sql.transaction([
+    sql`SELECT pg_advisory_xact_lock(hashtext('penjualan.no'))`,
     sql`INSERT INTO penjualan (id, no, tgl, pelanggan, pelanggan_akhir, ppn, gudang, status, dibuat_oleh)
-        VALUES (${s.id}, ${s.no}, ${s.tgl}, ${rute.pelanggan}, ${rute.akhir}, ${rute.ppn},
+        VALUES (${s.id},
+                (SELECT ${awalan} || lpad((COALESCE(MAX(substr(no, ${awalan.length + 1})::int), 0) + 1)::text, 3, '0')
+                   FROM penjualan WHERE no LIKE ${awalan + "%"} AND substr(no, ${awalan.length + 1}) ~ '^[0-9]+$'),
+                ${s.tgl}, ${rute.pelanggan}, ${rute.akhir}, ${rute.ppn},
                 ${s.gudang}, 'penawaran', ${req.user.id})
         RETURNING *`,
     ...s.items.map((it) => sql`
@@ -1465,6 +1494,17 @@ app.patch("/api/penjualan/:id/status", wrap(async (req, res) => {
   const salah = pindahStatus(SO_FLOW, "pesanan", so.status, req.body.status);
   if (salah) return res.status(400).json({ error: salah });
 
+  /* Setiap langkah mundur membatalkan sesuatu yang sudah dinyatakan terjadi
+     (barang berangkat, tagihan terbit, uang lunas), jadi wajib beralasan dan
+     tercatat di log_status. Langkah maju ikut tercatat tanpa alasan. */
+  const mundur = SO_FLOW.indexOf(req.body.status) < SO_FLOW.indexOf(so.status);
+  const catatan = teks(req.body?.catatan);
+  if (mundur && catatan.length < 3)
+    return res.status(400).json({ error: "Tulis alasan untuk mengembalikan status." });
+  const log = () => sql`
+    INSERT INTO log_status (penjualan, no, dari, ke, catatan, oleh, oleh_nama)
+    VALUES (${so.id}, ${so.no}, ${so.status}, ${req.body.status}, ${catatan}, ${req.user.id}, ${req.user.username})`;
+
   // Pengelolaan stok tidak dipakai lagi: status 'kirim' tidak pernah ditahan
   // oleh jumlah stok di gudang pengirim. Trigger DB tetap mencatat mutasi
   // keluar, jadi stok boleh menjadi minus.
@@ -1500,30 +1540,29 @@ app.patch("/api/penjualan/:id/status", wrap(async (req, res) => {
     await sql.transaction([
       sql`DELETE FROM stok_mutasi WHERE ref = ${so.no} AND tipe = 'keluar'`,
       sql`UPDATE penjualan SET status = 'pesanan', tgl_kirim = NULL WHERE id = ${so.id}`,
+      log(),
     ]);
     const [row] = await sql`SELECT * FROM penjualan WHERE id = ${so.id}`;
     return res.json(row);
   }
 
-  /* '→ Lunas' berarti "sisanya masuk hari ini": sisa tagihannya ikut dicatat
-     sebagai satu baris pembayaran, ditandai auto. Tanpa ini dokumen bisa
-     berstatus lunas dengan buku pembayaran yang kosong atau setengah terisi,
-     dan pertanyaan "kapan uangnya masuk" tidak akan pernah bisa dijawab.
-     Tanggalnya hari ini — penerimaan yang mundur dicatat lewat dialog
-     pembayaran, yang memang menanyakan tanggalnya. */
+  /* '→ Lunas' hanya sah bila pembayarannya memang sudah lengkap. Dulu langkah
+     ini mencatat sisa tagihan sebagai satu pembayaran otomatis bertanggal hari
+     ini, sehingga satu klik bisa "melunasi" Rp 10 juta yang belum pernah
+     diterima. Sekarang sisanya harus dicatat lewat dialog pembayaran — yang
+     menanyakan tanggal dan caranya — dan pembayaran terakhir itu sendiri yang
+     menandai dokumen lunas (tandaiLunas). */
   if (req.body.status === "lunas") {
     const { sisa } = await nilaiSisa(so.id);
-    if (sisa > 0) {
-      const id = await idBayarBaru();
-      await sql.transaction([
-        sql`INSERT INTO penjualan_bayar (id, penjualan, tgl, jumlah, cara, catatan, auto, dibuat_oleh, dibuat_oleh_nama)
-            VALUES (${id}, ${so.id}, wib_today(), ${sisa}, 'transfer', 'Pelunasan', true,
-                    ${req.user.id}, ${req.user.username})`,
-        sql`UPDATE penjualan SET status = 'lunas' WHERE id = ${so.id}`,
-      ]);
-    } else {
-      await sql`UPDATE penjualan SET status = 'lunas' WHERE id = ${so.id}`;
-    }
+    if (sisa > 0)
+      return res.status(400).json({
+        error: `Sisa tagihan masih Rp ${Math.round(sisa).toLocaleString("id-ID")} — catat pembayarannya dulu.`,
+        sisa,
+      });
+    await sql.transaction([
+      sql`UPDATE penjualan SET status = 'lunas' WHERE id = ${so.id}`,
+      log(),
+    ]);
     const [dok] = await sql`SELECT * FROM penjualan WHERE id = ${so.id}`;
     return res.json(dok);
   }
@@ -1535,19 +1574,23 @@ app.patch("/api/penjualan/:id/status", wrap(async (req, res) => {
     await sql.transaction([
       sql`DELETE FROM penjualan_bayar WHERE penjualan = ${so.id} AND auto`,
       sql`UPDATE penjualan SET status = 'tagihan' WHERE id = ${so.id}`,
+      log(),
     ]);
     const [dok] = await sql`SELECT * FROM penjualan WHERE id = ${so.id}`;
     return res.json(dok);
   }
 
-  const [row] = req.body.status === "kirim"
-    ? await sql`
-        UPDATE penjualan
-        SET status = ${req.body.status}, tgl_kirim = COALESCE(${tglKirim}::date, wib_today())
-        WHERE id = ${req.params.id} RETURNING *`
-    : await sql`
-        UPDATE penjualan SET status = ${req.body.status}
-        WHERE id = ${req.params.id} RETURNING *`;
+  const [[row]] = await sql.transaction([
+    req.body.status === "kirim"
+      ? sql`
+          UPDATE penjualan
+          SET status = ${req.body.status}, tgl_kirim = COALESCE(${tglKirim}::date, wib_today())
+          WHERE id = ${req.params.id} RETURNING *`
+      : sql`
+          UPDATE penjualan SET status = ${req.body.status}
+          WHERE id = ${req.params.id} RETURNING *`,
+    log(),
+  ]);
   res.json(row);
 }));
 
@@ -1596,12 +1639,17 @@ app.patch("/api/pembelian/:id/status", wrap(async (req, res) => {
 // dokumen bulan berjalan tanpa persetujuan (lihat tolakUbahSO). Sisanya —
 // bulan lalu, dokumen orang lain, import lama — tetap admin atau usulan hapus.
 app.delete("/api/penjualan/:id", wrap(async (req, res) => {
-  const [row] = await sql`SELECT no, tgl, dibuat_oleh FROM penjualan WHERE id = ${req.params.id}`;
+  const [row] = await sql`SELECT no, tgl, status, dibuat_oleh FROM penjualan WHERE id = ${req.params.id}`;
   if (!row) return res.status(404).json({ error: "Data penjualan tidak ditemukan." });
   const tolak = await tolakUbahSO(req.user, row);
   if (tolak) return res.status(403).json({ error: tolak });
-  // Tiga DELETE dalam satu transaksi — mutasi, item, dan header hilang bersama.
+  const alasan = teks(req.body?.alasan);
+  if (alasan.length < 3) return res.status(400).json({ error: "Tulis alasan penghapusan." });
+  // Tiga DELETE dalam satu transaksi — mutasi, item, dan header hilang bersama —
+  // ditambah jejaknya di log_status, yang tetap ada sesudah dokumennya hilang.
   await sql.transaction([
+    sql`INSERT INTO log_status (penjualan, no, dari, ke, catatan, oleh, oleh_nama)
+        VALUES (${req.params.id}, ${row.no}, ${row.status}, 'hapus', ${alasan}, ${req.user.id}, ${req.user.username})`,
     sql`DELETE FROM stok_mutasi WHERE ref = ${row.no}`,
     sql`DELETE FROM penjualan_item WHERE penjualan = ${req.params.id}`,
     sql`DELETE FROM penjualan WHERE id = ${req.params.id}`,

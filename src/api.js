@@ -99,7 +99,7 @@ export const api = {
   // sendiri). Server menolak bila bukan admin / bukan pembuat / bukan bulan ini.
   updatePenjualan: (id, s) => j(`/penjualan/${id}`, { method: "PUT", body: s }),
   // tgl hanya dipakai saat status 'kirim' — tanggal barang benar-benar keluar.
-  statusPenjualan: (id, status, tgl) => j(`/penjualan/${id}/status`, { method: "PATCH", body: { status, tgl } }),
+  statusPenjualan: (id, status, tgl, catatan) => j(`/penjualan/${id}/status`, { method: "PATCH", body: { status, tgl, catatan } }),
   /* Cicilan pelanggan. Server yang memutuskan apakah dokumennya menjadi lunas
      — sisa tagihan dihitung di sana, bukan dari angka yang dikirim layar. */
   bayarPenjualan: (id, b) => j(`/penjualan/${id}/bayar`, { method: "POST", body: b }),
@@ -111,7 +111,7 @@ export const api = {
   // bebas; untuk penjualan, pembuat dokumen juga boleh menghapus miliknya
   // selama masih bulan berjalan. Selebihnya memakai usulan penghapusan di
   // bawah; persetujuannya yang menjalankan hapus.
-  deletePenjualan: (id) => j(`/penjualan/${id}`, { method: "DELETE" }),
+  deletePenjualan: (id, alasan) => j(`/penjualan/${id}`, { method: "DELETE", body: { alasan } }),
   deletePembelian: (id) => j(`/pembelian/${id}`, { method: "DELETE" }),
   deletePelanggan: (id) => j(`/pelanggan/${id}`, { method: "DELETE" }),
 
