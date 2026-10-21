@@ -497,6 +497,9 @@ function Aplikasi() {
     try { localStorage.setItem("vk_user", JSON.stringify(u)); } catch { /* noop */ }
   };
   const logout = () => {
+    // Dicatat di log akses; header Authorization sudah terbentuk sebelum
+    // setToken(null) di bawah. Gagal (mis. sesi sudah habis) diabaikan.
+    if (online) api.logout().catch(() => {});
     setUser(null);
     api.setToken(null);
     try { localStorage.removeItem("vk_user"); } catch { /* noop */ }
@@ -1297,8 +1300,124 @@ function PenggunaAdmin({ online, say, user, minta, reload }) {
       {buka && <FormPengguna close={() => setBuka(false)} say={say} submit={tambah} />}
       {ubah && <FormPengguna close={() => setUbah(null)} say={say} submit={simpanUbah} awal={ubah} sendiri={ubah.id === user?.id} />}
       {sandiBaru && <SandiSementara data={sandiBaru} close={() => setSandiBaru(null)} />}
+      <AksesLogAdmin online={online} say={say} users={users} />
       <PenerbitAdmin online={online} say={say} reload={reload} />
       <LaporanDataAdmin online={online} say={say} />
+    </>
+  );
+}
+
+/* Pemantauan akses: siapa yang sedang aktif, kapan terakhir masuk, dan
+   peristiwa login/gagal/keluar terbaru (server: /api/akses-log). "Online"
+   berarti ada permintaan API dalam {AKTIF_MENIT} menit terakhir. */
+const PERISTIWA_LABEL = {
+  login: "Masuk|login", gagal: "Gagal masuk", terkunci: "Terkunci",
+  logout: "Keluar", ganti_sandi: "Ganti sandi", reset_sandi: "Reset sandi",
+};
+const PERISTIWA_KELAS = { gagal: "s-alert", terkunci: "s-alert", login: "s-ok", reset_sandi: "s-warn" };
+// Ringkas user-agent jadi "Chrome · Windows" — cukup untuk mengenali perangkat.
+const ringkasUA = (ua) => {
+  const s = String(ua || "");
+  if (!s) return "—";
+  const b = /Edg\//.test(s) ? "Edge" : /OPR\//.test(s) ? "Opera" : /SamsungBrowser/.test(s) ? "Samsung"
+    : /Chrome\//.test(s) ? "Chrome" : /Firefox\//.test(s) ? "Firefox" : /Safari\//.test(s) ? "Safari" : "Lain";
+  const o = /Android/.test(s) ? "Android" : /iPhone|iPad/.test(s) ? "iOS" : /Windows/.test(s) ? "Windows"
+    : /Mac OS X/.test(s) ? "macOS" : /Linux/.test(s) ? "Linux" : "";
+  return o ? `${b} · ${o}` : b;
+};
+const jamWIB = (w) => w ? new Date(w).toLocaleString("sv-SE", { timeZone: "Asia/Jakarta" }).slice(0, 16) : "—";
+
+function AksesLogAdmin({ online, say, users }) {
+  const { t } = useLang();
+  const [q, setQ] = useState({ hari: "7", username: "", peristiwa: "" });
+  const [d, setD] = useState(null);
+  const load = async () => {
+    try { setD(await api.aksesLog(q)); } catch (e) { setD({ ringkas: [], log: [] }); say(e.message, true); }
+  };
+  useEffect(() => { if (online) load(); }, [online, q.hari, q.username, q.peristiwa]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!online) return null;
+  const batas = Date.now() - (d?.aktifMenit || 5) * 60000;
+  const ubah = (k) => (v) => setQ((x) => ({ ...x, [k]: v }));
+  return (
+    <>
+      <SectionTitle id={t("Log Akses")}>
+        <button className="btn sm" onClick={load}>{t("Muat Ulang")}</button>
+      </SectionTitle>
+      <Card title={t("Aktivitas Pengguna")}
+        note={t("Online = ada aktivitas dalam {n} menit terakhir. Hitungan masuk & gagal untuk 30 hari terakhir. Waktu dalam WIB.", { n: d?.aktifMenit || 5 })}>
+        <Scroll>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">{t("Username")}</th>
+                <th scope="col">{t("Nama")}</th>
+                <th scope="col">{t("Status")}</th>
+                <th scope="col">{t("Aktif terakhir")}</th>
+                <th scope="col">{t("Login terakhir")}</th>
+                <th scope="col" className="r">{t("Masuk|login")}</th>
+                <th scope="col" className="r">{t("Gagal")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(d?.ringkas || []).map((u) => {
+                const on = u.terakhir_aktif && new Date(u.terakhir_aktif).getTime() > batas;
+                return (
+                  <tr key={u.id}>
+                    <td className="n strong">{u.username}</td>
+                    <td>{u.nama}</td>
+                    <td><span className={"st " + (on ? "s-ok" : "")}>{on ? t("Online") : t("Offline")}</span></td>
+                    <td className="num">{jamWIB(u.terakhir_aktif)}</td>
+                    <td className="num">{jamWIB(u.login_terakhir)}</td>
+                    <td className="r num">{u.login_30}</td>
+                    <td className={"r num"}>{u.gagal_30}</td>
+                  </tr>
+                );
+              })}
+              {d === null && <tr><td colSpan={7}><Empty id={t("Memuat…")} /></td></tr>}
+            </tbody>
+          </table>
+        </Scroll>
+      </Card>
+      <Card title={t("Riwayat Akses")}
+        note={t("Gagal masuk juga mencatat username yang tidak terdaftar. Kata sandi yang dicoba tidak pernah disimpan.")}>
+        <div className="akses-flt">
+          <Sel label={t("Periode")} value={q.hari} onChange={ubah("hari")}
+            opts={[["1", t("Hari ini & kemarin")], ["7", t("7 hari")], ["30", t("30 hari")], ["90", t("90 hari")]]} />
+          <Sel label={t("Pengguna")} value={q.username} onChange={ubah("username")}
+            opts={[["", t("Semua")], ...(users || []).map((u) => [u.username, u.username])]} />
+          <Sel label={t("Peristiwa")} value={q.peristiwa} onChange={ubah("peristiwa")}
+            opts={[["", t("Semua")], ...Object.entries(PERISTIWA_LABEL).map(([k, v]) => [k, t(v)])]} />
+        </div>
+        <Scroll max={420}>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">{t("Waktu")}</th>
+                <th scope="col">{t("Username")}</th>
+                <th scope="col">{t("Peristiwa")}</th>
+                <th scope="col">{t("IP")}</th>
+                <th scope="col">{t("Perangkat")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(d?.log || []).map((r) => (
+                <tr key={r.id}>
+                  <td className="num">{jamWIB(r.waktu)}</td>
+                  <td className="n">{r.username || "—"}{!r.pengguna && r.peristiwa === "gagal" && <span className="mut2"> ({t("tidak terdaftar")})</span>}</td>
+                  <td>
+                    <span className={"st " + (PERISTIWA_KELAS[r.peristiwa] || "")}>{t(PERISTIWA_LABEL[r.peristiwa] || r.peristiwa)}</span>
+                    {r.oleh && <span className="mut2"> · {t("oleh {u}", { u: r.oleh })}</span>}
+                  </td>
+                  <td className="num">{r.ip || "—"}</td>
+                  <td title={r.ua || ""}>{ringkasUA(r.ua)}</td>
+                </tr>
+              ))}
+              {d && d.log.length === 0 && <tr><td colSpan={5}><Empty id={t("Belum ada catatan akses pada periode ini.")} /></td></tr>}
+            </tbody>
+          </table>
+        </Scroll>
+        {d?.log?.length === 500 && <p className="note">{t("Hanya 500 catatan terbaru yang ditampilkan.")}</p>}
+      </Card>
     </>
   );
 }
@@ -5306,6 +5425,8 @@ function Style() {
 .vk .strong{font-weight:700}
 .vk .ok{color:var(--asm-success)} .vk .bad{color:var(--asm-danger)} .vk .warn{color:var(--asm-warning)}
 .vk .r{text-align:right}
+.vk .akses-flt{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:0 0 10px}
+@media (max-width:560px){.vk .akses-flt{grid-template-columns:1fr}}
 .vk .c{text-align:center}
 .vk ::selection{background:var(--asm-primary-20); color:var(--asm-primary)}
 

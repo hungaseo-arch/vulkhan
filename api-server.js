@@ -79,7 +79,7 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }));
    dihitung; kalau mengubah helper semacam itu, ubah juga KUNCI_SKEMA. */
 const KUNCI_SKEMA = "1";
 const SIDIK_SKEMA = crypto.createHash("sha1")
-  .update([KUNCI_SKEMA, ensureUsers, ensureUsulan, ensureHapus, ensurePelanggan, ensurePenjualan, ensureWaktu, ensurePenerbit]
+  .update([KUNCI_SKEMA, ensureUsers, ensureUsulan, ensureHapus, ensurePelanggan, ensurePenjualan, ensureWaktu, ensurePenerbit, ensureAkses]
     .map(String).join("\n"))
   .digest("hex").slice(0, 16);
 async function skemaSudahPasang() {
@@ -90,7 +90,7 @@ async function skemaSudahPasang() {
 }
 const pasangSkema = () => ensureUsers()
   // ensurePenjualan() punya FK ke pengguna, jadi tabel itu harus ada lebih dulu.
-  .then(() => Promise.all([ensureUsulan(), ensureHapus(), ensurePelanggan(), ensurePenjualan(), ensurePenerbit()]))
+  .then(() => Promise.all([ensureUsulan(), ensureHapus(), ensurePelanggan(), ensurePenjualan(), ensurePenerbit(), ensureAkses()]))
   // ensureWaktu() membuat wib_today(), lalu memakainya di DEFAULT kolom dan di
   // badan trigger — jadi ia harus jalan sesudah tabel-tabelnya ada.
   .then(() => ensureWaktu())
@@ -104,6 +104,8 @@ const ensureReady = () => (ready ||= skemaSudahPasang()
   .then((sudah) => (sudah ? null : pasangSkema()))
   .catch((e) => { ready = null; throw e; }));
 app.use((req, res, next) => ensureReady().then(() => next()).catch(next));
+// Dipasang sesudah ensureReady: kolom terakhir_aktif harus sudah ada.
+app.use((req, _res, next) => (req.user ? sentuhAktif(req.user.id) : Promise.resolve()).then(() => next(), () => next()));
 
 // Kolom teks pelanggan NOT NULL DEFAULT '' — undefined/null dari klien lama
 // harus jadi string kosong, bukan NULL yang ditolak basis data.
@@ -166,7 +168,7 @@ const RANK = { staff: 1, manager: 2, admin: 3 };
 const requireRole = (min) => (req, res, next) => {
   const auth = verifyToken((req.headers.authorization || "").replace(/^Bearer /, ""));
   if (!auth) return res.status(401).json({ error: "Sesi tidak valid. Silakan login ulang." });
-  if (auth.mc && req.path !== "/api/ganti-sandi")
+  if (auth.mc && req.path !== "/api/ganti-sandi" && req.path !== "/api/logout")
     return res.status(403).json({ error: "Ganti kata sandi sementara lebih dulu.", must_change: true });
   if ((RANK[auth.peran] || 0) < RANK[min])
     return res.status(403).json({ error: `Akses ditolak: butuh peran ${min} ke atas.` });
@@ -556,6 +558,54 @@ async function ensureWaktu() {
     $wib$ LANGUAGE plpgsql`;
 }
 
+/* Log akses: login berhasil/gagal/terkunci, keluar, ganti & reset sandi.
+   Hanya ditambah, tidak pernah diubah atau dihapus dari aplikasi.
+   pengguna tanpa FK: username yang dicoba bisa saja tidak ada, dan log harus
+   tetap terbaca setelah akunnya dihapus. Sandi yang dicoba TIDAK disimpan.
+   terakhir_aktif di pengguna diperbarui dari permintaan API mana pun
+   (paling sering sekali per AKTIF_MENIT per instans), untuk tanda "online". */
+const PERISTIWA_AKSES = ["login", "gagal", "terkunci", "logout", "ganti_sandi", "reset_sandi"];
+async function ensureAkses() {
+  await sql`
+    CREATE TABLE IF NOT EXISTS akses_log (
+      id        BIGSERIAL PRIMARY KEY,
+      waktu     TIMESTAMPTZ NOT NULL DEFAULT now(),
+      pengguna  TEXT,
+      username  TEXT NOT NULL,
+      peristiwa TEXT NOT NULL CHECK (peristiwa IN ('login','gagal','terkunci','logout','ganti_sandi','reset_sandi')),
+      ip        TEXT,
+      ua        TEXT,
+      oleh      TEXT
+    )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_akses_waktu ON akses_log (waktu DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_akses_user ON akses_log (username, waktu DESC)`;
+  await sql`ALTER TABLE pengguna ADD COLUMN IF NOT EXISTS terakhir_aktif TIMESTAMPTZ`;
+}
+
+// Di Vercel alamat klien ada di x-forwarded-for (entri pertama).
+const ipKlien = (req) =>
+  String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || req.socket?.remoteAddress || null;
+
+// Gagal mencatat tidak boleh menggagalkan login — cukup dicatat di konsol.
+async function catatAkses(req, { pengguna = null, username, peristiwa, oleh = null }) {
+  try {
+    await sql`
+      INSERT INTO akses_log (pengguna, username, peristiwa, ip, ua, oleh)
+      VALUES (${pengguna}, ${String(username || "").slice(0, 100)}, ${peristiwa},
+              ${ipKlien(req)}, ${String(req.headers["user-agent"] || "").slice(0, 300) || null}, ${oleh})`;
+  } catch (e) { console.error("catatAkses:", e.message); }
+}
+
+const AKTIF_MENIT = 5;
+const aktifTerakhir = new Map(); // id → ms; penghemat UPDATE, bukan sumber kebenaran
+async function sentuhAktif(id, paksa = false) {
+  const kini = Date.now();
+  if (!paksa && kini - (aktifTerakhir.get(id) || 0) < AKTIF_MENIT * 60000) return;
+  aktifTerakhir.set(id, kini);
+  try { await sql`UPDATE pengguna SET terakhir_aktif = now() WHERE id = ${id}`; }
+  catch (e) { console.error("sentuhAktif:", e.message); }
+}
+
 async function ensureUsers() {
   await sql`
     CREATE TABLE IF NOT EXISTS pengguna (
@@ -602,22 +652,62 @@ app.post("/api/login", wrap(async (req, res) => {
     SELECT COUNT(*)::int AS n FROM login_gagal
     WHERE username = ${username} AND waktu > now() - interval '10 minutes'`;
   if (n >= LOGIN_MAKS) {
+    await catatAkses(req, { username, peristiwa: "terkunci" });
     await tunda(1000);
     return res.status(429).json({ error: "Terlalu banyak percobaan. Coba lagi 10 menit lagi." });
   }
   const [u] = await sql`SELECT * FROM pengguna WHERE username = ${username}`;
   if (!u || !verifyPw(sandi, u.sandi_hash)) {
     await sql`INSERT INTO login_gagal (username) VALUES (${username})`;
+    await catatAkses(req, { pengguna: u?.id, username, peristiwa: "gagal" });
     // Catatan lama tidak berguna lagi sesudah jendelanya lewat.
     await sql`DELETE FROM login_gagal WHERE waktu < now() - interval '1 day'`;
     await tunda(1000);
     return res.status(401).json({ error: "Username atau kata sandi salah." });
   }
   await sql`DELETE FROM login_gagal WHERE username = ${username}`;
+  await catatAkses(req, { pengguna: u.id, username: u.username, peristiwa: "login" });
+  await sentuhAktif(u.id, true);
   res.json({
     id: u.id, username: u.username, nama: u.nama, peran: u.peran,
     must_change: !!u.must_change, token: signToken(u),
   });
+}));
+
+// Token tidak bisa dicabut (tanpa sesi di server), jadi ini hanya mencatat
+// bahwa pengguna menekan Keluar — token lama tetap sah sampai kedaluwarsa.
+app.post("/api/logout", wrap(async (req, res) => {
+  await catatAkses(req, { pengguna: req.user.id, username: req.user.username, peristiwa: "logout" });
+  res.json({ ok: true });
+}));
+
+/* Pemantauan akses (admin): ringkasan per pengguna + peristiwa terbaru.
+   Penyaring: hari (1–90), username, peristiwa. Paling banyak 500 baris. */
+app.get("/api/akses-log", requireRole("admin"), wrap(async (req, res) => {
+  const hari = Math.min(Math.max(parseInt(req.query.hari, 10) || 7, 1), 90);
+  const username = teks(req.query.username);
+  const peristiwa = PERISTIWA_AKSES.includes(req.query.peristiwa) ? req.query.peristiwa : "";
+  const [ringkas, log] = await Promise.all([
+    sql`
+      SELECT p.id, p.username, p.nama, p.peran, p.terakhir_aktif,
+             a.login_terakhir, COALESCE(a.login_30, 0)::int AS login_30, COALESCE(a.gagal_30, 0)::int AS gagal_30
+      FROM pengguna p
+      LEFT JOIN (
+        SELECT username,
+               MAX(waktu) FILTER (WHERE peristiwa = 'login') AS login_terakhir,
+               COUNT(*) FILTER (WHERE peristiwa = 'login') AS login_30,
+               COUNT(*) FILTER (WHERE peristiwa IN ('gagal','terkunci')) AS gagal_30
+        FROM akses_log WHERE waktu > now() - interval '30 days' GROUP BY username
+      ) a ON a.username = p.username
+      ORDER BY p.terakhir_aktif DESC NULLS LAST, p.username`,
+    sql`
+      SELECT id::text, waktu, pengguna, username, peristiwa, ip, ua, oleh FROM akses_log
+      WHERE waktu > now() - make_interval(days => ${hari})
+        AND (${username} = '' OR username = ${username})
+        AND (${peristiwa} = '' OR peristiwa = ${peristiwa})
+      ORDER BY waktu DESC LIMIT 500`,
+  ]);
+  res.json({ ringkas, log, hari, aktifMenit: AKTIF_MENIT });
 }));
 
 app.get("/api/pengguna", requireRole("admin"), wrap(async (_req, res) => {
@@ -659,6 +749,7 @@ app.post("/api/ganti-sandi", wrap(async (req, res) => {
   if (verifyPw(String(baru), u.sandi_hash))
     return res.status(400).json({ error: "Kata sandi baru harus berbeda dari yang lama." });
   await sql`UPDATE pengguna SET sandi_hash = ${hashPw(baru)}, must_change = false WHERE id = ${req.user.id}`;
+  await catatAkses(req, { pengguna: u.id, username: u.username, peristiwa: "ganti_sandi" });
   res.json({ ok: true, token: signToken({ ...u, must_change: false }) });
 }));
 
@@ -715,6 +806,7 @@ app.post("/api/pengguna/:id/reset-sandi", requireRole("admin"), wrap(async (req,
   // Catatan gagal ikut dibersihkan: pengguna yang terkunci 429 karena lupa
   // sandi harus bisa langsung masuk dengan sandi sementaranya.
   await sql`DELETE FROM login_gagal WHERE username = ${u.username}`;
+  await catatAkses(req, { pengguna: req.params.id, username: u.username, peristiwa: "reset_sandi", oleh: req.user.username });
   res.set("Cache-Control", "no-store").json({ ok: true, username: u.username, sandi });
 }));
 

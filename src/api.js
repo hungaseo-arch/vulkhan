@@ -59,6 +59,9 @@ export const api = {
 
   // auth & pengguna
   login: (username, sandi) => j("/login", { method: "POST", body: { username, sandi } }),
+  // hanya mencatat di log akses; token tetap sah sampai kedaluwarsa
+  logout: () => j("/logout", { method: "POST" }),
+  aksesLog: (q = {}) => j("/akses-log?" + new URLSearchParams(q)),
   gantiSandi: (lama, baru) => j("/ganti-sandi", { method: "POST", body: { lama, baru } }),
   listPengguna: () => j("/pengguna"),
   createPengguna: (u) => j("/pengguna", { method: "POST", body: u }),
