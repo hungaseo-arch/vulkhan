@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useId, useCallback } from "react";
 import { api } from "./api";
-import { downloadXlsx } from "./xlsx";
+import { downloadXlsx, downloadXlsxBook } from "./xlsx";
 import { LangProvider, useLang, LANGS } from "./i18n.jsx";
 
 /* ============================================================
@@ -2516,7 +2516,18 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
               qtySO(s), totalSO(s),
             ]),
           ];
-    downloadXlsx(`penjualan_${sumbu}_${today()}`, "Penjualan", aoa);
+    /* Sheet kedua: satu baris per item SO dalam filter yang sama — bentuk yang
+       bisa langsung di-pivot, karena kolom "Rincian" di sheet pertama berupa teks. */
+    const item = [
+      [t("No."), t("Tanggal"), t("Pelanggan"), t("Kode"), t("Nama Barang"), t("Qty"), t("Harga"), t("Subtotal")],
+      ...list.flatMap((s) => s.items.map((i) => [
+        s.no, s.tgl, cById(pelangganSO(s)).nama, pById(i.produk).kode, pById(i.produk).nama,
+        i.qty, i.harga, i.qty * i.harga,
+      ])),
+    ];
+    // nama berkas memuat filternya: dua unduhan dengan rentang lain tidak saling tertukar
+    const nama = ["penjualan", dari || "awal", sampai || "akhir", sumbu !== "waktu" && sumbu].filter(Boolean).join("_");
+    downloadXlsxBook(nama, [{ name: t("Penjualan"), rows: aoa }, { name: "Item", rows: item }]);
   };
 
   /* Baris transaksi di bawah pelanggan yang dibuka. Jumlah selnya harus persis

@@ -70,6 +70,10 @@
   "Manajemen Penjualan & Piutang Ban Vulkanisir"로 바꿨습니다(모듈을 열 때 다시 넣도록 주석). 푸터 `Copyright © ASEOA` 는 그대로.
 - **한국어 금액 단위.** 한국어 화면에서는 요약 금액이 억·만 단위입니다(`Rp 1.83억`, `Rp 203만/pcs`, 1만 미만은 전체 숫자).
   인도네시아어는 지금처럼 juta/miliar. Excel·인쇄·문서는 언어와 상관없이 전체 숫자입니다.
+- **Excel 서식.** 자체 xlsx 생성기에 `styles.xml` 을 넣었습니다: 머리글 굵게·회색 배경, 내용 길이에 맞춘 열 너비,
+  정수 `#,##0`, `YYYY-MM-DD` 문자열은 날짜 셀(`yyyy-mm-dd`, 정렬·필터 가능), 1행 고정, 자동 필터. 모든 화면의 내보내기에 적용됩니다.
+  판매 내보내기는 시트 2 "Item"(SO×품목: No·Tanggal·Pelanggan·Kode·Nama·Qty·Harga·Subtotal)을 추가하고,
+  파일 이름에 필터를 넣습니다(`penjualan_2025-01-01_2025-12-31.xlsx`, 분석 축이 있으면 `_pelanggan` 등).
 
 ### Added
 - **판매 화면 연도 선택 (2026-10-21).** 판매 필터를 연도 · 고객 · 기간 세 묶음으로 나누고, 연도를 고르면
