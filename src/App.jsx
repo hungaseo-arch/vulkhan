@@ -3222,7 +3222,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
         <FormPenjualan
           close={() => setBaru(false)} pelanggan={pelanggan} produk={produk}
           piutang={piutang} say={say} submit={doCreatePenjualan}
-          nomor={(tgl) => nomorBaru("SO", penjualan, tgl)}
+          nomor={(tgl) => nomorBaru("SO", penjualan, tgl)} bebasTgl={user?.peran === "admin"}
         />
       )}
       {/* Form yang sama dipakai untuk mengubah: yang berbeda hanya nilai awal,
@@ -3863,7 +3863,13 @@ function DokumenPenjualan({ so, pById, cById, gById, close }) {
    dokumen yang sudah ada. Yang TIDAK bisa diubah dari sini adalah nomor,
    tanggal, dan status — nomor menaut buku mutasi, tanggal menentukan dokumen
    ini masih boleh disentuh atau tidak, dan status punya tombol majunya sendiri. */
-function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, awal }) {
+/* Tanggal dokumen penjualan baru: paling awal tanggal 1 bulan berjalan,
+   paling akhir hari ini (WIB). Bulan yang sudah lewat sudah dilaporkan, jadi
+   dokumen susulan ke sana hanya boleh oleh admin; tanggal depan tidak boleh
+   sama sekali. Server memeriksa aturan yang sama (POST /api/penjualan). */
+const tglMinJual = (bebas) => (bebas ? undefined : today().slice(0, 8) + "01");
+
+function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, awal, bebasTgl }) {
   /* yang bisa dijual: ban jadi + Ban Jasa */
   const { t } = useLang();
   const jadi = produk.filter((p) => ["jadi", "jasa"].includes(p.kategori));
@@ -3915,6 +3921,12 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
   const kirim = async (lanjutNol = false) => {
     if (!f.pelanggan) return say(t("Pilih pelanggan terlebih dahulu."), true);
     if (!f.gudang) return say(t("Pilih gudang pengirim terlebih dahulu."), true);
+    if (!awal) {
+      if (!f.tgl) return say(t("Isi tanggal dokumen."), true);
+      if (f.tgl > today()) return say(t("Tanggal dokumen tidak boleh melewati hari ini."), true);
+      if (tglMinJual(bebasTgl) && f.tgl < tglMinJual(bebasTgl))
+        return say(t("Tanggal sebelum bulan ini hanya bisa diisi admin."), true);
+    }
     const salah = items.find((i) => String(i.qty).trim() !== "" && !(Number(i.qty) > 0));
     if (salah) return say(t("Qty harus berupa angka lebih besar dari 0."), true);
     const valid = items.filter((i) => Number(i.qty) > 0);
@@ -3945,13 +3957,25 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
   };
 
   return (
-    <Modal title={awal ? t("Ubah Penjualan {no}", { no: awal.no }) : t("Penjualan Baru")}
+    <Modal title={awal ? t("Ubah Penjualan {no}", { no: awal.no }) : t("Penawaran Baru")}
       close={close} onSave={() => kirim()} wide
       saveLabel={awal ? t("Simpan Perubahan") : t("Simpan Penawaran")}>
       <div className="row2">
         <Combo label={t("Pelanggan")} value={f.pelanggan} onChange={set("pelanggan")} placeholder={t("-- Pilih Pelanggan --")} opts={pelanggan.map((p) => [p.id, `${p.kode} — ${p.nama}`])} />
         <Combo label={t("Gudang Pengirim")} value={f.gudang} onChange={set("gudang")} placeholder={t("-- Pilih Gudang --")} opts={opsiGudang(t)} />
       </div>
+      {!awal && (
+        <div className="row2">
+          <label className="fld">
+            <span className="lbl">{t("Tanggal Dokumen")}</span>
+            <Tgl value={f.tgl} onChange={set("tgl")} min={tglMinJual(bebasTgl)} max={today()} />
+            <span className="hint">
+              {bebasTgl ? t("Nomor SO mengikuti bulan tanggal ini.")
+                : t("Bulan berjalan saja (sampai hari ini). Bulan sebelumnya lewat admin.")}
+            </span>
+          </label>
+        </div>
+      )}
 
       {awal && (
         <div className="row2">

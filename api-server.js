@@ -1443,8 +1443,17 @@ app.post("/api/penjualan", wrap(async (req, res) => {
     return res.status(400).json({ error: "Minimal satu baris barang." });
   // Header + semua item dalam satu transaksi & satu perjalanan HTTP ke Neon:
   // tidak ada SO tanpa item bila salah satu insert gagal.
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(s.tgl || "")))
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(s.tgl || "")) || isNaN(Date.parse(s.tgl)))
     return res.status(400).json({ error: "Tanggal dokumen tidak valid." });
+  /* Sama dengan form: tanggal depan ditolak untuk siapa pun, tanggal sebelum
+     bulan berjalan (WIB) hanya admin — bulan lalu sudah dilaporkan. */
+  const [tg] = await sql`
+    SELECT ${s.tgl}::date > wib_today() AS depan,
+           ${s.tgl}::date < date_trunc('month', wib_today())::date AS lalu`;
+  if (tg.depan)
+    return res.status(400).json({ error: "Tanggal dokumen tidak boleh melewati hari ini.", code: "TGL_DEPAN" });
+  if (tg.lalu && req.user.peran !== "admin")
+    return res.status(403).json({ error: "Tanggal sebelum bulan ini hanya bisa diisi admin.", code: "TGL_LALU" });
   const rute = await ruteTagih(s.pelanggan);
   /* Nomor dokumen ditentukan server, bukan klien: dua orang yang membuka form
      bersamaan dulu sama-sama menghitung "tertinggi + 1" dari daftar di

@@ -484,9 +484,15 @@ const KO = {
   "Tanggal kirim tidak boleh mundur ke bulan sebelum tanggal dokumen ({tgl}).": "출고일은 문서일({tgl})보다 앞선 달로 갈 수 없습니다",
 
   /* ---------- formulir penjualan ---------- */
-  "Penjualan Baru": "새 판매",
+  "Penawaran Baru": "새 견적",
   "Ubah Penjualan {no}": "판매 {no} 수정",
   "Simpan Penawaran": "견적 저장",
+  "Tanggal Dokumen": "전표일",
+  "Isi tanggal dokumen.": "전표일을 입력하세요.",
+  "Tanggal dokumen tidak boleh melewati hari ini.": "전표일은 오늘 이후로 할 수 없습니다.",
+  "Tanggal sebelum bulan ini hanya bisa diisi admin.": "이번 달 이전 날짜는 관리자만 입력할 수 있습니다.",
+  "Nomor SO mengikuti bulan tanggal ini.": "SO 번호는 이 날짜의 월을 따릅니다.",
+  "Bulan berjalan saja (sampai hari ini). Bulan sebelumnya lewat admin.": "이번 달 1일부터 오늘까지. 이전 달은 관리자에게 요청하세요.",
   "Simpan Perubahan": "수정 저장",
   "Gudang Pengirim": "출고 창고",
   "Rincian Barang": "품목 내역",
