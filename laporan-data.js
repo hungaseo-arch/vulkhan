@@ -11,7 +11,9 @@
      SMTP_HOST, SMTP_PORT (465 = TLS langsung, selain itu STARTTLS), SMTP_USER, SMTP_PASS
    Nama di depan ":" dicocokkan dengan kolom sales pelanggan (tanpa beda huruf
    besar/kecil, cukup kata pertamanya). Pelanggan yang salesnya kosong atau tidak
-   cocok dengan siapa pun dikirim ke semua penerima — tidak ada yang tercecer. */
+   cocok dengan siapa pun dikirim ke semua penerima — tidak ada yang tercecer.
+   Saat ini kolom sales berisi nama sales lapangan (mis. YONO), bukan penerima
+   laporan, jadi praktisnya ketiga penerima mendapat daftar lengkap, urut per sales. */
 
 // Sama dengan CABANG di src/App.jsx — ubah keduanya bersamaan.
 const ALIAS_CABANG = ["SBY", "SURABAYA", "JKT", "JAKARTA", "KRW", "KARAWANG", "SMG", "SMR", "SEMARANG"];
@@ -52,6 +54,8 @@ export function susunLaporan({ pelanggan, produk, akanDihapus = new Set() }) {
     if (!c.grade_tgl) isi.push("Grade belum dinilai");
     if (isi.length) kurang.push({ c, isi });
   }
+  // dikelompokkan per sales di surat, supaya mudah diteruskan ke orangnya
+  kurang.sort((x, y) => String(x.c.sales || "~").localeCompare(String(y.c.sales || "~")) || String(x.c.kode).localeCompare(String(y.c.kode)));
 
   // dugaan kembar: dibandingkan berpasangan, tiap pasangan sekali
   const kembar = [];
