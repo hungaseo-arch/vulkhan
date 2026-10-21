@@ -11,3 +11,12 @@ DB 제약도 겁니다.
 
 `log_status` 테이블(상태 변경·삭제 사유)과 `pengguna.must_change`, `login_gagal` 은 다른 테이블과 같이
 서버 시작 시 `ensure*` 함수가 만들기 때문에 여기에는 없습니다.
+
+## 6절 데이터 정비 (D1·D5)
+
+사용자 결정(2026-10-21): 같은 회사 이중 등록은 문제, 지점별 관리는 "회사명 - 지점", 출고일 = 전표일 원칙.
+
+3. `30_d1_dry_run.sql` — 읽기 전용. 4쌍의 지점·담당·거래 건수와, 그 밖의 같은 이름 고객 목록
+4. `40_d1_rename_branch.sql` — 지점별 쌍(KARTIKA SEMESTA LOGISTIK, BUNGA DARU) 이름 변경. 트랜잭션 안에서 확인 후 COMMIT
+5. `50_d1_merge.sql` — 진짜 중복(AFIF MA'ARUF, TRI DOMINITAMA/DOMINIC 등) 거래 이동. 쌍마다 코드 2개를 바꿔 실행한 뒤 앱에서 삭제 승인
+6. `60_d5_tgl_kirim.sql` — 선택. 출고일 없는 옛 전표에 전표일 채우기
