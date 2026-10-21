@@ -467,6 +467,7 @@ function Aplikasi() {
   const [cekData, setCekData] = useState(null); // pemberitahuan data belum lengkap
 
   useEffect(() => { api.setToken(user?.token || null); }, [user]);
+  api.setPenerjemah(t); // pesan galat server mengikuti bahasa yang sedang dipilih
 
   const say = (msg, bad) => {
     setToast({ msg, bad });

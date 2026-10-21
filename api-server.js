@@ -118,6 +118,9 @@ const wrap = (fn) => (req, res) =>
   });
 
 // ---------- auth & hak akses (RBAC) ----------
+// Galat yang sering sampai ke layar membawa `code` (+ `params`); klien
+// menerjemahkannya (src/api.js PESAN). `error` tetap teks Indonesia untuk
+// klien lama dan log.
 // Kata sandi di-hash dengan scrypt (tanpa dependensi tambahan).
 const hashPw = (pw) => {
   const salt = crypto.randomBytes(16).toString("hex");
@@ -167,11 +170,11 @@ const RANK = { staff: 1, manager: 2, admin: 3 };
 // memasangnya lagi secara eksplisit (manager untuk hapus, admin untuk pengguna).
 const requireRole = (min) => (req, res, next) => {
   const auth = verifyToken((req.headers.authorization || "").replace(/^Bearer /, ""));
-  if (!auth) return res.status(401).json({ error: "Sesi tidak valid. Silakan login ulang." });
+  if (!auth) return res.status(401).json({ error: "Sesi tidak valid. Silakan login ulang.", code: "SESI_INVALID" });
   if (auth.mc && req.path !== "/api/ganti-sandi" && req.path !== "/api/logout")
-    return res.status(403).json({ error: "Ganti kata sandi sementara lebih dulu.", must_change: true });
+    return res.status(403).json({ error: "Ganti kata sandi sementara lebih dulu.", code: "GANTI_SANDI", must_change: true });
   if ((RANK[auth.peran] || 0) < RANK[min])
-    return res.status(403).json({ error: `Akses ditolak: butuh peran ${min} ke atas.` });
+    return res.status(403).json({ error: `Akses ditolak: butuh peran ${min} ke atas.`, code: "PERAN_KURANG", params: { min } });
   req.user = auth;
   next();
 };
@@ -654,7 +657,7 @@ app.post("/api/login", wrap(async (req, res) => {
   if (n >= LOGIN_MAKS) {
     await catatAkses(req, { username, peristiwa: "terkunci" });
     await tunda(1000);
-    return res.status(429).json({ error: "Terlalu banyak percobaan. Coba lagi 10 menit lagi." });
+    return res.status(429).json({ error: "Terlalu banyak percobaan. Coba lagi 10 menit lagi.", code: "LOGIN_TERKUNCI" });
   }
   const [u] = await sql`SELECT * FROM pengguna WHERE username = ${username}`;
   if (!u || !verifyPw(sandi, u.sandi_hash)) {
@@ -663,7 +666,7 @@ app.post("/api/login", wrap(async (req, res) => {
     // Catatan lama tidak berguna lagi sesudah jendelanya lewat.
     await sql`DELETE FROM login_gagal WHERE waktu < now() - interval '1 day'`;
     await tunda(1000);
-    return res.status(401).json({ error: "Username atau kata sandi salah." });
+    return res.status(401).json({ error: "Username atau kata sandi salah.", code: "LOGIN_SALAH" });
   }
   await sql`DELETE FROM login_gagal WHERE username = ${username}`;
   await catatAkses(req, { pengguna: u.id, username: u.username, peristiwa: "login" });

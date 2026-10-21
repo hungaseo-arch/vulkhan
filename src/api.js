@@ -15,6 +15,18 @@ const num = (v) => Number(v) || 0;
 // memverifikasi peran tanpa bisa dipalsukan klien.
 let TOKEN = null;
 
+// Kode galat dari server → kunci kamus (teks Indonesia). Penerjemahnya dipasang
+// App lewat api.setPenerjemah(t) karena modul ini di luar React. Kode yang tak
+// dikenal tetap menampilkan pesan server apa adanya.
+const PESAN = {
+  SESI_INVALID: "Sesi tidak valid. Silakan login ulang.",
+  GANTI_SANDI: "Ganti kata sandi sementara lebih dulu.",
+  PERAN_KURANG: "Akses ditolak: butuh peran {min} ke atas.",
+  LOGIN_TERKUNCI: "Terlalu banyak percobaan. Coba lagi 10 menit lagi.",
+  LOGIN_SALAH: "Username atau kata sandi salah.",
+};
+let terjemah = (s, p) => s.replace(/\{(\w+)\}/g, (m, k) => (p && k in p ? String(p[k]) : m));
+
 async function j(path, opts = {}) {
   const res = await fetch(BASE + path, {
     headers: {
@@ -26,8 +38,10 @@ async function j(path, opts = {}) {
   });
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));
-    const err = new Error(e.error || `HTTP ${res.status}`);
+    const pesan = e.code && PESAN[e.code] ? terjemah(PESAN[e.code], e.params) : e.error;
+    const err = new Error(pesan || `HTTP ${res.status}`);
     err.status = res.status; // 401 dipakai UI untuk memaksa login ulang
+    err.code = e.code;
     throw err;
   }
   return res.status === 204 ? null : res.json();
@@ -53,6 +67,7 @@ const normTrx = (t) => ({
 export const api = {
   base: BASE,
   setToken: (t) => { TOKEN = t || null; },
+  setPenerjemah: (fn) => { terjemah = fn; },
 
   // cek koneksi sebelum login — satu-satunya endpoint tanpa sesi selain /login
   ping: () => j("/health"),

@@ -694,6 +694,12 @@ const KO = {
   "Pilih dari daftar": "목록에서 선택하세요",
   "Rincian {nama}": "{nama} 상세",
   "Tampilkan {n} terbaru": "최근 {n}건만 보기",
+  /* pesan galat server (src/api.js PESAN) */
+  "Sesi tidak valid. Silakan login ulang.": "세션이 유효하지 않습니다. 다시 로그인하세요.",
+  "Ganti kata sandi sementara lebih dulu.": "먼저 임시 비밀번호를 변경하세요.",
+  "Akses ditolak: butuh peran {min} ke atas.": "접근 거부: {min} 이상 권한이 필요합니다.",
+  "Terlalu banyak percobaan. Coba lagi 10 menit lagi.": "시도 횟수가 너무 많습니다. 10분 후 다시 시도하세요.",
+  "Username atau kata sandi salah.": "아이디 또는 비밀번호가 올바르지 않습니다.",
   "Rincian transaksi {nama}": "{nama} 거래 내역",
 };
 
