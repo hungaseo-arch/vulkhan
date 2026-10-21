@@ -460,6 +460,7 @@ function Aplikasi() {
   const [konfirmasi, setKonfirmasi] = useState(null); // { msg, onYes }
   const minta = (msg, onYes, opsi) => setKonfirmasi({ msg, onYes, ...opsi });
   const [gantiSandi, setGantiSandi] = useState(false); // modal ganti kata sandi
+  const [cekData, setCekData] = useState(null); // pemberitahuan data belum lengkap
 
   useEffect(() => { api.setToken(user?.token || null); }, [user]);
 
@@ -524,6 +525,23 @@ function Aplikasi() {
     setLoaded(true);
   };
   const reload = async () => applyData(await api.loadAll());
+
+  /* Pemberitahuan "Pemeriksaan Data Mingguan" pada akses pertama hari itu
+     (per pengguna, per perangkat). Muncul hanya bila ada yang perlu
+     dilengkapi; gagal memuat cukup dilewati — ini pengingat, bukan pengaman. */
+  useEffect(() => {
+    if (!loaded || !online || !user || user.must_change) return;
+    const kunci = `${user.username}:${today()}`;
+    try { if (localStorage.getItem("vk_cek_data") === kunci) return; } catch { /* noop */ }
+    let batal = false;
+    api.laporanData().then((d) => {
+      if (batal) return;
+      try { localStorage.setItem("vk_cek_data", kunci); } catch { /* noop */ }
+      const r = d.ringkas;
+      if (r.pelanggan + r.kembar + r.produk > 0) setCekData(d);
+    }).catch(() => {});
+    return () => { batal = true; };
+  }, [loaded, online, user?.username, user?.must_change]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* 1) cek koneksi saja — data tidak lagi terbuka untuk anonim */
   const cekKoneksi = () => {
@@ -924,6 +942,10 @@ function Aplikasi() {
         <GantiSandi online={online} say={say} user={user} wajib={!!user?.must_change}
           pakaiToken={pakaiToken} logout={logout} close={() => setGantiSandi(false)} />
       )}
+      {cekData && (
+        <CekDataModal d={cekData} close={() => setCekData(null)}
+          buka={() => { setCekData(null); setTab("mitra"); }} />
+      )}
       {tanyaKirim && (
         <FormTglKirim so={tanyaKirim} say={say} close={() => setTanyaKirim(null)}
           submit={(tgl) => { const so = tanyaKirim; setTanyaKirim(null); return majuSO(so, tgl); }} />
@@ -1304,6 +1326,43 @@ function PenggunaAdmin({ online, say, user, minta, reload }) {
       <PenerbitAdmin online={online} say={say} reload={reload} />
       <LaporanDataAdmin online={online} say={say} />
     </>
+  );
+}
+
+/* Isi pemberitahuan saat akses pertama: ringkasan + sebagian daftar
+   pelanggan yang kurang (urut sales, sama dengan surat mingguan). */
+const CEK_TAMPIL = 8;
+function CekDataModal({ d, close, buka }) {
+  const { t } = useLang();
+  const { kurang, kembar } = d.laporan;
+  return (
+    <Modal title={t("Laporan Data Mingguan")} close={close} onSave={buka} saveLabel={t("Buka Pelanggan")} wide>
+      <p className="note">{t("Data berikut masih perlu dilengkapi. Mohon diperbarui di menu Pelanggan / Produk.")}</p>
+      <div className="kpis">
+        <Kpi label={t("Pelanggan belum lengkap")} val={d.ringkas.pelanggan} tone={d.ringkas.pelanggan ? "warn" : ""} />
+        <Kpi label={t("Dugaan kembar")} val={d.ringkas.kembar} tone={d.ringkas.kembar ? "warn" : ""} />
+        <Kpi label={t("Produk belum lengkap")} val={d.ringkas.produk} tone={d.ringkas.produk ? "warn" : ""} />
+      </div>
+      {kurang.length > 0 && (
+        <Scroll max={280}>
+          <table>
+            <thead><tr><th scope="col">{t("Pelanggan")}</th><th scope="col">{t("Sales")}</th><th scope="col">{t("Yang kurang")}</th></tr></thead>
+            <tbody>
+              {kurang.slice(0, CEK_TAMPIL).map(({ c, isi }) => (
+                <tr key={c.id}>
+                  <td>{c.kode} — {c.nama}</td>
+                  <td>{c.sales || "—"}</td>
+                  <td>{isi.map((x) => t(x)).join(", ")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Scroll>
+      )}
+      {kurang.length > CEK_TAMPIL && <p className="note">{t("dan {n} pelanggan lainnya.", { n: kurang.length - CEK_TAMPIL })}</p>}
+      {kembar.length > 0 && <p className="note warn">{t("Dugaan pelanggan terdaftar dua kali: {n} pasang.", { n: kembar.length })}</p>}
+      <p className="mut2">{t("Pemberitahuan ini muncul sekali sehari.")}</p>
+    </Modal>
   );
 }
 

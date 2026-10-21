@@ -913,12 +913,16 @@ const tanggalWib = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0
 const urlAplikasi = () => process.env.APP_URL || "https://vulkhan.vercel.app";
 
 // Pratinjau untuk admin: isi laporan dan pembagiannya, tanpa mengirim apa pun.
-app.get("/api/laporan-data", requireRole("admin"), wrap(async (_req, res) => {
+// Semua yang login boleh membaca isinya (dipakai juga untuk pemberitahuan saat
+// masuk) — datanya sama dengan yang sudah terlihat di menu Pelanggan/Produk.
+// Pengaturan email dan daftar penerima hanya untuk admin.
+app.get("/api/laporan-data", wrap(async (req, res) => {
   const lap = await bacaLaporan();
+  const ringkas = { pelanggan: lap.kurang.length, kembar: lap.kembar.length, produk: lap.produkKurang.length };
+  if (req.user.peran !== "admin") return res.json({ ringkas, laporan: lap });
   const penerima = penerimaDariEnv();
   res.json({
-    siap: smtpSiap(), penerima: penerima.map((p) => p.nama),
-    ringkas: { pelanggan: lap.kurang.length, kembar: lap.kembar.length, produk: lap.produkKurang.length },
+    siap: smtpSiap(), penerima: penerima.map((p) => p.nama), ringkas,
     per_penerima: bagiPerPenerima(lap, penerima).map((b) => ({
       nama: b.nama, pelanggan: b.kurang.length, kembar: b.kembar.length, produk: b.produkKurang.length })),
     laporan: lap,
