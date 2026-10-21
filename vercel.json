@@ -5,6 +5,12 @@
   "regions": [
     "sin1"
   ],
+  "crons": [
+    {
+      "path": "/api/cron/laporan-data",
+      "schedule": "0 1 * * 1"
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/(.*)",

@@ -269,6 +269,30 @@ const menungguHapus = (usulan, jenis) =>
    berutang". Keduanya harus dibaca sama di seluruh layar: tanpa ini, pelanggan
    impor tidak bisa dijual sama sekali dan selalu tampil melebihi limit. */
 const punyaLimit = (c) => Number(c?.limit) > 0;
+/* Grade baru berarti bila pernah dinilai (grade_tgl terisi). Baris lama selalu
+   punya grade — bawaan form dulu "B" — jadi tanpa tanggal itu tidak dipercaya. */
+const gradeDinilai = (c) => !!c?.grade_tgl;
+
+/* Pelanggan kembar. Satu perusahaan didaftarkan sekali; bila dikelola per
+   cabang, namanya "NAMA - CABANG" supaya keduanya tetap terbedakan.
+   Pembandingnya mengabaikan bentuk usaha (PT/CV/UD), tanda baca, dan spasi. */
+const BENTUK_USAHA = /^(PT|CV|UD|TB|TOKO|PO)\.?\s+/;
+const normNama = (s) => String(s || "").toUpperCase().trim().replace(BENTUK_USAHA, "")
+  .replace(/['’`]/g, "").replace(/[^A-Z0-9]+/g, " ").trim();
+const namaInduk = (s) => normNama(String(s || "").split(/\s+-\s+/)[0]);
+const normTelp = (s) => String(s || "").replace(/\D/g, "").slice(-9);
+function kembarPelanggan(f, pelanggan, selfId) {
+  const nama = normNama(f.nama), induk = namaInduk(f.nama), telp = normTelp(f.telp);
+  const pakaiCabang = /\s-\s/.test(f.nama || "");
+  const hasil = [];
+  for (const x of pelanggan) {
+    if (x.id === selfId || !nama) continue;
+    if (normNama(x.nama) === nama) hasil.push({ x, sama: true });
+    else if (namaInduk(x.nama) === induk && !(pakaiCabang && /\s-\s/.test(x.nama))) hasil.push({ x, cabang: true });
+    else if (telp.length >= 8 && normTelp(x.telp) === telp) hasil.push({ x, telp: true });
+  }
+  return hasil;
+}
 const lewatiLimit = (c, piutang) => punyaLimit(c) && piutang > c.limit;
 
 const ROLE_LABEL = {
@@ -1091,11 +1115,12 @@ function Konfirmasi({ msg, onYes, close, say, tajuk, labelAksi, alasan: pakaiAla
 }
 
 /* Tanggal pengiriman — ditanyakan sekali, saat dokumen berpindah ke 'kirim'.
-   Bawaannya hari ini karena itu yang paling sering benar. Tanggal yang lebih
-   tua dari dokumennya diterima selama masih di bulan yang sama. */
+   Aturannya barang keluar di hari yang sama dengan dokumennya, jadi bawaannya
+   tanggal SO; diubah hanya bila memang terlambat. Tanggal yang lebih tua dari
+   dokumennya diterima selama masih di bulan yang sama. */
 function FormTglKirim({ so, submit, say, close }) {
   const { t } = useLang();
-  const [tgl, setTgl] = useState(today());
+  const [tgl, setTgl] = useState(so.tgl || today());
   const kirim = async () => {
     if (!tgl) return say(t("Isi tanggal pengiriman."), true);
     if (!tglKirimSah(tgl, so.tgl))
@@ -1105,7 +1130,8 @@ function FormTglKirim({ so, submit, say, close }) {
   return (
     <Modal title={t("Kirim {no}", { no: so.no })} close={close} onSave={kirim} saveLabel={t("Kirim")}>
       <Inp label={t("Tanggal Pengiriman")} type="date" value={tgl} onChange={setTgl}
-        hint={t("Tanggal dokumen: {tgl}", { tgl: so.tgl })} />
+        hint={tgl === so.tgl ? t("Sama dengan tanggal dokumen — sesuai aturan.")
+          : t("Berbeda dari tanggal dokumen ({tgl}). Pastikan memang terlambat kirim.", { tgl: so.tgl })} />
     </Modal>
   );
 }
@@ -1272,6 +1298,65 @@ function PenggunaAdmin({ online, say, user, minta, reload }) {
       {ubah && <FormPengguna close={() => setUbah(null)} say={say} submit={simpanUbah} awal={ubah} sendiri={ubah.id === user?.id} />}
       {sandiBaru && <SandiSementara data={sandiBaru} close={() => setSandiBaru(null)} />}
       <PenerbitAdmin online={online} say={say} reload={reload} />
+      <LaporanDataAdmin online={online} say={say} />
+    </>
+  );
+}
+
+/* Laporan mingguan data belum lengkap (server: laporan-data.js). Dikirim
+   otomatis tiap Senin 08.00 WIB oleh cron Vercel; di sini admin melihat isinya
+   dulu dan bisa mengirim di luar jadwal untuk mencoba pengaturan email. */
+function LaporanDataAdmin({ online, say }) {
+  const { t } = useLang();
+  const [d, setD] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const lihat = async () => {
+    setBusy(true);
+    try { setD(await api.laporanData()); } catch (e) { say(e.message, true); } finally { setBusy(false); }
+  };
+  const kirim = async () => {
+    setBusy(true);
+    try {
+      const r = await api.kirimLaporanData();
+      const n = r.hasil.filter((h) => h.dikirim).length;
+      say(t("Laporan terkirim ke {n} penerima.", { n }));
+    } catch (e) { say(e.message, true); } finally { setBusy(false); }
+  };
+  if (!online) return null;
+  return (
+    <>
+      <SectionTitle id={t("Laporan Data Mingguan")} />
+      <Card title={t("Laporan Data Belum Lengkap")}
+        note={t("Dikirim tiap Senin 08.00 WIB ke sales penanggung akun: data pelanggan yang kurang, grade belum dinilai, dugaan pelanggan kembar, produk tanpa ukuran/pola.")}>
+        <div className="acts">
+          <button className="btn sm" onClick={lihat} disabled={busy}>{t("Lihat Pratinjau")}</button>
+          <button className="btn sm pri" onClick={kirim} disabled={busy || !d?.siap}>{t("Kirim Sekarang")}</button>
+        </div>
+        {d && (
+          <>
+            <p className="note">
+              {d.siap ? t("Email siap. Penerima: {p}", { p: d.penerima.join(", ") })
+                : t("Email belum dikonfigurasi — laporan belum bisa dikirim.")}
+            </p>
+            <p className="note">
+              {t("Pelanggan belum lengkap: {a} · Dugaan kembar: {b} · Produk belum lengkap: {c}",
+                { a: d.ringkas.pelanggan, b: d.ringkas.kembar, c: d.ringkas.produk })}
+            </p>
+            {d.laporan.kembar.length > 0 && (
+              <Scroll max={260}>
+                <table>
+                  <thead><tr><th scope="col">{t("Pelanggan")} 1</th><th scope="col">{t("Pelanggan")} 2</th></tr></thead>
+                  <tbody>
+                    {d.laporan.kembar.map(({ a, b }) => (
+                      <tr key={a.id + b.id}><td>{a.kode} — {a.nama}</td><td>{b.kode} — {b.nama}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Scroll>
+            )}
+          </>
+        )}
+      </Card>
     </>
   );
 }
@@ -3222,9 +3307,12 @@ function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, on
             {so.pelanggan_akhir && (
               <div><span className="lbl2">{t("Ditagih ke")}</span><b>{tagih.nama}</b></div>
             )}
-            {/* Baris lama hasil import dikirim tanpa tanggal ini; "—" lebih
-                jujur daripada meminjam tanggal dokumen. */}
-            <div><span className="lbl2">{t("Tanggal Kirim")}</span><b>{so.tgl_kirim || "—"}</b></div>
+            {/* Baris lama hasil import dikirim tanpa tanggal ini. Karena aturannya
+                kirim = tanggal SO, tampilkan tanggal SO tapi beri tanda bahwa itu
+                pinjaman, bukan tanggal yang dicatat. */}
+            <div><span className="lbl2">{t("Tanggal Kirim")}</span><b>{so.tgl_kirim
+              || (["kirim", "tagihan", "lunas"].includes(so.status)
+                ? <>{so.tgl} <em className="mut2">{t("(tgl SO)")}</em></> : "—")}</b></div>
           </div>
 
           <Scroll max={300}>
@@ -4038,10 +4126,11 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
   const unduhExcel = () => {
     const aoa = [
       [t("Kode"), t("Nama"), t("Pemilik"), t("PIC"), t("Telepon"), t("Email"), t("Alamat"), t("Cabang"),
-       t("NPWP"), t("Sales"), t("Grade"), t("Limit Kredit"), t("Termin (hari)"), t("Piutang"), t("Omzet"), t("Catatan")],
+       t("NPWP"), t("Sales"), t("Grade"), t("Tanggal Grade"), t("Limit Kredit"), t("Termin (hari)"), t("Piutang"), t("Omzet"), t("Catatan")],
       ...list.map((c) => [
         c.kode, c.nama, c.pemilik, c.pic, c.telp, c.email, c.alamat, c.kota, c.npwp, c.sales,
-        c.grade, c.limit, c.termin, piutang(c.id), omzet(c.id), c.catatan,
+        gradeDinilai(c) ? c.grade : t("Belum dinilai"), c.grade_tgl || "",
+        c.limit, c.termin, piutang(c.id), omzet(c.id), c.catatan,
       ]),
     ];
     downloadXlsx(`pelanggan_${today()}`, "Pelanggan", aoa);
@@ -4165,7 +4254,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
                       </em>
                     </td>
                     <td className="mut">{namaCabang(c.kota, t)}</td>
-                    <td className="c"><span className={"grade g" + c.grade}>{c.grade}</span></td>
+                    <td className="c"><GradeBadge c={c} /></td>
                     <td className="r n mut">{t("{n} hari", { n: c.termin })}</td>
                     <td className={"r n strong " + (lewat ? "bad" : "")}>{rp(p)}</td>
                     <td className="r n">{punyaLimit(c) ? rp(c.limit) : <span className="mut">—</span>}</td>
@@ -4235,12 +4324,25 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
 /* Satu formulir untuk tambah dan ubah: c terisi berarti mode ubah. Saat ubah,
    limit & termin tidak ditampilkan — keduanya hanya berpindah lewat usulan
    yang disetujui admin, supaya jejak persetujuannya tidak bisa dilewati. */
+function GradeBadge({ c, tgl }) {
+  const { t } = useLang();
+  if (!gradeDinilai(c)) return <span className="grade g0" title={t("Belum dinilai")}>?</span>;
+  return (
+    <>
+      <span className={"grade g" + c.grade} title={t("Dinilai {tgl}", { tgl: c.grade_tgl })}>{c.grade}</span>
+      {tgl && <em className="mut2"> {t("Dinilai {tgl}", { tgl: c.grade_tgl })}</em>}
+    </>
+  );
+}
+
 function FormPelanggan({ c, pelanggan = [], close, say, submit }) {
   const { t } = useLang();
   const [f, setF] = useState({
     nama: c?.nama || "", pemilik: c?.pemilik || "", pic: c?.pic || "", telp: c?.telp || "",
     email: c?.email || "", alamat: c?.alamat || "", kota: c?.kota || "", npwp: c?.npwp || "",
-    sales: c?.sales || "", catatan: c?.catatan || "", grade: c?.grade || "B",
+    sales: c?.sales || "", catatan: c?.catatan || "",
+    // "" = belum dinilai; grade lama tanpa tanggal penilaian tidak ditampilkan sebagai hasil nilai
+    grade: gradeDinilai(c) ? c.grade : "",
     limit: String(c?.limit ?? 100000000), termin: String(c?.termin ?? 30),
     via: c?.via || "", ppn: c?.ppn ? "1" : "0",
   });
@@ -4250,12 +4352,20 @@ function FormPelanggan({ c, pelanggan = [], close, say, submit }) {
      sendiri. Server menolak hal yang sama — ini supaya tidak sampai terpilih. */
   const calonVia = pelanggan.filter((x) => x.id !== c?.id && !x.via);
   const adaYangLewat = !!c && pelanggan.some((x) => x.via === c.id);
+  const kembar = kembarPelanggan(f, pelanggan, c?.id);
+  const gantiNama = !c || normNama(c.nama) !== normNama(f.nama);
   const kirim = async () => {
     if (!f.nama.trim()) return say(t("Nama pelanggan wajib diisi."), true);
+    const persis = gantiNama && kembar.find((k) => k.sama);
+    if (persis)
+      return say(t("Nama ini sudah terdaftar ({kode}). Bila cabang lain, pakai \"Nama - Cabang\".", { kode: persis.x.kode }), true);
     const isi = {
       nama: f.nama.trim(), pemilik: f.pemilik.trim(), pic: f.pic.trim(), telp: f.telp.trim(),
       email: f.email.trim(), alamat: f.alamat.trim(), kota: f.kota.trim(), npwp: f.npwp.trim(),
-      sales: f.sales.trim(), catatan: f.catatan.trim(), grade: f.grade,
+      sales: f.sales.trim(), catatan: f.catatan.trim(),
+      // kolom grade tidak boleh kosong; "belum dinilai" disimpan sebagai grade lama + dinilai=false
+      grade: f.grade || c?.grade || "B", dinilai: !!f.grade,
+      grade_tgl: !f.grade ? null : (c?.grade_tgl && c.grade === f.grade ? c.grade_tgl : today()),
       via: adaYangLewat ? null : (f.via || null), ppn: f.ppn === "1",
     };
     try {
@@ -4269,7 +4379,19 @@ function FormPelanggan({ c, pelanggan = [], close, say, submit }) {
   return (
     <Modal title={c ? t("Ubah Pelanggan") : t("Pelanggan Baru")} close={close} onSave={kirim} wide>
       <h4 className="mut2">{t("Identitas Faktur")}</h4>
-      <Inp label={t("Nama Perusahaan")} value={f.nama} onChange={set("nama")} />
+      <Inp label={t("Nama Perusahaan")} value={f.nama} onChange={set("nama")}
+        hint={t("Satu perusahaan didaftarkan sekali. Per cabang: \"Nama - Cabang\".")} />
+      {kembar.length > 0 && (
+        <div className="note warn" role="status">
+          {kembar.slice(0, 3).map(({ x, sama, cabang }) => (
+            <div key={x.id}>
+              {sama ? t("Nama sama dengan {kode} — {nama}.", { kode: x.kode, nama: x.nama })
+                : cabang ? t("Mirip {kode} — {nama}. Bila cabang lain, tulis \"Nama - Cabang\".", { kode: x.kode, nama: x.nama })
+                : t("Telepon sama dengan {kode} — {nama}.", { kode: x.kode, nama: x.nama })}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="row2">
         <Inp label={t("Pemilik")} value={f.pemilik} onChange={set("pemilik")} hint={t("Nama pemilik/direktur.")} />
         <Inp label={t("NPWP")} value={f.npwp} onChange={set("npwp")} hint={t("Nomor pajak, dicetak di faktur.")} />
@@ -4301,7 +4423,9 @@ function FormPelanggan({ c, pelanggan = [], close, say, submit }) {
       <h4 className="mut2">{t("Data Penjualan")}</h4>
       <div className="row2">
         <Inp label={t("Sales")} value={f.sales} onChange={set("sales")} hint={t("Petugas penjualan penanggung akun.")} />
-        <Sel label={t("Grade")} value={f.grade} onChange={set("grade")} opts={[["A", "A"], ["B", "B"], ["C", "C"]]} />
+        <Sel label={t("Grade")} value={f.grade} onChange={set("grade")}
+          opts={[["", t("Belum dinilai")], ["A", "A"], ["B", "B"], ["C", "C"]]}
+          hint={gradeDinilai(c) && f.grade === c.grade ? t("Dinilai {tgl}", { tgl: c.grade_tgl }) : undefined} />
       </div>
       {c ? (
         <p className="note">
@@ -4354,7 +4478,7 @@ function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, cById, 
           <h4 className="mut2">{t("Data Penjualan")}</h4>
           <div className="cust-info">
             <div><span className="lbl2">{t("Sales")}</span><b>{c.sales || "-"}</b></div>
-            <div><span className="lbl2">{t("Grade")}</span><span className={"grade g" + c.grade}>{c.grade}</span></div>
+            <div><span className="lbl2">{t("Grade")}</span><GradeBadge c={c} tgl /></div>
             <div><span className="lbl2">{t("Termin")}</span><b>{t("{n} hari", { n: c.termin })}</b></div>
             <div><span className="lbl2">{t("Limit Kredit")}</span><b>{punyaLimit(c) ? rp(c.limit) : t("Belum diatur")}</b></div>
             <div><span className="lbl2">{t("Sisa Limit")}</span><b>{punyaLimit(c) ? rp(Math.max(0, c.limit - p)) : "—"}</b></div>
@@ -4672,7 +4796,7 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
                     </td>
                     <td>
                       <button type="button" className="namelink" onClick={() => setDetail(r.c)}>{r.c.nama}</button>
-                      <em className="mut2">{t("Grade {g}", { g: r.c.grade })}</em>
+                      <em className="mut2">{gradeDinilai(r.c) ? t("Grade {g}", { g: r.c.grade }) : t("Grade belum dinilai")}</em>
                     </td>
                     <td className="n">{r.so.tgl}</td>
                     <td className="n">{r.tempo}</td>
@@ -4757,7 +4881,7 @@ function DaftarUmur({ label, rows, close, onPilih }) {
                     <td className="n strong">
                       <button type="button" className="namelink" title={t("Lihat rincian")}>{r.so.no}</button>
                     </td>
-                    <td>{r.c.nama}<em className="mut2">{t("Grade {g}", { g: r.c.grade })}</em></td>
+                    <td>{r.c.nama}<em className="mut2">{gradeDinilai(r.c) ? t("Grade {g}", { g: r.c.grade }) : t("Grade belum dinilai")}</em></td>
                     <td className="n">{r.so.tgl}</td>
                     <td className="n">{r.tempo}</td>
                     <td className={"r n " + (r.telat > 90 ? "bad" : r.telat > 30 ? "warn" : "")}>
@@ -5579,6 +5703,7 @@ function Style() {
 .vk .gA{background:var(--asm-success-soft); color:var(--asm-success); border-color:var(--asm-success-border)}
 .vk .gB{background:var(--asm-info-soft); color:var(--asm-info); border-color:var(--asm-info-border)}
 .vk .gC{background:var(--asm-neutral-soft); color:var(--asm-neutral); border-color:var(--asm-neutral-border)}
+.vk .g0{background:transparent; color:var(--asm-fg-muted); border:1px dashed var(--asm-neutral-border)}
 
 /* modal */
 .vk .ov{position:fixed; inset:0; background:rgb(51 51 51 / .5); display:grid; place-items:center; padding:16px; z-index:50}

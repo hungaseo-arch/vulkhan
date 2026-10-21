@@ -11,6 +11,7 @@ import cors from "cors";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
 import { neon, types } from "@neondatabase/serverless";
+import { susunLaporan, bagiPerPenerima, penerimaDariEnv, smtpSiap, kirimLaporan } from "./laporan-data.js";
 
 // Kembalikan kolom DATE (oid 1082) apa adanya sebagai 'YYYY-MM-DD'.
 // Tanpa ini, driver mem-parsing ke JS Date dan menggeser tanggal karena
@@ -55,9 +56,10 @@ app.use("/api", (_req, res, next) => { res.set("Cache-Control", "no-store, priva
 // Seluruh /api butuh sesi login — baca maupun tulis. Data pelanggan, harga,
 // dan transaksi tidak boleh terbuka untuk anonim. Pemeriksaan can() di App.jsx
 // hanya menyembunyikan tombol, bukan pengaman.
-// Pengecualian: /login (belum punya token) dan /health (cek koneksi sebelum login).
+// Pengecualian: /login (belum punya token) dan /health (cek koneksi sebelum login),
+// serta cron Vercel yang membawa CRON_SECRET sendiri (diperiksa di rutenya).
 // Ditaruh sebelum penyiapan basis data agar permintaan anonim tidak menyentuh DB.
-const TERBUKA = new Set(["/api/login", "/api/health"]);
+const TERBUKA = new Set(["/api/login", "/api/health", "/api/cron/laporan-data"]);
 app.use((req, res, next) => (TERBUKA.has(req.path) ? next() : requireRole("staff")(req, res, next)));
 
 // Cek koneksi, dipakai layar login sebelum ada sesi.
@@ -329,6 +331,10 @@ async function ensurePelanggan() {
      pelanggan tidak bisa punya dua perlakuan pajak yang berbeda-beda. */
   await sql`ALTER TABLE pelanggan ADD COLUMN IF NOT EXISTS via TEXT REFERENCES pelanggan(id) ON DELETE SET NULL`;
   await sql`ALTER TABLE pelanggan ADD COLUMN IF NOT EXISTS ppn BOOLEAN NOT NULL DEFAULT false`;
+  /* Kapan grade terakhir benar-benar dinilai. NULL = belum pernah dinilai:
+     kolom grade lama selalu berisi (bawaannya B), jadi tanpa tanggal ini
+     "B" hasil penilaian dan "B" bawaan form tidak bisa dibedakan. */
+  await sql`ALTER TABLE pelanggan ADD COLUMN IF NOT EXISTS grade_tgl DATE`;
 }
 
 /* Kolom pemilik dokumen penjualan. Dipakai aturan "boleh ubah/hapus sendiri
@@ -802,6 +808,52 @@ app.put("/api/penerbit/:kode", requireRole("admin"), wrap(async (req, res) => {
   res.json(row);
 }));
 
+// ---------- laporan mingguan data belum lengkap (lihat laporan-data.js) ----------
+const bacaLaporan = async () => {
+  const [pelanggan, produk, hapus] = await Promise.all([
+    sql`SELECT * FROM pelanggan ORDER BY kode`,
+    sql`SELECT * FROM produk ORDER BY kode`,
+    sql`SELECT sasaran FROM hapus_usulan WHERE jenis = 'pelanggan' AND status = 'menunggu'`,
+  ]);
+  return susunLaporan({ pelanggan, produk, akanDihapus: new Set(hapus.map((h) => h.sasaran)) });
+};
+const tanggalWib = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
+const urlAplikasi = () => process.env.APP_URL || "https://vulkhan.vercel.app";
+
+// Pratinjau untuk admin: isi laporan dan pembagiannya, tanpa mengirim apa pun.
+app.get("/api/laporan-data", requireRole("admin"), wrap(async (_req, res) => {
+  const lap = await bacaLaporan();
+  const penerima = penerimaDariEnv();
+  res.json({
+    siap: smtpSiap(), penerima: penerima.map((p) => p.nama),
+    ringkas: { pelanggan: lap.kurang.length, kembar: lap.kembar.length, produk: lap.produkKurang.length },
+    per_penerima: bagiPerPenerima(lap, penerima).map((b) => ({
+      nama: b.nama, pelanggan: b.kurang.length, kembar: b.kembar.length, produk: b.produkKurang.length })),
+    laporan: lap,
+  });
+}));
+
+const kirimSekarang = async (res) => {
+  if (!smtpSiap())
+    return res.status(503).json({ error: "Email belum dikonfigurasi (SMTP_HOST/SMTP_USER/SMTP_PASS/MAIL_FROM/MAIL_TO)." });
+  const bagian = bagiPerPenerima(await bacaLaporan(), penerimaDariEnv());
+  res.json({ hasil: await kirimLaporan(bagian, { tanggal: tanggalWib(), url: urlAplikasi() }) });
+};
+
+// Admin bisa memicu kiriman di luar jadwal, mis. untuk mencoba pengaturan SMTP.
+app.post("/api/laporan-data/kirim", requireRole("admin"), wrap((_req, res) => kirimSekarang(res)));
+
+/* Dipanggil cron Vercel (vercel.json, Senin 08.00 WIB). Vercel mengirim
+   "Authorization: Bearer <CRON_SECRET>"; tanpa CRON_SECRET rute ini tertutup. */
+app.get("/api/cron/laporan-data", wrap(async (req, res) => {
+  const rahasia = process.env.CRON_SECRET || "";
+  const datang = Buffer.from((req.headers.authorization || "").replace(/^Bearer /, ""));
+  const harap = Buffer.from(rahasia);
+  if (!rahasia || datang.length !== harap.length || !crypto.timingSafeEqual(datang, harap))
+    return res.status(401).json({ error: "Tidak berwenang." });
+  return kirimSekarang(res);
+}));
+
 // ---------- master ----------
 app.get("/api/gudang", wrap(async (_req, res) => {
   res.json(await sql`SELECT * FROM gudang ORDER BY kode`);
@@ -825,10 +877,11 @@ app.post("/api/pelanggan", wrap(async (req, res) => {
   if (salahRute) return res.status(400).json({ error: salahRute });
   const [row] = await sql`
     INSERT INTO pelanggan (id, kode, nama, pemilik, pic, telp, email, alamat, kota, npwp,
-                           sales, catatan, grade, limit_kredit, termin, via, ppn)
+                           sales, catatan, grade, grade_tgl, limit_kredit, termin, via, ppn)
     VALUES (${c.id}, ${c.kode}, ${c.nama}, ${teks(c.pemilik)}, ${teks(c.pic)}, ${teks(c.telp)},
             ${teks(c.email)}, ${teks(c.alamat)}, ${teks(c.kota)}, ${teks(c.npwp)},
-            ${teks(c.sales)}, ${teks(c.catatan)}, ${c.grade}, ${c.limit}, ${c.termin},
+            ${teks(c.sales)}, ${teks(c.catatan)}, ${c.grade},
+            CASE WHEN ${!!c.dinilai} THEN wib_today() END, ${c.limit}, ${c.termin},
             ${c.via || null}, ${!!c.ppn})
     RETURNING *`;
   res.status(201).json(row);
@@ -848,6 +901,11 @@ app.put("/api/pelanggan/:id", wrap(async (req, res) => {
       telp = ${teks(c.telp)}, email = ${teks(c.email)}, alamat = ${teks(c.alamat)},
       kota = ${teks(c.kota)}, npwp = ${teks(c.npwp)}, sales = ${teks(c.sales)},
       catatan = ${teks(c.catatan)}, grade = ${c.grade},
+      -- tanggal penilaian hanya bergeser bila grade-nya memang berubah
+      -- (atau baru pertama kali dinilai), bukan setiap kali form disimpan
+      grade_tgl = CASE WHEN NOT ${!!c.dinilai} THEN NULL
+                       WHEN grade_tgl IS NULL OR grade IS DISTINCT FROM ${c.grade} THEN wib_today()
+                       ELSE grade_tgl END,
       via = ${c.via || null}, ppn = ${!!c.ppn}
     WHERE id = ${req.params.id}
     RETURNING *`;

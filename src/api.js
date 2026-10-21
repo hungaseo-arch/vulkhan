@@ -88,6 +88,8 @@ export const api = {
 
   // penerbit dokumen — baca semua yang login, ubah hanya admin
   listPenerbit: () => j("/penerbit"),
+  laporanData: () => j("/laporan-data"),
+  kirimLaporanData: () => j("/laporan-data/kirim", { method: "POST" }),
   updatePenerbit: (kode, p) => j(`/penerbit/${kode}`, { method: "PUT", body: p }),
 
   // tulis
