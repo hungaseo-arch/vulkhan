@@ -378,9 +378,28 @@ const dibayarSO = (s) => Number(s.dibayar) || 0;
 const sisaSO = (s) => Math.max(0, nilaiSO(s) - dibayarSO(s));
 const pelangganSO = (s) => s.pelanggan_akhir || s.pelanggan;
 
+/* Tab aktif tinggal di URL (?page=…) supaya muat ulang, tombol Kembali, dan
+   tautan yang dibagikan membuka layar yang sama. Pindah tab = pushState;
+   penyaring di dalam layar tetap replaceState agar riwayat tidak penuh.
+   Nilai yang tidak dikenal/tidak boleh dibuka jatuh ke Ringkasan saat render. */
+const bacaHalaman = () => new URLSearchParams(window.location.search).get("page") || "dasbor";
+const JUDUL_ASLI = typeof document === "undefined" ? "VULKHAN" : document.title;
+
 function Aplikasi() {
   const { t } = useLang();
-  const [tab, setTab] = useState("dasbor");
+  const [tab, setTabState] = useState(bacaHalaman);
+  const setTab = (k, extra) => {
+    const q = new URLSearchParams(extra);
+    q.set("page", k);
+    const url = `${window.location.pathname}?${q}`;
+    if (url !== `${window.location.pathname}${window.location.search}`) window.history.pushState(null, "", url);
+    setTabState(k);
+  };
+  useEffect(() => {
+    const balik = () => setTabState(bacaHalaman());
+    window.addEventListener("popstate", balik);
+    return () => window.removeEventListener("popstate", balik);
+  }, []);
   /* Semua koleksi mulai kosong dan `loaded` false: tidak ada angka di layar
      sebelum /bootstrap menjawab. Dulu state awalnya data contoh, dan selama
      beberapa detik setelah login angka contoh itu terbaca seperti angka
@@ -449,7 +468,8 @@ function Aplikasi() {
     try { localStorage.removeItem("vk_user"); } catch { /* noop */ }
     setStokServer(null);
     setLoaded(false);
-    setTab("dasbor");
+    setTabState("dasbor");
+    window.history.replaceState(null, "", window.location.pathname);
   };
 
   /* ---------- muat data dari server ---------- */
@@ -777,11 +797,7 @@ function Aplikasi() {
   /* Pindah ke layar Penjualan dengan periode tertentu. Penyaring layar itu
      dibaca dari URL saat ia dipasang, jadi URL diatur dulu, tabnya kemudian —
      tanpa memuat ulang halaman. */
-  const bukaPenjualan = (dari, sampai) => {
-    const q = new URLSearchParams({ dari, sampai });
-    window.history.replaceState(null, "", `${window.location.pathname}?${q}`);
-    setTab("jual");
-  };
+  const bukaPenjualan = (dari, sampai) => setTab("jual", { dari, sampai });
 
   const ctx = {
     produk, pelanggan, pemasok, mutasi, mutasiLimit, penjualan, pembelian,
@@ -801,6 +817,12 @@ function Aplikasi() {
     ["piutang", "Piutang"],
     ...(can("users") ? [["admin", "Pengguna"]] : []),
   ].filter(([k]) => !MODUL_SEMBUNYI.includes(k));
+  /* modul tersembunyi, admin tanpa hak, atau page=asal → Ringkasan */
+  const aktif = TABS.some(([k]) => k === tab) ? tab : "dasbor";
+  const labelAktif = TABS.find(([k]) => k === aktif)?.[1];
+  useEffect(() => {
+    document.title = user && labelAktif ? `${t(labelAktif)} · VULKHAN` : JUDUL_ASLI;
+  }, [user, labelAktif, t]);
 
   /* ---------- gerbang: loading & login ---------- */
   if (conn === "loading")
@@ -837,7 +859,7 @@ function Aplikasi() {
         <div className="accent" />
         <nav className="tabs">
           {TABS.map(([k, a]) => (
-            <button key={k} className={"tab" + (tab === k ? " on" : "")} aria-current={tab === k ? "page" : undefined} onClick={() => setTab(k)}>
+            <button key={k} className={"tab" + (aktif === k ? " on" : "")} aria-current={aktif === k ? "page" : undefined} onClick={() => setTab(k)}>
               {t(a)}
             </button>
           ))}
@@ -849,13 +871,13 @@ function Aplikasi() {
           <Memuat galat={galatMuat} offline={!online}
             coba={() => (online ? muatData() : cekKoneksi())} />
         )}
-        {loaded && tab === "dasbor" && <Dasbor {...ctx} />}
-        {loaded && tab === "stok" && !MODUL_SEMBUNYI.includes("stok") && <Stok {...ctx} />}
-        {loaded && tab === "jual" && <Penjualan {...ctx} />}
-        {loaded && tab === "beli" && !MODUL_SEMBUNYI.includes("beli") && <Pembelian {...ctx} />}
-        {loaded && tab === "mitra" && <Pelanggan {...ctx} />}
-        {loaded && tab === "piutang" && <Piutang {...ctx} />}
-        {loaded && tab === "admin" && can("users") && <PenggunaAdmin {...ctx} />}
+        {loaded && aktif === "dasbor" && <Dasbor {...ctx} />}
+        {loaded && aktif === "stok" && !MODUL_SEMBUNYI.includes("stok") && <Stok {...ctx} />}
+        {loaded && aktif === "jual" && <Penjualan {...ctx} />}
+        {loaded && aktif === "beli" && !MODUL_SEMBUNYI.includes("beli") && <Pembelian {...ctx} />}
+        {loaded && aktif === "mitra" && <Pelanggan {...ctx} />}
+        {loaded && aktif === "piutang" && <Piutang {...ctx} />}
+        {loaded && aktif === "admin" && can("users") && <PenggunaAdmin {...ctx} />}
       </main>
 
       <footer className="ft">Copyright © ASEOA</footer>
@@ -2271,7 +2293,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
   };
 
   useEffect(() => {
-    const q = new URLSearchParams();
+    const q = new URLSearchParams({ page: "jual" });
     if (dari) q.set("dari", dari);
     if (sampai) q.set("sampai", sampai);
     if (sumbu !== "waktu") q.set("sumbu", sumbu);
