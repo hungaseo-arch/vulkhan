@@ -319,7 +319,7 @@ function MenuPengguna({ user, gantiSandi, logout }) {
   return (
     <div className="um" ref={kotak}>
       <button type="button" className={"um-b" + (buka ? " on" : "")} aria-haspopup="menu" aria-expanded={buka}
-        onClick={() => setBuka((v) => !v)}>
+        aria-label={t("Menu pengguna {nama}", { nama: user.nama })} onClick={() => setBuka((v) => !v)}>
         <span className={"um-av r-" + user.peran} aria-hidden="true">{user.nama.slice(0, 1).toUpperCase()}</span>
         <span className="um-nm">{user.nama}</span>
         <svg className="um-ar" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
@@ -837,7 +837,7 @@ function Aplikasi() {
         <div className="accent" />
         <nav className="tabs">
           {TABS.map(([k, a]) => (
-            <button key={k} className={"tab" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>
+            <button key={k} className={"tab" + (tab === k ? " on" : "")} aria-current={tab === k ? "page" : undefined} onClick={() => setTab(k)}>
               {t(a)}
             </button>
           ))}
@@ -1497,7 +1497,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
       )}
 
       <SectionTitle id={t("Ringkasan Bulanan")} />
-      <Card title={t("Penjualan per Bulan")} note={t("tidak termasuk penawaran · pelanggan dihitung unik")}>
+      <Card title={t("Penjualan per Bulan")} note={t("tidak termasuk penawaran · pelanggan unik yang bertransaksi")}>
         <Scroll>
           <table>
             <thead>
@@ -2023,12 +2023,38 @@ function DetailProduk({ p, getStok, stokTotal, close }) {
    layarnya sendiri, supaya daftar di layar penjualan tidak dipenuhi permintaan
    hapus pelanggan. Tidak ada usulan sama sekali berarti kartunya tidak muncul:
    kartu kosong memakan tinggi layar untuk mengatakan "tidak ada apa-apa". */
-function KartuUsulHapus({ jenis, hapusUsulan, can, onPutuskan }) {
+/* Letak kartu usulan. Ada yang menunggu dan menyangkut pembacanya (admin yang
+   memutus, atau pengajunya sendiri) → kartu terbuka di atas KPI. Selain itu
+   satu baris terlipat di bawah KPI: riwayat yang sudah diputus tidak perlu
+   mendahului angka penjualan. `satuTempat` untuk layar yang kartunya memang
+   sudah di bawah KPI — terbuka atau terlipat di tempat yang sama. */
+const usulanMendesak = (rows, can, user) =>
+  rows.some((u) => u.status === "menunggu" && (can("putusan") || u.pengusul === user?.id));
+function LipatUsulan({ judul, rows, mendesak, posisi, satuTempat, children }) {
+  const { t } = useLang();
+  const [buka, setBuka] = useState(false);
+  if (!rows.length) return null;
+  if (mendesak) return satuTempat || posisi === "atas" ? children : null;
+  if (posisi === "atas") return null;
+  const tunggu = rows.filter((u) => u.status === "menunggu").length;
+  return (
+    <>
+      <button type="button" className="lipat-usul" aria-expanded={buka} onClick={() => setBuka((v) => !v)}>
+        {t("{judul}: {a} menunggu · {b} selesai", { judul, a: fmt(tunggu), b: fmt(rows.length - tunggu) })}
+        <span className="chev" aria-hidden="true">{buka ? "▾" : "▸"}</span>
+      </button>
+      {buka && children}
+    </>
+  );
+}
+
+function KartuUsulHapus({ jenis, hapusUsulan, can, user, posisi, satuTempat, onPutuskan }) {
   const { t } = useLang();
   const [semua, setSemua] = useState(false);
   const rows = (hapusUsulan || []).filter((u) => u.jenis === jenis);
-  if (!rows.length) return null;
   return (
+    <LipatUsulan judul={t("Permintaan Hapus")} rows={rows} mendesak={usulanMendesak(rows, can, user)}
+      posisi={posisi} satuTempat={satuTempat}>
     <Card title={t("Permintaan Hapus")}
       note={t("Diajukan oleh petugas, disahkan oleh admin. Data terhapus tepat saat usulan disetujui.")}>
       <Scroll>
@@ -2064,6 +2090,7 @@ function KartuUsulHapus({ jenis, hapusUsulan, can, onPutuskan }) {
       </Scroll>
       <KakiSemua total={rows.length} semua={semua} onToggle={() => setSemua((v) => !v)} />
     </Card>
+    </LipatUsulan>
   );
 }
 
@@ -2507,7 +2534,8 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
     const j = jumlahPeringkat(rows);
     return (
     <>
-      <table className="drill rank">
+      <Scroll>
+      <table className="drill rank cust">
         <thead>
           <tr>
             <th scope="col" className="no">#</th>
@@ -2578,6 +2606,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
           </tfoot>
         )}
       </table>
+      </Scroll>
       <KakiSemua total={rows.length} semua={semua} onToggle={() => setSemua((v) => !v)} />
     </>
     );
@@ -2626,7 +2655,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
         <button className="btn pri" onClick={() => setBaru(true)}>{t("+ Penjualan Baru")}</button>
       </SectionTitle>
 
-      <KartuUsulHapus jenis="penjualan" hapusUsulan={hapusUsulan} can={can} onPutuskan={setPutusanH} />
+      <KartuUsulHapus jenis="penjualan" posisi="atas" hapusUsulan={hapusUsulan} can={can} user={user} onPutuskan={setPutusanH} />
 
       <div className="kpis jual-kpi">
         <KpiTren label={t("Nilai Penjualan")} val={rpRingkas(kini.total)} delta={naikTurun(kini.total, lalu?.total)} />
@@ -2637,6 +2666,8 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
         <KpiTren label={t("Jumlah Transaksi")} val={t("{n} transaksi", { n: fmt(kini.n) })}
           sub={t("rata-rata {n}/bulan", { n: fmt(bulanTerpakai ? kini.n / bulanTerpakai : 0) })} />
       </div>
+
+      <KartuUsulHapus jenis="penjualan" posisi="bawah" hapusUsulan={hapusUsulan} can={can} user={user} onPutuskan={setPutusanH} />
 
       {/* Sumbu analisis. Diletakkan di bawah KPI, bukan di deret penyaring:
           yang berganti bukan data yang dihitung, melainkan cara membacanya. */}
@@ -2701,7 +2732,8 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
                 aria-pressed={kelompok === k} onClick={() => ubah({ kelompok: k })}>{t(label)}</button>
             ))}
           </div>
-          <table className="drill rank">
+          <Scroll>
+          <table className="drill rank prod">
             <thead>
               <tr>
                 <th scope="col" className="no">#</th>
@@ -2737,6 +2769,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
               {perProduk.length === 0 && <tr><td colSpan={7}><Empty id={t("Tidak ada transaksi pada filter ini.")} /></td></tr>}
             </tbody>
           </table>
+          </Scroll>
           <KakiSemua total={perProduk.length} semua={semua} onToggle={() => setSemua((v) => !v)} />
         </Card>
       )}
@@ -2913,6 +2946,9 @@ function GrafBulanan({ data, lang, pilih, onPilih }) {
     .map((d, i) => (d.datang ? null : `${((i + 0.5) / data.length) * 100},${GRAF_DASAR - GRAF_ANGKAT - (maxQty ? (d.qty / maxQty) * GRAF_BAR : 0)}`))
     .filter(Boolean).join(" ");
   const aktif = tip == null ? null : data[tip];
+  /* Label yang lebih lebar dari kolomnya akan bertabrakan dengan tetangga
+     ("198 pcs232 pcs") — disembunyikan; angkanya tetap ada di tooltip & title. */
+  const muat = (teks, px) => !lebarKol || teks.length * px <= lebarKol - 4;
 
   return (
     <Card cls="graf-card" title={t("Tren Bulanan")} note={t("Batang = nilai penjualan · garis = kuantitas")}>
@@ -2926,6 +2962,7 @@ function GrafBulanan({ data, lang, pilih, onPilih }) {
           <button key={d.ym} type="button"
             className={"graf-kol" + (d.datang ? " datang" : "") + (tip === i ? " sorot" : "") + (d.ym === pilih ? " pilih" : "")}
             disabled={d.n === 0} aria-pressed={d.ym === pilih} aria-label={`${bulanLabel(d.ym, lang)} — ${rpRingkas(d.total)}`}
+            title={`${bulanLabel(d.ym, lang)} · ${rpRingkas(d.total)} · ${fmt(d.qty)} pcs`}
             onMouseEnter={() => setTip(i)} onMouseLeave={() => setTip(null)}
             onFocus={() => setTip(i)} onBlur={() => setTip(null)}
             onClick={() => onPilih(d.ym)}>
@@ -2933,10 +2970,10 @@ function GrafBulanan({ data, lang, pilih, onPilih }) {
                 tiap angka menempel pada bentuk yang diwakilinya. Nilai ditulis
                 lengkap dengan satuannya — tabel di bawah grafik sudah tidak ada. */}
             <span className="graf-bar" style={{ height: maxNilai ? Math.round((d.total / maxNilai) * GRAF_BATANG) : 0 }}>
-              {d.total > 0 && <span className="graf-nilai">{satuan(d.total)}</span>}
+              {d.total > 0 && muat(satuan(d.total), 6) && <span className="graf-nilai">{satuan(d.total)}</span>}
             </span>
             <span className="graf-x">{bulanSingkat(d.ym, lang)}</span>
-            {!d.datang && d.qty > 0 && (
+            {!d.datang && d.qty > 0 && muat(`${fmt(d.qty)} pcs`, 6.5) && (
               <span className="graf-q" style={{ bottom: Math.min(GRAF_T - 12, GRAF_X + GRAF_ANGKAT + tinggiQ(d) + angkatLabel(i) + 3) }}>
                 {fmt(d.qty)} pcs
               </span>
@@ -3189,6 +3226,30 @@ function RincianPenjualan({ so, pById, cById, gById, totalSO, close, onCetak, on
   );
 }
 
+const KERTAS_W = 760;
+/* Skala kertas agar seluruh lebar 760px muat di wadah gulir; tinggi asli diukur
+   supaya pembungkus mengambil ruang hasil skala (transform tidak mengubah tata letak). */
+function useSkalaKertas() {
+  const gulir = useRef(null);
+  const kertas = useRef(null);
+  const [skala, setSkala] = useState(1);
+  const [tinggi, setTinggi] = useState(0);
+  useEffect(() => {
+    const g = gulir.current, k = kertas.current;
+    if (!g || !k || typeof ResizeObserver === "undefined") return undefined;
+    const ukur = () => {
+      const cs = getComputedStyle(g);
+      const isi = g.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      setSkala(Math.min(1, isi / KERTAS_W));
+      setTinggi(k.offsetHeight);
+    };
+    const ro = new ResizeObserver(ukur);
+    ro.observe(g); ro.observe(k);
+    return () => ro.disconnect();
+  }, []);
+  return { gulir, kertas, skala, tinggi };
+}
+
 function DokumenPenjualan({ so, pById, cById, gById, close }) {
   const { t } = useLang();
   const [jenis, setJenis] = useState(so.status === "penawaran" || so.status === "pesanan" ? "penawaran" : "faktur");
@@ -3209,6 +3270,7 @@ function DokumenPenjualan({ so, pById, cById, gById, close }) {
   const ppn = firm.ppn ? Math.round(subtotal * PPN_PERSEN / 100) : 0;
   const grand = subtotal + ppn;
   const jatuhTempo = addDays(so.tgl, isFaktur ? (Number(c.termin) || 30) : 14);
+  const { gulir, kertas, skala, tinggi } = useSkalaKertas();
 
   return (
     <div className="ov" onClick={close}>
@@ -3233,19 +3295,22 @@ function DokumenPenjualan({ so, pById, cById, gById, close }) {
           </div>
         </div>
 
-        <div className="doc-scroll">
-          <div className="doc-paper">
+        <div className="doc-scroll" ref={gulir}>
+          {/* di layar sempit kertas 760px diperkecil utuh, bukan dipotong; cetak tetap ukuran asli */}
+          <div className="doc-fit" style={skala < 1 ? { width: KERTAS_W * skala, height: tinggi * skala } : undefined}>
+          <div className="doc-paper" ref={kertas}
+            style={skala < 1 ? { width: KERTAS_W, maxWidth: "none", transform: `scale(${skala})`, transformOrigin: "top left" } : undefined}>
             <div className="doc-hd">
               <div className="doc-co">
                 <TreadMark />
                 <div>
-                  <h2>{firm.nama.toUpperCase()}</h2>
+                  <div className="doc-issuer">{firm.nama.toUpperCase()}</div>
                   <p>{firm.sub}</p>
                   <p className="doc-addr">Indonesia · Telp — · Email —</p>
                 </div>
               </div>
               <div className="doc-title">
-                <h1 id={judul}>{isFaktur ? "FAKTUR PENJUALAN" : "PENAWARAN HARGA"}</h1>
+                <h2 id={judul}>{isFaktur ? "FAKTUR PENJUALAN" : "PENAWARAN HARGA"}</h2>
               </div>
             </div>
 
@@ -3324,6 +3389,7 @@ function DokumenPenjualan({ so, pById, cById, gById, close }) {
               {firm.ppn ? " · Harga belum termasuk PPN." : " · Non-PKP, tanpa PPN."}
               {" · "}Dicetak dari VULKANISIR
             </p>
+          </div>
           </div>
         </div>
       </div>
@@ -3490,7 +3556,7 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
 }
 
 /* ============================ PEMBELIAN ============================ */
-function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById, gById, majuPO, mundurPO, say, can, minta, doDeletePembelian, hapusUsulan, ajukanHapus, putusanHapus }) {
+function Pembelian({ user, pembelian, doCreatePembelian, pemasok, produk, pById, sById, gById, majuPO, mundurPO, say, can, minta, doDeletePembelian, hapusUsulan, ajukanHapus, putusanHapus }) {
   const { t, lang } = useLang();
   const [buka, setBuka] = useState(false);
   const [usulHapus, setUsulHapus] = useState(null); // PO yang diusulkan dihapus
@@ -3553,7 +3619,7 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
           }}>{t("+ Pembelian Baru")}</button>
       </SectionTitle>
 
-      <KartuUsulHapus jenis="pembelian" hapusUsulan={hapusUsulan} can={can} onPutuskan={setPutusanH} />
+      <KartuUsulHapus jenis="pembelian" posisi="atas" hapusUsulan={hapusUsulan} can={can} user={user} onPutuskan={setPutusanH} />
 
       <div className="kpis">
         {["casing", "bahan"].map((j) => {
@@ -3568,6 +3634,8 @@ function Pembelian({ pembelian, doCreatePembelian, pemasok, produk, pById, sById
           sub={t("sudah diterima, belum dibayar")}
           tone="warn" />
       </div>
+
+      <KartuUsulHapus jenis="pembelian" posisi="bawah" hapusUsulan={hapusUsulan} can={can} user={user} onPutuskan={setPutusanH} />
 
       <Card title={t("Pembelian per Bulan")}>
         <Scroll>
@@ -3815,9 +3883,11 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
       <SectionTitle id={t("Pelanggan")}
         mid={
           <div className="filters">
-            <label className="fld cari">
+            <label className="fld cari lebar">
               <span className="lbl">{t("Cari")}</span>
-              <input type="search" value={cari} onChange={(e) => setCari(e.target.value)} placeholder={t("Kode / nama / pemilik / PIC / kota / sales")} />
+              {/* placeholder dipendekkan agar tidak terpotong; semua kolom tetap dicari (lihat title) */}
+              <input type="search" value={cari} onChange={(e) => setCari(e.target.value)} placeholder={t("Kode / nama / PIC / kota")}
+                title={t("Kode / nama / pemilik / PIC / kota / sales")} />
             </label>
           </div>
         }>
@@ -3842,7 +3912,8 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
       {/* Kartu muncul hanya bila ada usulan — sama seperti kartu permintaan
           hapus. Tabel kosong dengan delapan kepala kolom hanya memakan tempat
           di atas daftar pelanggan yang sebenarnya dicari. */}
-      {usulan !== null && usulan.length > 0 && (
+      <LipatUsulan judul={t("Usulan Limit Kredit")} rows={usulan || []} satuTempat
+        mendesak={usulanMendesak(usulan || [], can, user)}>
         <Card title={t("Usulan Limit Kredit")}
           note={t("Diajukan oleh petugas, disahkan oleh admin. Limit berubah hanya setelah disetujui.")}>
           <Scroll>
@@ -3864,10 +3935,13 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
                   <tr key={u.id}>
                     <td><span className="chip">{u.pelanggan_kode}</span> {u.pelanggan_nama}</td>
                     <td className="r n mut">{rp(Number(u.limit_lama))}</td>
-                    <td className="r n strong">{rp(Number(u.limit_baru))}</td>
+                    {/* nilai yang tidak berubah ditulis "—", bukan "Rp 0 → Rp 0" */}
+                    <td className="r n strong">
+                      {Number(u.limit_baru) === Number(u.limit_lama) ? <span className="mut">—</span> : rp(Number(u.limit_baru))}
+                    </td>
                     {/* NULL = usulan lama, dibuat sebelum TOP ikut diusulkan. */}
                     <td className="r n mut">
-                      {u.termin_baru == null ? "—"
+                      {u.termin_baru == null || Number(u.termin_baru) === Number(u.termin_lama) ? "—"
                         : <>{Number(u.termin_lama)} → <b>{t("{n} hari", { n: Number(u.termin_baru) })}</b></>}
                     </td>
                     <td className="mut">{u.alasan || "—"}</td>
@@ -3885,9 +3959,9 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
           </Scroll>
           <KakiSemua total={usulan.length} semua={usulanSemua} onToggle={() => setUsulanSemua((v) => !v)} />
         </Card>
-      )}
+      </LipatUsulan>
 
-      <KartuUsulHapus jenis="pelanggan" hapusUsulan={hapusUsulan} can={can} onPutuskan={setPutusanH} />
+      <KartuUsulHapus jenis="pelanggan" satuTempat hapusUsulan={hapusUsulan} can={can} user={user} onPutuskan={setPutusanH} />
 
       <Card>
         <Scroll>
@@ -5154,7 +5228,16 @@ function Style() {
 .vk table.drill.rank td:nth-child(2){padding:0}
 .vk .rank-nama{display:flex; align-items:center; gap:2px; padding-left:4px}
 .vk .rank-nama .mut2{margin-left:6px; font-weight:400}
-.vk .chevb{background:none; border:0; padding:2px 0; font:inherit; cursor:pointer; line-height:1}
+/* target sentuh >= 32px tanpa menambah tinggi baris: margin negatif menyerap padding */
+.vk .chevb{background:none; border:0; padding:0; font:inherit; cursor:pointer; line-height:1;
+  min-width:32px; min-height:32px; display:inline-flex; align-items:center; justify-content:center; margin:-6px -6px -6px -4px}
+@media (max-width:720px){
+  /* kolom pelengkap disembunyikan; Qty, nilai, piutang tetap */
+  .vk table.rank.cust tr > :nth-child(4),.vk table.rank.cust tr > :nth-child(5),
+  .vk table.rank.cust tr > :nth-child(8),.vk table.rank.cust tr > :nth-child(9),
+  .vk table.rank.prod tr > :nth-child(6),.vk table.rank.prod tr > :nth-child(7){display:none}
+  .vk .rank-nama .namelink{max-width:42vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+}
 /* bilah porsi digambar di belakang angkanya: satu kolom untuk dua keterangan,
    supaya tabel peringkat tidak melebar */
 .vk .porsi-th{min-width:92px}
@@ -5169,6 +5252,10 @@ function Style() {
   color:var(--asm-fg-muted); font-variant-numeric:tabular-nums}
 .vk .rank-ft{padding:10px 12px; border-top:.5px solid var(--asm-border-50); text-align:center}
 .vk .gerak{margin-bottom:16px}
+.vk .lipat-usul{display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; min-height:40px;
+  margin:0 0 16px; padding:8px 14px; background:var(--asm-card); border:1px solid var(--asm-border);
+  border-radius:var(--asm-radius-md); font:inherit; font-size:var(--asm-fs-sm); color:var(--asm-fg-muted); cursor:pointer; text-align:left}
+.vk .lipat-usul:hover{border-color:var(--asm-primary); color:var(--asm-fg)}
 .vk .gerak .mut2{margin-top:1px}
 
 /* table (Bab 11 STEP 3) */
@@ -5240,6 +5327,7 @@ function Style() {
   pointer-events:none; color:var(--asm-fg-muted); font-size:var(--asm-fs-base)}
 .vk .filters .fld{min-width:210px}
 .vk .filters .cari input{min-width:190px}
+.vk .filters .cari.lebar input{min-width:260px}
 
 /* filters & flow lifted into the section-title row (single-line height) */
 .vk .sect-l .filters{margin-bottom:0}
@@ -5325,15 +5413,20 @@ function Style() {
 
 /* modal */
 .vk .ov{position:fixed; inset:0; background:rgb(51 51 51 / .5); display:grid; place-items:center; padding:16px; z-index:50}
+/* lebar mengikuti viewport; min-width:0 supaya tabel di dalam tidak mendorong dialog
+   melebar (item grid default min-width:auto) — tabel menggulir di .md-bd */
 .vk .md{background:var(--asm-card); border:1px solid var(--asm-border); border-top:4px solid var(--asm-primary);
   border-radius:var(--asm-radius-lg); box-shadow:var(--asm-shadow-lg);
-  width:100%; max-width:440px; max-height:90vh; display:flex; flex-direction:column}
-.vk .md.wide{max-width:720px}
+  width:min(440px, calc(100vw - 20px)); min-width:0; max-height:calc(100dvh - 20px); display:flex; flex-direction:column; overflow:hidden}
+.vk .md.wide{width:min(720px, calc(100vw - 20px))}
 .vk .md-hd{display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--asm-border)}
 .vk .md-hd h3{font-size:var(--asm-fs-lg); font-weight:700; letter-spacing:-.01em}
 .vk .md-hd h3 em{font-size:var(--asm-fs-xs); letter-spacing:0; color:var(--asm-fg-muted); margin-left:7px; font-weight:400}
-.vk .md-bd{padding:16px; overflow:auto}
-.vk .md-ft{display:flex; justify-content:flex-end; gap:8px; padding:12px 16px; border-top:1px solid var(--asm-border);
+.vk .md-bd{padding:16px; overflow:auto; min-width:0; flex:1 1 auto; -webkit-overflow-scrolling:touch}
+.vk .md-hd,.vk .md-ft{flex:none}
+/* tabel di dialog menggulir ke samping di dalam .scroll, bukan diperas jadi kolom sempit */
+.vk .md .scroll table{min-width:520px}
+.vk .md-ft{display:flex; justify-content:flex-end; flex-wrap:wrap; gap:8px; padding:12px 16px; border-top:1px solid var(--asm-border);
   background:var(--asm-secondary); border-radius:0 0 var(--asm-radius-lg) var(--asm-radius-lg)}
 
 /* footer & toast */
@@ -5385,7 +5478,7 @@ function Style() {
 /* bendera, bukan kode huruf: bahasa terbaca sekilas tanpa harus dieja.
    Yang tidak aktif diredam abu-abu — dua bendera berwarna bersebelahan tidak
    menunjukkan mana yang sedang dipakai, dan latar saja terlalu samar. */
-.vk .lang-b{background:none; border:0; padding:3px 9px; cursor:pointer; font:inherit; font-size:var(--asm-fs-lg);
+.vk .lang-b{background:none; border:0; padding:3px 9px; min-height:32px; min-width:40px; cursor:pointer; font:inherit; font-size:var(--asm-fs-lg);
   line-height:1.3; filter:grayscale(1); opacity:.5; transition:background .15s, filter .15s, opacity .15s}
 .vk .lang-b + .lang-b{border-left:1px solid var(--asm-border)}
 .vk .lang-b:hover{background:var(--asm-primary-6); filter:none; opacity:.8}
@@ -5413,7 +5506,7 @@ function Style() {
 .vk .um-i:hover{background:var(--asm-primary-6); color:var(--asm-primary)}
 .vk .um-i.keluar:hover{background:var(--asm-danger-soft); color:var(--asm-danger)}
 
-.vk .namelink{background:none; border:0; padding:0; margin:0; font:inherit; font-weight:inherit; color:inherit; cursor:pointer; text-align:left}
+.vk .namelink{background:none; border:0; padding:6px 0; margin:-6px 0; font:inherit; font-weight:inherit; color:inherit; cursor:pointer; text-align:left}
 .vk .namelink:hover{text-decoration:underline; color:var(--asm-primary)}
 
 .vk .cust-info, .vk .spec-info{display:grid; grid-template-columns:repeat(3, 1fr); gap:12px 18px; margin-bottom:16px}
@@ -5446,16 +5539,17 @@ function Style() {
 .vk .doc-firm-lbl em{display:block; font-size:9.5px}
 .vk .doc-bar-r{display:flex; gap:10px; align-items:center; margin-left:auto}
 .vk .doc-scroll{overflow:auto; padding:22px; background:#8C8C8C}
+.vk .doc-fit{margin:0 auto; overflow:hidden}
 .vk .doc-paper{background:#fff; color:#333333; width:100%; max-width:760px; margin:0 auto; padding:34px 40px 30px;
   box-shadow:var(--asm-shadow-lg); font-family:var(--fb); font-size:12px; line-height:1.5;
   -webkit-print-color-adjust:exact; print-color-adjust:exact}
 .vk .doc-hd{display:flex; justify-content:space-between; align-items:flex-start; gap:16px; border-bottom:2px solid #0062C6; padding-bottom:14px}
 .vk .doc-co{display:flex; gap:12px; align-items:center}
-.vk .doc-co h2{font-family:var(--fd); font-size:17px; font-weight:700; letter-spacing:.06em; color:#0062C6}
+.vk .doc-co .doc-issuer{font-family:var(--fd); font-size:17px; font-weight:700; letter-spacing:.06em; color:#0062C6}
 .vk .doc-co p{margin:2px 0 0; font-size:11px; color:#666666}
 .vk .doc-addr{font-size:10px !important; color:#666666 !important}
 .vk .doc-title{text-align:right}
-.vk .doc-title h1{font-family:var(--fd); font-size:20px; font-weight:700; letter-spacing:-.01em; color:#333333}
+.vk .doc-title h2{font-family:var(--fd); font-size:20px; font-weight:700; letter-spacing:-.01em; color:#333333}
 .vk .doc-title em{display:block; font-size:12px; color:#666666; margin-top:2px}
 .vk .doc-meta{display:flex; justify-content:space-between; gap:20px; margin-top:16px}
 .vk .doc-lbl{display:block; font-family:var(--fd); font-size:10px; font-weight:500; letter-spacing:.06em; text-transform:uppercase; color:#0062C6; margin-bottom:4px}
@@ -5519,13 +5613,12 @@ function Style() {
   .vk .kpis{grid-template-columns:1fr 1fr}
   .vk .ft{padding:6px 12px 24px}
   .vk .ov{padding:10px}
-  .vk .md,.vk .doc-modal{max-height:94vh}
-  .vk .md-ft .btn{flex:1}
+  .vk .doc-modal{max-height:calc(100dvh - 20px)}
+  .vk .md-ft .btn{flex:1 1 120px}
   .vk .doc-scroll{padding:12px}
-  .vk .doc-paper{padding:20px 18px 18px}
-  .vk .doc-hd,.vk .doc-meta,.vk .doc-sum,.vk .doc-sign{flex-direction:column; gap:12px}
-  .vk .doc-title{text-align:left}
-  .vk .doc-sign{gap:18px}
+  /* baris 1: jenis dokumen + Cetak/×, baris 2: penerbit */
+  .vk .doc-bar{padding:10px 12px; gap:8px}
+  .vk .doc-firm{order:2; width:100%; flex-wrap:wrap}
 }
 @media (max-width:520px){
   .vk .kpis{grid-template-columns:1fr}
@@ -5544,7 +5637,8 @@ function Style() {
 @media print{
   body *{visibility:hidden !important}
   .vk .doc-paper, .vk .doc-paper *{visibility:visible !important}
-  .vk .doc-paper{position:absolute; left:0; top:0; width:100%; max-width:none; margin:0;
+  .vk .doc-fit{width:auto !important; height:auto !important; overflow:visible}
+  .vk .doc-paper{position:absolute; left:0; top:0; width:100% !important; max-width:none; margin:0; transform:none !important;
     padding:0; box-shadow:none; font-size:11pt}
   @page{size:A4; margin:16mm}
 }

@@ -44,6 +44,8 @@ const KO = {
   "○ Server tidak terjangkau": "○ 서버 연결 안 됨",
   "Memeriksa koneksi…": "연결 확인 중…",
   "Tampilkan kata sandi": "비밀번호 보기",
+  "Menu pengguna {nama}": "{nama} 사용자 메뉴",
+  "{judul}: {a} menunggu · {b} selesai": "{judul}: 대기 {a} · 처리 {b}",
   "Sembunyikan kata sandi": "비밀번호 숨기기",
   "○ Server tidak terhubung — jalankan api-server.js": "○ 서버 연결 안 됨 — api-server.js 실행 필요",
   "○ Server tidak terhubung — angka di layar ini hanya contoh": "서버 미연결 — 화면의 숫자는 예시입니다",
@@ -250,7 +252,7 @@ const KO = {
   "Penjualan {bulan}": "{bulan} 판매",
   "Tidak ada data.": "데이터가 없습니다.",
   "Penjualan per Bulan": "월별 판매",
-  "tidak termasuk penawaran · pelanggan dihitung unik": "견적 제외 · 고객수 중복 제외",
+  "tidak termasuk penawaran · pelanggan unik yang bertransaksi": "견적 제외 · 고객수는 거래 고객 기준(중복 제외)",
   "tidak termasuk penawaran": "견적 제외",
   "Stok per Gudang": "창고별 재고",
   "Bulan": "월",
@@ -461,6 +463,7 @@ const KO = {
 
   /* ---------- pelanggan ---------- */
   "Kode / nama / pemilik / PIC / kota / sales": "코드 / 이름 / 오너 / 담당자 / 도시 / 영업",
+  "Kode / nama / PIC / kota": "코드 / 이름 / 담당자 / 도시",
   "+ Pelanggan Baru": "+ 새 고객",
   "Cabang": "지점",
   "Total Pelanggan": "총 고객수",
