@@ -1690,6 +1690,13 @@ const AGING_DEF = [
 ];
 
 const STATUS_UMUR = Object.fromEntries(AGING_DEF.map(([k, , status]) => [k, status]));
+/* "Undue/Ondue/Overdue" hanya kode; yang tampil (layar, Excel, cetak) teks ini.
+   "|status" memisahkan kata Korea-nya dari label kolom Umur yang sama bunyinya. */
+const STATUS_LABEL = {
+  Undue: "Belum Jatuh Tempo|status",
+  Ondue: "Jatuh Tempo Bulan Ini|status",
+  Overdue: "Lewat Jatuh Tempo",
+};
 
 /* piutang & umur piutang (mengacu panduan analisis AR) — dipakai Dasbor & halaman Piutang.
    SO berstatus "kirim"/"tagihan" = sudah dikirim tapi belum lunas.
@@ -1855,7 +1862,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
   /* Kartu tanpa isi tidak bisa dibuka — dialog kosong hanya menipu, sama
      seperti baris umur piutang yang jumlah pelanggannya nol. */
   const bukaPiutang = (x) => x.inv
-    ? () => setDetail(daftarPiutang(t(x.status), piutangRows.filter((r) => STATUS_UMUR[r.bucket] === x.status), t))
+    ? () => setDetail(daftarPiutang(t(STATUS_LABEL[x.status]), piutangRows.filter((r) => STATUS_UMUR[r.bucket] === x.status), t))
     : undefined;
 
   return (
@@ -1872,9 +1879,9 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
         {!MODUL_SEMBUNYI.includes("beli") && (
           <Kpi label={t("Pembelian")} val={rp(beli)} sub={t("{n} transaksi", { n: pembelian.length })} />
         )}
-        <Kpi label={t("Undue")} val={rp(undue.nilai)} sub={subPiutang(undue, t)} onClick={bukaPiutang(undue)} />
-        <Kpi label={t("Ondue")} val={rp(ondue.nilai)} sub={subPiutang(ondue, t)} tone={ondue.nilai > 0 ? "warn" : ""} onClick={bukaPiutang(ondue)} />
-        <Kpi label={t("Overdue")} val={rp(overdue.nilai)} sub={subPiutang(overdue, t)} tone={overdue.nilai > 0 ? "alert" : ""} onClick={bukaPiutang(overdue)} />
+        <Kpi label={t(STATUS_LABEL.Undue)} val={rp(undue.nilai)} sub={subPiutang(undue, t)} onClick={bukaPiutang(undue)} />
+        <Kpi label={t(STATUS_LABEL.Ondue)} val={rp(ondue.nilai)} sub={subPiutang(ondue, t)} tone={ondue.nilai > 0 ? "warn" : ""} onClick={bukaPiutang(ondue)} />
+        <Kpi label={t(STATUS_LABEL.Overdue)} val={rp(overdue.nilai)} sub={subPiutang(overdue, t)} tone={overdue.nilai > 0 ? "alert" : ""} onClick={bukaPiutang(overdue)} />
       </div>
       {detail && (
         <DetailKpi {...detail} close={() => setDetail(null)}
@@ -2587,13 +2594,14 @@ const PERINGKAT_N = 10;
 /* Kaki tabel "tampilkan semua / 10 teratas". Dipakai di setiap tabel halaman
    yang bisa panjang: halaman hanya boleh punya satu gulir (dokumen), jadi
    tabel tidak diberi max-height — yang dibatasi jumlah barisnya. */
-function KakiSemua({ total, semua, onToggle }) {
+/* satuan: "pelanggan" / "produk" — hanya mengubah satuan hitungan di bahasa Korea (개소·품목·건) */
+function KakiSemua({ total, semua, onToggle, satuan }) {
   const { t } = useLang();
   if (total <= PERINGKAT_N) return null;
   return (
     <div className="rank-ft">
       <button type="button" className="btn" onClick={onToggle}>
-        {semua ? t("Tampilkan 10 Teratas") : t("Tampilkan Semua ({n})", { n: fmt(total) })}
+        {semua ? t("Tampilkan 10 Teratas") : t("Tampilkan Semua ({n})" + (satuan ? "|" + satuan : ""), { n: fmt(total) })}
       </button>
     </div>
   );
@@ -3023,7 +3031,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
         )}
       </table>
       </Scroll>
-      <KakiSemua total={rows.length} semua={semua} onToggle={() => setSemua((v) => !v)} />
+      <KakiSemua satuan="pelanggan" total={rows.length} semua={semua} onToggle={() => setSemua((v) => !v)} />
     </>
     );
   };
@@ -3189,7 +3197,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
             </tbody>
           </table>
           </Scroll>
-          <KakiSemua total={perProduk.length} semua={semua} onToggle={() => setSemua((v) => !v)} />
+          <KakiSemua satuan="produk" total={perProduk.length} semua={semua} onToggle={() => setSemua((v) => !v)} />
         </Card>
       )}
 
@@ -3308,7 +3316,7 @@ function DaftarGerak({ rows, kepala, kolom, kosong, takJelas, onPilih }) {
         </tbody>
       </table>
     </Scroll>
-    <KakiSemua total={rows.length} semua={semua} onToggle={() => setSemua((v) => !v)} />
+    <KakiSemua satuan="pelanggan" total={rows.length} semua={semua} onToggle={() => setSemua((v) => !v)} />
     </>
   );
 }
@@ -4839,7 +4847,7 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
   const bukaKartu = (judul, rows) => rows.length
     ? () => setKpi(daftarPiutang(judul, rows, t))
     : undefined;
-  const bukaStatus = (x) => bukaKartu(t(x.status), piutangRows.filter((r) => STATUS_UMUR[r.bucket] === x.status));
+  const bukaStatus = (x) => bukaKartu(t(STATUS_LABEL[x.status]), piutangRows.filter((r) => STATUS_UMUR[r.bucket] === x.status));
 
   const unduhExcel = () => {
     const aoa = [
@@ -4858,9 +4866,9 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
       <div className="kpis">
         <Kpi label={t("Piutang Berjalan")} val={rp(piutangF)} sub={t("{n} invoice belum lunas", { n: fmt(piutangRows.length) })} tone={piutangF > 0 ? "warn" : ""}
           onClick={bukaKartu(t("Piutang Berjalan"), piutangRows)} />
-        <Kpi label={t("Undue")} val={rp(undue.nilai)} sub={subPiutang(undue, t)} onClick={bukaStatus(undue)} />
-        <Kpi label={t("Ondue")} val={rp(ondue.nilai)} sub={subPiutang(ondue, t)} tone={ondue.nilai > 0 ? "warn" : ""} onClick={bukaStatus(ondue)} />
-        <Kpi label={t("Overdue")} val={rp(overdue.nilai)} sub={subPiutang(overdue, t)} tone={overdue.nilai > 0 ? "alert" : ""} onClick={bukaStatus(overdue)} />
+        <Kpi label={t(STATUS_LABEL.Undue)} val={rp(undue.nilai)} sub={subPiutang(undue, t)} onClick={bukaStatus(undue)} />
+        <Kpi label={t(STATUS_LABEL.Ondue)} val={rp(ondue.nilai)} sub={subPiutang(ondue, t)} tone={ondue.nilai > 0 ? "warn" : ""} onClick={bukaStatus(ondue)} />
+        <Kpi label={t(STATUS_LABEL.Overdue)} val={rp(overdue.nilai)} sub={subPiutang(overdue, t)} tone={overdue.nilai > 0 ? "alert" : ""} onClick={bukaStatus(overdue)} />
       </div>
 
       <SectionTitle id={t("Umur Piutang (Aging)")} />
@@ -4872,7 +4880,7 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
                 <th scope="col">{t("Umur")}</th>
                 <th scope="col">{t("Status")}</th>
                 <th scope="col" className="r">{t("Pelanggan")}</th>
-                <th scope="col" className="r">{t("Lewat (hari)")}</th>
+                <th scope="col" className="r">{t("Lewat terlama (hari)")}</th>
                 <th scope="col" className="r">{t("Nilai")}</th>
                 <th scope="col" className="r">{t("Porsi")}</th>
               </tr>
@@ -4888,7 +4896,7 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
                   </td>
                   <td>
                     <span className={"st s-" + (r.status === "Overdue" ? "alert" : r.status === "Ondue" ? "warn" : "ok")}>
-                      {t(r.status)}
+                      {t(STATUS_LABEL[r.status])}
                     </span>
                   </td>
                   <td className="r n">{fmt(r.n)}</td>
@@ -4897,16 +4905,24 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
                       jauh ujungnya sudah lewat. */}
                   <td className="r n">{r.status !== "Overdue" || !r.n ? "—" : fmt(r.maks)}</td>
                   <td className="r n">{rp(r.nilai)}</td>
-                  <td className="r n">{piutangF ? fmt((r.nilai / piutangF) * 100) : 0}%</td>
+                  <td className="r n">{(piutangF ? (r.nilai / piutangF) * 100 : 0).toFixed(1)}%</td>
                 </tr>
               ))}
               {piutangRows.length === 0 && <tr><td colSpan={6}><Empty id={t("Tidak ada piutang berjalan.")} /></td></tr>}
             </tbody>
           </table>
         </Scroll>
+        {piutangRows.length > 0 && (
+          <p className="note">
+            {t("Jumlah pelanggan dihitung per umur (dapat berulang).")}
+            {/* porsi dibulatkan per baris; jumlahnya bisa 99.9% / 100.1% */}
+            {piutangF > 0 && Math.abs(agingRows.reduce((a, r) => a + Number(((r.nilai / piutangF) * 100).toFixed(1)), 0) - 100) > 0.05
+              && " " + t("Jumlah dapat berbeda dari 100.0% karena pembulatan.")}
+          </p>
+        )}
       </Card>
 
-      <Lipat id={t("Pelanggan Berisiko")}
+      <Lipat id={t("Risiko Piutang per Pelanggan")}
         mid={
           <div className="filters">
             <label className="fld cari">
@@ -4927,7 +4943,7 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
                     <Th k="nilai" urut={urut} klik={klik} cls="r">{t("Piutang")}</Th>
                     <Th k="telat" urut={urut} klik={klik} cls="r">{t("Telat")}</Th>
                     <Th k="pakai" urut={urut} klik={klik} cls="r">{t("Pakai Limit")}</Th>
-                    <Th k="risiko" urut={urut} klik={klik}>{t("Grade")}</Th>
+                    <Th k="risiko" urut={urut} klik={klik}>{t("Risiko")}</Th>
                   </tr>
                 </thead>
                 <tbody>
