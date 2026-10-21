@@ -6,9 +6,8 @@ import { LangProvider, useLang, LANGS } from "./i18n.jsx";
 /* ============================================================
    VULKANISIR — Sistem Manajemen Penjualan Ban Vulkanisir
    ------------------------------------------------------------
-   Data layer: lihat objek `api` di bawah.
-   Saat ini memakai state memori (data contoh).
-   Ganti isi `api` dengan fetch() ke server Neon (api-server.js).
+   Data layer: src/api.js (fetch → api-server.js → Neon).
+   Data contoh hanya pada build demo (VITE_DEMO=true) — src/demo/seed.js.
    ============================================================ */
 
 /* ---------- format ---------- */
@@ -208,12 +207,10 @@ const namaGudang = (g, t) => {
 };
 const opsiGudang = (t) => GUDANG.map((x) => [x.id, `${kodeGudang(x)} · ${namaGudang(x, t)}`]);
 
-/* ---------- data contoh ---------- */
-let GUDANG = [
-  { id: "G1", kode: "KRW", nama: "Gudang Karawang", kota: "Karawang" },
-  { id: "G2", kode: "SMR", nama: "Gudang Semarang", kota: "Semarang" },
-  { id: "G3", kode: "SBY", nama: "Gudang Surabaya", kota: "Surabaya" },
-];
+/* ---------- gudang ----------
+   Diisi dari /bootstrap (applyData). Kosong sampai data pertama tiba — data
+   contoh untuk mode demo ada di src/demo/seed.js. */
+let GUDANG = [];
 
 const KATEGORI = {
   jadi: { id: "Ban Jadi" },
@@ -221,71 +218,6 @@ const KATEGORI = {
   casing: { id: "Casing" },
   bahan: { id: "Bahan Baku" },
 };
-
-const SEED_PRODUK = [
-  { id: "P1", kode: "VK-1020R", nama: "Vulkanisir 1000-20 Rib", ukuran: "1000-20", pola: "Rib (HR)", grade: "A", kategori: "jadi", satuan: "pcs", hpp: 1250000, harga: 1850000, min: 20 },
-  { id: "P2", kode: "VK-1020L", nama: "Vulkanisir 1000-20 Lug", ukuran: "1000-20", pola: "Lug (HL)", grade: "A", kategori: "jadi", satuan: "pcs", hpp: 1320000, harga: 1950000, min: 20 },
-  { id: "P3", kode: "VK-1120L", nama: "Vulkanisir 1100-20 Lug", ukuran: "1100-20", pola: "Lug (HL)", grade: "A", kategori: "jadi", satuan: "pcs", hpp: 1510000, harga: 2250000, min: 15 },
-  { id: "P4", kode: "VK-2958R", nama: "Vulkanisir 295/80R22.5 Rib", ukuran: "295/80R22.5", pola: "Rib", grade: "A", kategori: "jadi", satuan: "pcs", hpp: 1620000, harga: 2400000, min: 24 },
-  { id: "P5", kode: "VK-3158L", nama: "Vulkanisir 315/80R22.5 Lug", ukuran: "315/80R22.5", pola: "Lug", grade: "A", kategori: "jadi", satuan: "pcs", hpp: 1880000, harga: 2750000, min: 24 },
-  { id: "P6", kode: "VK-1200R24", nama: "Vulkanisir 1200R24 Lug", ukuran: "1200R24", pola: "Lug", grade: "A", kategori: "jadi", satuan: "pcs", hpp: 2640000, harga: 3900000, min: 8 },
-  { id: "P7", kode: "VK-750B", nama: "Vulkanisir 750-16 Rib", ukuran: "750-16", pola: "Rib", grade: "B", kategori: "jadi", satuan: "pcs", hpp: 560000, harga: 850000, min: 30 },
-  { id: "P8", kode: "CS-1020", nama: "Casing Bekas 1000-20", ukuran: "1000-20", pola: "-", grade: "B", kategori: "casing", satuan: "pcs", hpp: 320000, harga: 0, min: 40 },
-  { id: "P9", kode: "CS-2958", nama: "Casing Bekas 295/80R22.5", ukuran: "295/80R22.5", pola: "-", grade: "A", kategori: "casing", satuan: "pcs", hpp: 480000, harga: 0, min: 30 },
-  { id: "P10", kode: "BH-TAPAK", nama: "Karet Tapak / Tread Rubber", ukuran: "-", pola: "-", grade: "-", kategori: "bahan", satuan: "kg", hpp: 62000, harga: 0, min: 500 },
-  { id: "P11", kode: "BH-CUSHION", nama: "Cushion Gum", ukuran: "-", pola: "-", grade: "-", kategori: "bahan", satuan: "kg", hpp: 78000, harga: 0, min: 200 },
-];
-
-const SEED_PELANGGAN = [
-  { id: "C1", kode: "PLG-001", nama: "PT Sumber Karya Logistik", pic: "Bpk. Andi Prasetyo", telp: "0812-8811-4520", kota: "Jakarta Utara", grade: "A", limit: 500000000, termin: 45 },
-  { id: "C2", kode: "PLG-002", nama: "CV Anugerah Trans Nusantara", pic: "Ibu Ratna Dewi", telp: "0813-9922-7310", kota: "Bekasi", grade: "B", limit: 200000000, termin: 30 },
-  { id: "C3", kode: "PLG-003", nama: "PT Bumi Mineral Sejahtera", pic: "Bpk. Yusuf Hakim", telp: "0811-5540-2288", kota: "Balikpapan", grade: "A", limit: 800000000, termin: 60 },
-  { id: "C4", kode: "PLG-004", nama: "PT Jaya Armada Transport", pic: "Bpk. Slamet Riyadi", telp: "0816-3311-9087", kota: "Surabaya", grade: "B", limit: 300000000, termin: 30 },
-  { id: "C5", kode: "PLG-005", nama: "UD Mandiri Ban Gresik", pic: "Bpk. Hendra", telp: "0857-2200-1144", kota: "Gresik", grade: "C", limit: 100000000, termin: 14 },
-];
-
-const SEED_PEMASOK = [
-  { id: "S1", kode: "PMS-001", nama: "PT Karet Nusantara Indah", pic: "Bpk. Bagus", telp: "021-5501-3300", jenis: "bahan" },
-  { id: "S2", kode: "PMS-002", nama: "CV Ban Bekas Jaya Makmur", pic: "Bpk. Rudi", telp: "0812-3344-8899", jenis: "casing" },
-  { id: "S3", kode: "PMS-003", nama: "PT Indo Rubber Compound", pic: "Ibu Lia", telp: "031-8820-4411", jenis: "bahan" },
-];
-
-/* mutasi awal: stok pembukaan per gudang */
-const SEED_MUTASI = [];
-const opening = [
-  ["G1", "P1", 48], ["G1", "P2", 36], ["G1", "P4", 62], ["G1", "P5", 28], ["G1", "P8", 90], ["G1", "P10", 1200],
-  ["G2", "P1", 22], ["G2", "P3", 18], ["G2", "P4", 30], ["G2", "P7", 44], ["G2", "P9", 26], ["G2", "P11", 180],
-  ["G3", "P2", 14], ["G3", "P3", 26], ["G3", "P5", 33], ["G3", "P6", 17], ["G3", "P8", 52],
-  ["G3", "P1", 12], ["G3", "P7", 19], ["G3", "P9", 41], ["G3", "P10", 340],
-];
-opening.forEach(([g, p, q], i) =>
-  SEED_MUTASI.push({ id: "M" + i, tgl: "2026-07-01", gudang: g, produk: p, tipe: "masuk", qty: q, ref: "Stok pembukaan Juli", catatan: "" })
-);
-
-const SEED_PENJUALAN = [
-  { id: "SO1", no: "SO-2607-001", tgl: "2026-07-08", pelanggan: "C1", gudang: "G1", status: "lunas", items: [{ produk: "P4", qty: 24, harga: 2400000 }, { produk: "P1", qty: 8, harga: 1850000 }] },
-  { id: "SO2", no: "SO-2607-002", tgl: "2026-07-14", pelanggan: "C3", gudang: "G1", status: "tagihan", items: [{ produk: "P5", qty: 16, harga: 2700000 }] },
-  { id: "SO3", no: "SO-2607-003", tgl: "2026-07-18", pelanggan: "C4", gudang: "G3", status: "kirim", items: [{ produk: "P3", qty: 10, harga: 2250000 }, { produk: "P5", qty: 6, harga: 2750000 }] },
-  { id: "SO4", no: "SO-2607-004", tgl: "2026-07-21", pelanggan: "C2", gudang: "G2", status: "pesanan", items: [{ produk: "P7", qty: 20, harga: 850000 }] },
-  { id: "SO5", no: "SO-2607-005", tgl: "2026-07-22", pelanggan: "C5", gudang: "G3", status: "penawaran", items: [{ produk: "P1", qty: 6, harga: 1880000 }] },
-];
-/* mutasi keluar untuk SO yang sudah dikirim */
-SEED_PENJUALAN.filter((s) => ["kirim", "tagihan", "lunas"].includes(s.status)).forEach((s) =>
-  s.items.forEach((it) =>
-    SEED_MUTASI.push({ id: uid("M"), tgl: s.tgl, gudang: s.gudang, produk: it.produk, tipe: "keluar", qty: -it.qty, ref: s.no, catatan: "Pengiriman penjualan" })
-  )
-);
-
-const SEED_PEMBELIAN = [
-  { id: "PO1", no: "PO-2607-001", tgl: "2026-07-05", pemasok: "S2", gudang: "G1", status: "lunas", items: [{ produk: "P8", qty: 60, harga: 315000 }] },
-  { id: "PO2", no: "PO-2607-002", tgl: "2026-07-12", pemasok: "S1", gudang: "G1", status: "diterima", items: [{ produk: "P10", qty: 800, harga: 61500 }] },
-  { id: "PO3", no: "PO-2607-003", tgl: "2026-07-20", pemasok: "S3", gudang: "G3", status: "order", items: [{ produk: "P11", qty: 250, harga: 77000 }] },
-];
-SEED_PEMBELIAN.filter((p) => ["diterima", "lunas"].includes(p.status)).forEach((p) =>
-  p.items.forEach((it) =>
-    SEED_MUTASI.push({ id: uid("M"), tgl: p.tgl, gudang: p.gudang, produk: it.produk, tipe: "masuk", qty: it.qty, ref: p.no, catatan: "Penerimaan pembelian" })
-  )
-);
 
 /* ---------- alur status ---------- */
 const SO_FLOW = ["penawaran", "pesanan", "kirim", "tagihan", "lunas"];
@@ -349,6 +281,12 @@ const ROLE_LABEL = {
    Ini semata soal tampilan — kodenya utuh, datanya utuh, dan tidak ada
    endpoint yang ditutup. Untuk mengembalikannya: kosongkan daftar ini. */
 const MODUL_SEMBUNYI = ["stok", "beli"];
+
+/* Mode demo: data contoh hanya dipakai bila build-nya diminta begitu
+   (VITE_DEMO=true) dan server tidak terjangkau. Ditulis sebagai ekspresi
+   bersyarat di tingkat modul supaya Vite membuang import()-nya dari build
+   biasa — berkas seed.js tidak ikut terbit sama sekali. */
+const muatDemo = import.meta.env.VITE_DEMO === "true" ? () => import("./demo/seed.js") : null;
 
 export default function App() {
   return (
@@ -441,12 +379,18 @@ const pelangganSO = (s) => s.pelanggan_akhir || s.pelanggan;
 function Aplikasi() {
   const { t } = useLang();
   const [tab, setTab] = useState("dasbor");
-  const [produk, setProduk] = useState(SEED_PRODUK);
-  const [pelanggan, setPelanggan] = useState(SEED_PELANGGAN);
-  const [pemasok, setPemasok] = useState(SEED_PEMASOK);
-  const [mutasi, setMutasi] = useState(SEED_MUTASI);
-  const [penjualan, setPenjualan] = useState(SEED_PENJUALAN);
-  const [pembelian, setPembelian] = useState(SEED_PEMBELIAN);
+  /* Semua koleksi mulai kosong dan `loaded` false: tidak ada angka di layar
+     sebelum /bootstrap menjawab. Dulu state awalnya data contoh, dan selama
+     beberapa detik setelah login angka contoh itu terbaca seperti angka
+     perusahaan. */
+  const [produk, setProduk] = useState([]);
+  const [pelanggan, setPelanggan] = useState([]);
+  const [pemasok, setPemasok] = useState([]);
+  const [mutasi, setMutasi] = useState([]);
+  const [penjualan, setPenjualan] = useState([]);
+  const [pembelian, setPembelian] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [galatMuat, setGalatMuat] = useState(null); // pesan bila /bootstrap gagal (selain 401)
   /* stok resmi dari server (v_stok). null = belum ada / offline → hitung dari mutasi */
   const [stokServer, setStokServer] = useState(null);
   const [mutasiLimit, setMutasiLimit] = useState(null); // batas baris mutasi yang dikirim server
@@ -494,10 +438,11 @@ function Aplikasi() {
     api.setToken(null);
     try { localStorage.removeItem("vk_user"); } catch { /* noop */ }
     setStokServer(null);
+    setLoaded(false);
     setTab("dasbor");
   };
 
-  /* ---------- muat data dari server (fallback ke data contoh) ---------- */
+  /* ---------- muat data dari server ---------- */
   const applyData = (d) => {
     if (d.gudang?.length) GUDANG = d.gudang;
     setProduk(d.produk);
@@ -508,32 +453,52 @@ function Aplikasi() {
     setMutasiLimit(d.mutasiLimit || null);
     setPenjualan(d.penjualan);
     setPembelian(d.pembelian);
+    setLoaded(true);
   };
   const reload = async () => applyData(await api.loadAll());
 
   /* 1) cek koneksi saja — data tidak lagi terbuka untuk anonim */
-  useEffect(() => {
-    let alive = true;
-    api.ping()
-      .then(() => { if (alive) setConn("online"); })
-      .catch(() => { if (alive) setConn("offline"); });
-    return () => { alive = false; };
-  }, []);
+  const cekKoneksi = () => {
+    setConn("loading");
+    return api.ping().then(() => setConn("online"), () => setConn("offline"));
+  };
+  useEffect(() => { cekKoneksi(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* 2) muat data setelah ada sesi. Sesi kedaluwarsa (401) → login ulang,
-        supaya data contoh tidak tampil seolah-olah data asli. */
+  /* 2) muat data setelah ada sesi. Sesi kedaluwarsa (401) → login ulang.
+        Galat lain tidak lagi hanya jadi toast: layar tetap di kerangka
+        pemuatan dengan tombol coba lagi, karena tanpa data tidak ada satu
+        pun angka yang boleh ditampilkan. */
+  const muatData = (alive = () => true) => {
+    setGalatMuat(null);
+    return api.loadAll()
+      .then((d) => { if (alive()) applyData(d); })
+      .catch((e) => {
+        if (!alive()) return;
+        if (e.status === 401) { logout(); say(t("Sesi berakhir. Silakan masuk kembali."), true); }
+        else setGalatMuat(e.message || t("Gagal memuat data."));
+      });
+  };
   useEffect(() => {
     if (!user || conn !== "online") return;
-    let alive = true;
-    api.loadAll()
-      .then((d) => { if (alive) applyData(d); })
-      .catch((e) => {
-        if (!alive) return;
-        if (e.status === 401) { logout(); say(t("Sesi berakhir. Silakan masuk kembali."), true); }
-        else say(e.message, true);
-      });
-    return () => { alive = false; };
+    let hidup = true;
+    muatData(() => hidup);
+    return () => { hidup = false; };
   }, [user, conn]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* 3) server tidak terjangkau: data contoh hanya pada build demo. Build biasa
+        berhenti di layar "butuh koneksi server" — lihat <Memuat>. */
+  useEffect(() => {
+    if (conn !== "offline" || !muatDemo) return;
+    let hidup = true;
+    muatDemo().then((s) => {
+      if (!hidup) return;
+      applyData({
+        gudang: s.SEED_GUDANG, produk: s.SEED_PRODUK, pelanggan: s.SEED_PELANGGAN, pemasok: s.SEED_PEMASOK,
+        mutasi: s.SEED_MUTASI, stok: null, mutasiLimit: null, penjualan: s.SEED_PENJUALAN, pembelian: s.SEED_PEMBELIAN,
+      });
+    });
+    return () => { hidup = false; };
+  }, [conn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* stok tidak pernah diedit langsung.
      Online  → dari view v_stok di server (menjumlah SELURUH buku mutasi).
@@ -835,7 +800,11 @@ function Aplikasi() {
               {/* Sesi tersimpan di localStorage tetap membuka layar walau server
                   mati, dan layar itu diam-diam memakai data contoh. Tanpa tanda
                   ini, angka contoh terbaca seperti angka perusahaan. */}
-              {!online && <span className="conn offline">{t("○ Server tidak terhubung — angka di layar ini hanya contoh")}</span>}
+              {!online && (
+                <span className="conn offline">
+                  {muatDemo ? t("○ Server tidak terhubung — angka di layar ini hanya contoh") : t("○ Server tidak terhubung")}
+                </span>
+              )}
               <LangSwitch />
               <MenuPengguna user={user} gantiSandi={() => setGantiSandi(true)} logout={logout} />
             </div>
@@ -851,14 +820,18 @@ function Aplikasi() {
         </nav>
       </header>
 
-      <main className="wrap">
-        {tab === "dasbor" && <Dasbor {...ctx} />}
-        {tab === "stok" && !MODUL_SEMBUNYI.includes("stok") && <Stok {...ctx} />}
-        {tab === "jual" && <Penjualan {...ctx} />}
-        {tab === "beli" && !MODUL_SEMBUNYI.includes("beli") && <Pembelian {...ctx} />}
-        {tab === "mitra" && <Pelanggan {...ctx} />}
-        {tab === "piutang" && <Piutang {...ctx} />}
-        {tab === "admin" && can("users") && <PenggunaAdmin {...ctx} />}
+      <main className="wrap" aria-busy={!loaded}>
+        {!loaded && (
+          <Memuat galat={galatMuat} offline={!online}
+            coba={() => (online ? muatData() : cekKoneksi())} />
+        )}
+        {loaded && tab === "dasbor" && <Dasbor {...ctx} />}
+        {loaded && tab === "stok" && !MODUL_SEMBUNYI.includes("stok") && <Stok {...ctx} />}
+        {loaded && tab === "jual" && <Penjualan {...ctx} />}
+        {loaded && tab === "beli" && !MODUL_SEMBUNYI.includes("beli") && <Pembelian {...ctx} />}
+        {loaded && tab === "mitra" && <Pelanggan {...ctx} />}
+        {loaded && tab === "piutang" && <Piutang {...ctx} />}
+        {loaded && tab === "admin" && can("users") && <PenggunaAdmin {...ctx} />}
       </main>
 
       <footer className="ft">Copyright © ASEOA</footer>
@@ -874,6 +847,32 @@ function Aplikasi() {
           {toast.msg}
         </div>
       )}
+    </div>
+  );
+}
+
+/* Kerangka pemuatan. Tiga keadaan, tak satu pun menampilkan angka:
+   menunggu /bootstrap, /bootstrap gagal, dan server tak terjangkau pada build
+   biasa (build demo memuat data contoh sebagai gantinya). */
+function Memuat({ galat, offline, coba }) {
+  const { t } = useLang();
+  if (offline || galat)
+    return (
+      <div className="card muat-gagal" role="alert">
+        <b>{offline ? t("Butuh koneksi ke server") : t("Gagal memuat data")}</b>
+        <p>{offline ? t("Data perusahaan hanya ditampilkan dari server. Periksa koneksi, lalu coba lagi.") : galat}</p>
+        <button type="button" className="btn pri" onClick={coba}>{t("Coba lagi")}</button>
+      </div>
+    );
+  return (
+    <div className="muat" role="status">
+      <span className="muat-tx">{t("Memuat data…")}</span>
+      <div className="kpis" aria-hidden="true">
+        {[0, 1, 2, 3].map((i) => <div key={i} className="kpi sk"><i /><i /></div>)}
+      </div>
+      <div className="card sk-card" aria-hidden="true">
+        {[0, 1, 2, 3, 4, 5].map((i) => <i key={i} />)}
+      </div>
     </div>
   );
 }
@@ -5226,6 +5225,19 @@ function Style() {
 .vk .login{min-height:100vh; display:grid; place-items:center; padding:20px;
   background:radial-gradient(120% 90% at 50% 0%, var(--asm-primary-6) 0%, var(--asm-bg) 60%)}
 .vk .splash{font-family:var(--fd); font-size:var(--asm-fs-sm); font-weight:500; letter-spacing:.06em; color:var(--asm-primary)}
+/* kerangka pemuatan — bentuk kartu tanpa angka */
+.vk .muat-tx{display:block; font-size:var(--asm-fs-sm); color:var(--asm-fg-muted); margin:4px 0 12px}
+.vk .sk i{display:block; height:12px; border-radius:4px; background:var(--asm-border); margin:6px 0}
+.vk .sk i + i{height:22px; width:60%}
+.vk .sk-card{padding:16px}
+.vk .sk-card i{display:block; height:14px; border-radius:4px; background:var(--asm-border); margin:10px 0}
+.vk .sk-card i:nth-child(odd){width:85%}
+@media (prefers-reduced-motion:no-preference){
+  .vk .sk i, .vk .sk-card i{animation:vk-sk 1.2s ease-in-out infinite alternate}
+}
+@keyframes vk-sk{from{opacity:.45}to{opacity:1}}
+.vk .muat-gagal{padding:24px; text-align:center}
+.vk .muat-gagal p{color:var(--asm-fg-muted); margin:8px 0 16px}
 .vk .login-card{width:100%; max-width:380px; background:var(--asm-card); border:1px solid var(--asm-border);
   border-radius:var(--asm-radius-lg); box-shadow:var(--asm-shadow-md); overflow:hidden}
 .vk .login-brand{display:flex; gap:12px; align-items:flex-start; padding:22px 20px 16px}

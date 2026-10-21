@@ -46,6 +46,15 @@ const KO = {
   "Server tidak terjangkau. Login membutuhkan koneksi.": "서버 연결 불가 — 로그인하려면 연결 필요",
   "Selamat datang, {nama}.": "{nama}님 환영",
   "Sesi berakhir. Silakan masuk kembali.": "세션 만료 — 재로그인 필요",
+  "○ Server tidak terhubung": "○ 서버 연결 안 됨",
+
+  /* ---------- pemuatan ---------- */
+  "Memuat data…": "데이터 불러오는 중…",
+  "Gagal memuat data": "데이터를 불러오지 못함",
+  "Gagal memuat data.": "데이터를 불러오지 못함",
+  "Butuh koneksi ke server": "서버 연결 필요",
+  "Data perusahaan hanya ditampilkan dari server. Periksa koneksi, lalu coba lagi.": "회사 데이터는 서버에서만 표시됩니다. 연결 확인 후 다시 시도하세요.",
+  "Coba lagi": "다시 시도",
 
   /* ---------- peran ---------- */
   "Admin": "관리자",
