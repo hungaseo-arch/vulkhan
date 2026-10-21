@@ -806,7 +806,7 @@ function Aplikasi() {
   if (conn === "loading")
     return <div className="vk"><Style /><div className="login"><div className="splash">{t("Menyambung…")}</div></div></div>;
   if (!user)
-    return <Login doLogin={doLogin} onOk={login} say={say} toast={toast} conn={conn} />;
+    return <Login doLogin={doLogin} onOk={login} say={say} toast={toast} conn={conn} coba={cekKoneksi} />;
 
   return (
     <div className="vk">
@@ -905,19 +905,22 @@ function Memuat({ galat, offline, coba }) {
 }
 
 /* ============================ LOGIN ============================ */
-function Login({ doLogin, onOk, say, toast, conn }) {
+/* <form> sungguhan dengan name/autocomplete standar supaya pengelola kata sandi
+   (Apple Passwords, Chrome) menawarkan simpan & isi otomatis; Enter = submit. */
+function Login({ doLogin, onOk, say, toast, conn, coba }) {
   const { t } = useLang();
   const [f, setF] = useState({ username: "", sandi: "" });
   const [busy, setBusy] = useState(false);
+  const [lihat, setLihat] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
-  const masuk = async () => {
+  const masuk = async (e) => {
+    e?.preventDefault();
     if (!f.username || !f.sandi) return say(t("Isi username dan kata sandi."), true);
     setBusy(true);
     try { onOk(await doLogin(f.username.trim(), f.sandi)); }
     catch (e) { say(e.message, true); }
     finally { setBusy(false); }
   };
-  const onKey = (e) => { if (e.key === "Enter") masuk(); };
   return (
     <div className="vk">
       <Style />
@@ -926,25 +929,44 @@ function Login({ doLogin, onOk, say, toast, conn }) {
           <div className="login-brand">
             <div className="login-id">
               <img className="sig" src="/ascendo-signature.png" alt="Ascendo Internasional" width={168} height={33} />
-              <h1>VULKANISIR</h1>
+              <h1>VULKHAN</h1>
             </div>
             <LangSwitch />
           </div>
           <div className="accent" />
-          <div className="login-bd">
+          <form className="login-bd" onSubmit={masuk}>
             <label className="fld">
               <span className="lbl">{t("Username")}</span>
-              <input value={f.username} onChange={set("username")} onKeyDown={onKey} autoFocus />
+              <input name="username" autoComplete="username" inputMode="text" autoCapitalize="none"
+                autoCorrect="off" spellCheck={false} value={f.username} onChange={set("username")} autoFocus />
             </label>
             <label className="fld">
               <span className="lbl">{t("Kata Sandi")}</span>
-              <input type="password" value={f.sandi} onChange={set("sandi")} onKeyDown={onKey} />
+              <span className="sandi-wrap">
+                <input type={lihat ? "text" : "password"} name="password" autoComplete="current-password"
+                  value={f.sandi} onChange={set("sandi")} />
+                <button type="button" className="lihat" aria-pressed={lihat}
+                  aria-label={lihat ? t("Sembunyikan kata sandi") : t("Tampilkan kata sandi")}
+                  onClick={() => setLihat((v) => !v)}>
+                  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" /><circle cx="12" cy="12" r="3" />
+                    {lihat && <path d="M3 3l18 18" />}
+                  </svg>
+                </button>
+              </span>
             </label>
-            <button className="btn pri lg" onClick={masuk} disabled={busy || conn !== "online"}>{busy ? t("Memproses…") : t("Masuk|login")}</button>
+            <button type="submit" className="btn pri lg" disabled={busy || conn !== "online"}>{busy ? t("Memproses…") : t("Masuk|login")}</button>
             <span className={"conn " + conn}>
-              {conn === "online" ? t("● Neon terhubung") : t("○ Server tidak terhubung — jalankan api-server.js")}
+              {conn === "online" ? t("● Terhubung ke server")
+                : conn === "loading" ? t("Memeriksa koneksi…")
+                /* nama berkas server hanya berguna bagi pengembang */
+                : import.meta.env.DEV ? t("○ Server tidak terhubung — jalankan api-server.js")
+                : t("○ Server tidak terjangkau")}
             </span>
-          </div>
+            {conn === "offline" && (
+              <button type="button" className="btn sm" onClick={coba}>{t("Coba lagi")}</button>
+            )}
+          </form>
         </div>
       </div>
       {toast && (
@@ -4932,6 +4954,11 @@ function Style() {
 .vk .hd-meta{text-align:right; font-size:var(--asm-fs-sm)}
 .vk .hd-meta .k{display:block; font-size:var(--asm-fs-xs); font-weight:500; letter-spacing:.06em; color:var(--asm-primary)}
 .vk .hd-meta .v{font-size:var(--asm-fs-md)}
+.vk .sandi-wrap{position:relative; display:block}
+.vk .sandi-wrap input{padding-right:44px}
+.vk .sandi-wrap .lihat{position:absolute; right:0; top:0; bottom:0; width:44px; display:grid; place-items:center;
+  background:none; border:0; color:var(--asm-fg-muted); cursor:pointer; border-radius:var(--asm-radius-md)}
+.vk .sandi-wrap .lihat[aria-pressed="true"]{color:var(--asm-primary)}
 .vk .conn{display:inline-block; margin-top:4px; font-size:var(--asm-fs-xs); padding:1px 8px; border:1px solid var(--asm-border); border-radius:var(--asm-radius-sm); color:var(--asm-fg-muted)}
 .vk .conn.online{color:var(--asm-success); border-color:var(--asm-success-border); background:var(--asm-success-soft)}
 .vk .conn.offline{color:var(--asm-warning); border-color:var(--asm-warning-border); background:var(--asm-warning-soft)}

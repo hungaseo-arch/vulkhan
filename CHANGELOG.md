@@ -44,6 +44,10 @@
   usulan status). `/api/hapus-usulan`·`/api/limit-usulan` 은 대기 건 전부와 최근 30일 결재 건만 주고 `?all=1` 이면 전체.
   Vercel 함수 리전 `sin1`(DB가 ap-southeast-1). 폰트는 Google Fonts 대신 `@fontsource-variable/noto-sans-kr`
   self-host(unicode-range 분할, 폰트 CSS gzip 약 27KB). CSP에서 Google 도메인 제거.
+- **로그인 폼.** 입력칸을 진짜 `<form>` 으로 감싸고 `name`/`autocomplete`(username, current-password)를 붙여
+  브라우저·비밀번호 관리자가 저장·자동 입력을 제안합니다. Enter는 폼 제출로 처리(키다운 핸들러 제거),
+  아이디 칸은 자동 대문자·자동 수정 끔, 비밀번호 보기 토글(`aria-pressed`). 제목 `VULKANISIR` → `VULKHAN`.
+  상태 문구는 "● 서버 연결됨" / "○ 서버 연결 안 됨" + "다시 시도" 버튼이며, `api-server.js 실행` 안내는 개발 모드에서만 나옵니다.
 
 ### Added
 - **판매 화면 연도 선택 (2026-10-21).** 판매 필터를 연도 · 고객 · 기간 세 묶음으로 나누고, 연도를 고르면
