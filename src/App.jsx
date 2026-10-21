@@ -2907,8 +2907,9 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
   /* nol kategori ditulis "—", bukan "0": baris yang hanya menjual ban jadi
      tidak "menjual 0 jasa", kategorinya saja tidak ada di situ */
   const selQty = (n) => <td className="r n">{n ? fmt(n) : <span className="mut">—</span>}</td>;
-  const barisSO = (s) => (
-    <tr key={s.id} className="br-t klik" onClick={() => setRinci(s)}>
+  /* grup: diisi bila baris ini dibuka tombol ▸ — id-nya jadi tujuan aria-controls */
+  const barisSO = (s, grup) => (
+    <tr key={s.id} id={grup ? `rinci-${grup}-${s.id}` : undefined} className="br-t klik" onClick={() => setRinci(s)}>
       <td className="no" />
       <td>
         <span className="per per-h">
@@ -2975,7 +2976,8 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
                   <td>
                     <span className="per per-b rank-nama">
                       <button type="button" className="chevb" aria-expanded={on}
-                        aria-label={t("Rincian transaksi")} onClick={() => setBukaCust((s) => balik(s, b.id))}>
+                        aria-controls={on ? b.rows.map((s) => `rinci-c${b.id}-${s.id}`).join(" ") : undefined}
+                        aria-label={t("Rincian transaksi {nama}", { nama: b.c.nama })} onClick={() => setBukaCust((s) => balik(s, b.id))}>
                         <span className="chev">{on ? "▾" : "▸"}</span>
                       </button>
                       <button type="button" className="namelink strong" title={t("Lihat rincian")}
@@ -2997,7 +2999,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
                       : <span className="mut">—</span>}
                   </td>
                 </tr>
-                {on && b.rows.map(barisSO)}
+                {on && b.rows.map((s) => barisSO(s, `c${b.id}`))}
               </React.Fragment>
             );
           })}
@@ -4423,7 +4425,9 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
                   <tr key={c.id} className="klik" onClick={() => setDetail(c)}>
                     <td><span className="chip">{c.kode}</span></td>
                     <td>
-                      <b>{c.nama}</b>
+                      {/* tombol agar baris terjangkau Tab; kliknya naik ke baris */}
+                      <button type="button" className="namelink strong" title={t("Lihat rincian")}
+                        aria-label={t("Rincian {nama}", { nama: c.nama })}>{c.nama}</button>
                       {/* Rute penagihan ikut nama, bukan kolom sendiri: hanya
                           sebagian kecil pelanggan memilikinya. */}
                       <em className="mut2">
@@ -5533,6 +5537,8 @@ function Style() {
   /* tanpa font mono khusus — perataan angka memakai tabular-nums (Bab 4) */
   font-variant-numeric:tabular-nums;
 }
+/* layar ponsel: langkah terkecil dinaikkan ke 11px — skalanya tetap, nilainya saja */
+@media (max-width:480px){.vk{--asm-fs-2xs:11px}}
 .vk *{box-sizing:border-box}
 .vk em{font-style:normal}
 .vk h1,.vk h2,.vk h3,.vk h4{font-family:var(--fd); margin:0; font-weight:700; letter-spacing:-.01em}
@@ -5656,7 +5662,7 @@ function Style() {
 
 /* chip pilihan (sumbu analisis) */
 .vk .chips{display:flex; gap:4px; flex-wrap:wrap; align-items:center}
-.vk .chip-b{font:inherit; font-size:var(--asm-fs-sm); font-weight:400; line-height:1; padding:7px 11px;
+.vk .chip-b{font:inherit; font-size:var(--asm-fs-sm); font-weight:400; line-height:1; padding:7px 11px; min-height:32px;
   background:transparent; color:var(--pl-tinta); border:.5px solid var(--pl-tinta);
   border-radius:var(--asm-radius-lg); cursor:pointer; white-space:nowrap}
 .vk .chip-b:hover{background:var(--pl-lembut)}

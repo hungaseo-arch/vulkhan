@@ -683,6 +683,8 @@ const KO = {
   "Ditagih lewat {nama} · PPN {p}% sudah termasuk dalam total.": "{nama} 경유 청구 · 합계에 PPN {p}% 포함.",
   /* ---------- tindak lanjut pemeriksaan (VK-WEB-2026-1021-02) ---------- */
   "Pilih dari daftar": "목록에서 선택하세요",
+  "Rincian {nama}": "{nama} 상세",
+  "Rincian transaksi {nama}": "{nama} 거래 내역",
 };
 
 const KAMUS = { id: {}, ko: KO };
