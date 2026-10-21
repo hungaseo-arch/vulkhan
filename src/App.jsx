@@ -3931,7 +3931,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
                 </tr>
               </thead>
               <tbody>
-                {(usulanSemua ? usulan : usulan.slice(0, PERINGKAT_N)).map((u) => (
+                {(usulanSemua ? usulan || [] : (usulan || []).slice(0, PERINGKAT_N)).map((u) => (
                   <tr key={u.id}>
                     <td><span className="chip">{u.pelanggan_kode}</span> {u.pelanggan_nama}</td>
                     <td className="r n mut">{rp(Number(u.limit_lama))}</td>
@@ -3957,7 +3957,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
               </tbody>
             </table>
           </Scroll>
-          <KakiSemua total={usulan.length} semua={usulanSemua} onToggle={() => setUsulanSemua((v) => !v)} />
+          <KakiSemua total={usulan?.length || 0} semua={usulanSemua} onToggle={() => setUsulanSemua((v) => !v)} />
         </Card>
       </LipatUsulan>
 
