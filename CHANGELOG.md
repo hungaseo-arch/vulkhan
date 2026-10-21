@@ -27,6 +27,9 @@
   `vulkhan-*.vercel.app`, localhost)하고 `CORS_ORIGIN` 은 추가만 가능하며 `*` 는 무시합니다.
   `public/robots.txt`(`Disallow: /`) · `<meta name="robots">` 추가, og:image 절대 URL.
   CSP가 인라인 `onload` 를 막기 때문에 폰트 preload 트릭은 일반 `<link rel="stylesheet">` 로 바꿨습니다.
+- **권한 문구를 실제 권한과 일치.** 화면에는 "manager: + 삭제"라고 나왔지만 서버·화면 모두 삭제·사용자·결재는
+  admin 전용이었습니다(결정 기본값 (b): 권한은 그대로, 문구 수정). 매니저와 직원의 차이는 기초재고
+  입력(`POST /api/mutasi/saldo-awal`) 하나뿐이라 역할 카드·안내문·역할 선택지를 그렇게 고쳤습니다(두 언어).
 
 ### Added
 - **판매 화면 연도 선택 (2026-10-21).** 판매 필터를 연도 · 고객 · 기간 세 묶음으로 나누고, 연도를 고르면

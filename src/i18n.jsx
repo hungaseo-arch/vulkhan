@@ -61,7 +61,7 @@ const KO = {
   "Manajer": "매니저",
   "Staf": "직원",
   "Akses penuh": "전체 권한",
-  "+ Hapus": "+ 삭제",
+  "Input & ubah + saldo awal": "입력·수정 + 기초재고",
   "Input & ubah": "입력 및 수정",
 
   /* ---------- status & kategori ---------- */
@@ -202,10 +202,10 @@ const KO = {
   "Akun Anda": "내 계정",
   "Belum ada pengguna.": "등록된 사용자 없음",
   "{n} akun": "{n}개 계정",
-  "admin: akses penuh · manager: + hapus · staff: input & ubah":
-    "admin: 전체 권한 · manager: + 삭제 · staff: 입력 및 수정",
+  "admin: akses penuh (hapus, pengguna, putusan) · manager/staff: input & ubah, ajukan hapus · manager: + saldo awal stok":
+    "관리자: 전체 권한(삭제·사용자·결재) · 매니저/직원: 입력·수정, 삭제 기안 · 매니저: + 기초재고",
   "Staf — input & ubah": "직원 — 입력 및 수정",
-  "Manajer — + hapus": "매니저 — + 삭제",
+  "Manajer — input & ubah + saldo awal": "매니저 — 입력·수정 + 기초재고",
   "Admin — akses penuh": "관리자 — 전체 권한",
   "Tambah pengguna hanya tersedia saat online.": "사용자 추가 — 온라인 상태에서만 가능",
   "Hapus pengguna hanya tersedia saat online.": "사용자 삭제 — 온라인 상태에서만 가능",

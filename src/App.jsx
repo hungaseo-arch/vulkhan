@@ -264,7 +264,9 @@ const lewatiLimit = (c, piutang) => punyaLimit(c) && piutang > c.limit;
 
 const ROLE_LABEL = {
   admin:   { id: "Admin", desc: "Akses penuh" },
-  manager: { id: "Manajer", desc: "+ Hapus" },
+  // Manajer belum punya hak hapus: selisihnya dengan staf hanya saldo awal stok
+  // (POST /api/mutasi/saldo-awal). Hapus, pengguna, dan putusan = admin.
+  manager: { id: "Manajer", desc: "Input & ubah + saldo awal" },
   staff:   { id: "Staf", desc: "Input & ubah" },
 };
 
@@ -1143,7 +1145,7 @@ function PenggunaAdmin({ online, say, user, minta }) {
       </div>
       <Card title={t("Daftar Pengguna")}
         note={<>
-          {t("admin: akses penuh · manager: + hapus · staff: input & ubah")}<br />
+          {t("admin: akses penuh (hapus, pengguna, putusan) · manager/staff: input & ubah, ajukan hapus · manager: + saldo awal stok")}<br />
           {t("Klik baris untuk mengubah nama dan peran.")}<br />
           {t("Reset menghasilkan kata sandi sementara yang tampil sekali.")}
         </>}>
@@ -1219,7 +1221,7 @@ function FormPengguna({ close, say, submit, awal, sendiri }) {
       <Inp label={t("Nama Lengkap")} value={f.nama} onChange={set("nama")} />
       <Sel label={t("Peran")} value={f.peran} onChange={set("peran")} disabled={sendiri}
         hint={sendiri ? t("Peran akun sendiri tidak bisa diubah.") : undefined}
-        opts={[["staff", t("Staf — input & ubah")], ["manager", t("Manajer — + hapus")], ["admin", t("Admin — akses penuh")]]} />
+        opts={[["staff", t("Staf — input & ubah")], ["manager", t("Manajer — input & ubah + saldo awal")], ["admin", t("Admin — akses penuh")]]} />
       {!edit && <Inp label={t("Kata Sandi")} type="password" value={f.sandi} onChange={set("sandi")}
         hint={t("Minimal 8 karakter, tanpa username. Pengguna wajib menggantinya saat pertama masuk.")} />}
     </Modal>
