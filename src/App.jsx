@@ -1810,7 +1810,7 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
                 <th scope="col" className="r">{t("Harga Agen")}</th>
                 <th scope="col" className="r">{t("Harga User")}</th>
                 {(g === "ALL" ? GUDANG : GUDANG.filter((x) => x.id === g)).map((x) => (
-                  <th scope="col" key={x.id} className="r">{x.kode}</th>
+                  <th scope="col" key={x.id} className="r">{kodeGudang(x)}</th>
                 ))}
                 <th scope="col" className="r">{t("Total")}</th>
                 <th scope="col" className="r">{t("Min")}</th>
