@@ -672,6 +672,10 @@ const KO = {
   "Tinggi": "높음",
   "Sedang": "보통",
   "Rendah": "낮음",
+  "Tidak ada pelanggan berisiko Sedang ke atas.": "위험도 '보통' 이상인 고객이 없습니다.",
+  "{n} pelanggan berisiko Rendah disembunyikan.": "위험도 '낮음' 고객 {n}곳은 숨겨져 있습니다.",
+  "Sedang ke atas saja": "'보통' 이상만 보기",
+  "Tampilkan Semua": "전체 보기",
 
   /* ---------- penagihan lewat pihak lain & PPN ---------- */
   "Urutkan": "정렬",

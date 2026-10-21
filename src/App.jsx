@@ -4882,9 +4882,15 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
         : k === "pakai" ? (punyaLimit(x.c) ? x.pakai : null)
           : k === "risiko" ? RISIKO_URUT[gradePiutang(x)[0]]
             : x.nilai;
-  const berisiko = (() => {
+  /* Bawaannya hanya risiko Sedang ke atas: daftar ini untuk memilih siapa
+     yang perlu ditagih/ditahan, dan pelanggan berisiko rendah menenggelamkan
+     yang perlu perhatian. Pencarian nama tetap ikut saringan ini. */
+  const [semuaRisiko, setSemuaRisiko] = useState(false);
+  const { berisiko, rendah } = (() => {
     const q = cari.trim().toLowerCase();
-    return susun(q ? topPelanggan.filter((x) => x.c.nama.toLowerCase().includes(q)) : topPelanggan, nilaiKolom);
+    const cocok = q ? topPelanggan.filter((x) => x.c.nama.toLowerCase().includes(q)) : topPelanggan;
+    const tampil = semuaRisiko ? cocok : cocok.filter((x) => RISIKO_URUT[gradePiutang(x)[0]] >= RISIKO_URUT.Sedang);
+    return { berisiko: susun(tampil, nilaiKolom), rendah: cocok.length - tampil.length };
   })();
   /* Rincian invoice dibuka dengan yang paling lama lewat di atas — urutan yang
      sama seperti sebelum kepala kolomnya bisa diklik. */
@@ -4993,7 +4999,8 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
         }>
         <Card>
           {berisiko.length === 0 ? (
-            <Empty id={cari ? t("Tidak ada pelanggan yang cocok.") : t("Tidak ada piutang berjalan.")} />
+            <Empty id={rendah > 0 ? t("Tidak ada pelanggan berisiko Sedang ke atas.")
+              : cari ? t("Tidak ada pelanggan yang cocok.") : t("Tidak ada piutang berjalan.")} />
           ) : (
             <Scroll>
               <table>
@@ -5024,6 +5031,14 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
                 </tbody>
               </table>
             </Scroll>
+          )}
+          {(rendah > 0 || semuaRisiko) && (
+            <div className="rank-ft">
+              {!semuaRisiko && <span className="mut2">{t("{n} pelanggan berisiko Rendah disembunyikan.", { n: fmt(rendah) })}</span>}
+              <button type="button" className="btn sm" aria-pressed={semuaRisiko} onClick={() => setSemuaRisiko((v) => !v)}>
+                {semuaRisiko ? t("Sedang ke atas saja") : t("Tampilkan Semua")}
+              </button>
+            </div>
           )}
         </Card>
       </Lipat>
@@ -5865,6 +5880,7 @@ function Style() {
 .vk .porsi em{position:relative; font-style:normal; font-size:var(--asm-fs-xs); line-height:16px;
   color:var(--asm-fg-muted); font-variant-numeric:tabular-nums}
 .vk .rank-ft{padding:10px 12px; border-top:.5px solid var(--asm-border-50); text-align:center}
+.vk .rank-ft .mut2{margin-right:10px}
 .vk .gerak{margin-bottom:16px}
 .vk .lipat-usul{display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; min-height:40px;
   margin:0 0 16px; padding:8px 14px; background:var(--asm-card); border:1px solid var(--asm-border);
