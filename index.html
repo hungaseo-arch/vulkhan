@@ -3,7 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/ascendo-symbol.png" />
-    <link rel="apple-touch-icon" href="/ascendo-symbol.png" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <!-- Tambah ke layar utama. Sengaja tanpa service worker: cache luring bisa
+         menampilkan angka stok/piutang yang sudah basi. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0062C6" />
     <!-- Font di-self-host lewat @fontsource (src/main.jsx) — tidak ada permintaan ke Google. -->

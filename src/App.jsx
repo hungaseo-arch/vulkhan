@@ -316,6 +316,10 @@ const ROLE_LABEL = {
    Ini semata soal tampilan — kodenya utuh, datanya utuh, dan tidak ada
    endpoint yang ditutup. Untuk mengembalikannya: kosongkan daftar ini. */
 const MODUL_SEMBUNYI = ["stok", "beli"];
+/* Hak khusus manajer (saldo awal stok) hanya disebut bila modul stok tampil —
+   kalau tidak, kartu peran menyebut fitur yang tak bisa ditemukan di layar. */
+const STOK_TAMPIL = !MODUL_SEMBUNYI.includes("stok");
+const descPeran = (k) => (k === "manager" && !STOK_TAMPIL ? ROLE_LABEL.staff.desc : ROLE_LABEL[k].desc);
 
 /* Mode demo: data contoh hanya dipakai bila build-nya diminta begitu
    (VITE_DEMO=true) dan server tidak terjangkau. Ditulis sebagai ekspresi
@@ -1272,12 +1276,14 @@ function PenggunaAdmin({ online, say, user, minta, reload }) {
       </SectionTitle>
       <div className="kpis">
         {Object.entries(ROLE_LABEL).map(([k, v]) => (
-          <Kpi key={k} label={t(v.id)} val={users === null ? "…" : t("{n} akun", { n: users.filter((u) => u.peran === k).length })} sub={t(v.desc)} />
+          <Kpi key={k} label={t(v.id)} val={users === null ? "…" : t("{n} akun", { n: users.filter((u) => u.peran === k).length })} sub={t(descPeran(k))} />
         ))}
       </div>
       <Card title={t("Daftar Pengguna")}
         note={<>
-          {t("admin: akses penuh (hapus, pengguna, putusan) · manager/staff: input & ubah, ajukan hapus · manager: + saldo awal stok")}<br />
+          {STOK_TAMPIL
+            ? t("admin: akses penuh (hapus, pengguna, putusan) · manager/staff: input & ubah, ajukan hapus · manager: + saldo awal stok")
+            : t("admin: akses penuh (hapus, pengguna, putusan) · manager/staff: input & ubah, ajukan hapus")}<br />
           {t("Klik baris untuk mengubah nama dan peran.")}<br />
           {t("Reset menghasilkan kata sandi sementara yang tampil sekali.")}
         </>}>
@@ -1666,7 +1672,7 @@ function FormPengguna({ close, say, submit, awal, sendiri }) {
       <Inp label={t("Nama Lengkap")} value={f.nama} onChange={set("nama")} />
       <Sel label={t("Peran")} value={f.peran} onChange={set("peran")} disabled={sendiri}
         hint={sendiri ? t("Peran akun sendiri tidak bisa diubah.") : undefined}
-        opts={[["staff", t("Staf — input & ubah")], ["manager", t("Manajer — input & ubah + saldo awal")], ["admin", t("Admin — akses penuh")]]} />
+        opts={[["staff", t("Staf — input & ubah")], ["manager", STOK_TAMPIL ? t("Manajer — input & ubah + saldo awal") : t("Manajer — input & ubah")], ["admin", t("Admin — akses penuh")]]} />
       {!edit && <Inp label={t("Kata Sandi")} type="password" value={f.sandi} onChange={set("sandi")}
         hint={t("Minimal 8 karakter, tanpa username. Pengguna wajib menggantinya saat pertama masuk.")} />}
     </Modal>
@@ -4633,6 +4639,7 @@ function FormPelanggan({ c, pelanggan = [], close, say, submit }) {
   );
 }
 
+const RIWAYAT_N = 20;
 function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, cById, close, onUsul, onUbah, onPilihSO }) {
   const { t } = useLang();
   const box = useDialog(close);
@@ -4645,6 +4652,9 @@ function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, cById, 
   );
   const omzet = riwayat.filter((s) => s.status !== "penawaran").reduce((a, s) => a + totalSO(s), 0);
   const p = piutang(c.id);
+  /* omzet & piutang tetap dari seluruh riwayat; yang dipotong hanya baris tabelnya */
+  const [semua, setSemua] = useState(false);
+  const tampil = semua ? riwayat : riwayat.slice(0, RIWAYAT_N);
 
   return (
     <div className="ov" onClick={close}>
@@ -4700,7 +4710,7 @@ function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, cById, 
                 </tr>
               </thead>
               <tbody>
-                {riwayat.map((s) => (
+                {tampil.map((s) => (
                   <tr key={s.id}>
                     <td className="n strong">
                       {onPilihSO
@@ -4722,6 +4732,13 @@ function DetailPelanggan({ c, penjualan, totalSO, piutang, gById, pById, cById, 
               </tbody>
             </table>
           </Scroll>
+          {riwayat.length > RIWAYAT_N && (
+            <div className="rank-ft">
+              <button type="button" className="btn sm" onClick={() => setSemua((v) => !v)}>
+                {semua ? t("Tampilkan {n} terbaru", { n: RIWAYAT_N }) : t("Tampilkan Semua ({n})", { n: fmt(riwayat.length) })}
+              </button>
+            </div>
+          )}
         </div>
         <div className="md-ft">
           {onUbah && <button className="btn" onClick={onUbah}>{t("Ubah Pelanggan")}</button>}

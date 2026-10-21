@@ -212,6 +212,9 @@ const KO = {
     "관리자: 전체 권한(삭제·사용자·결재) · 매니저/직원: 입력·수정, 삭제 기안 · 매니저: + 기초재고",
   "Staf — input & ubah": "직원 — 입력 및 수정",
   "Manajer — input & ubah + saldo awal": "매니저 — 입력·수정 + 기초재고",
+  "Manajer — input & ubah": "매니저 — 입력·수정",
+  "admin: akses penuh (hapus, pengguna, putusan) · manager/staff: input & ubah, ajukan hapus":
+    "관리자: 전체 권한(삭제·사용자·결재) · 매니저/직원: 입력·수정, 삭제 기안",
   "Admin — akses penuh": "관리자 — 전체 권한",
   "Tambah pengguna hanya tersedia saat online.": "사용자 추가 — 온라인 상태에서만 가능",
   "Hapus pengguna hanya tersedia saat online.": "사용자 삭제 — 온라인 상태에서만 가능",
@@ -690,6 +693,7 @@ const KO = {
   /* ---------- tindak lanjut pemeriksaan (VK-WEB-2026-1021-02) ---------- */
   "Pilih dari daftar": "목록에서 선택하세요",
   "Rincian {nama}": "{nama} 상세",
+  "Tampilkan {n} terbaru": "최근 {n}건만 보기",
   "Rincian transaksi {nama}": "{nama} 거래 내역",
 };
 
