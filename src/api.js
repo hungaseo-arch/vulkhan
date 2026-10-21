@@ -103,6 +103,9 @@ export const api = {
       penjualan: d.penjualan.map(normTrx),
       pembelian: d.pembelian.map(normTrx),
       penerbit: d.penerbit || [],
+      // usulan ikut /bootstrap; undefined bila server lama → layar memuat sendiri
+      limitUsulan: d.limitUsulan,
+      hapusUsulan: d.hapusUsulan,
     };
   },
 

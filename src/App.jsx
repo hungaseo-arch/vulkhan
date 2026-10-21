@@ -537,6 +537,8 @@ function Aplikasi() {
     setMutasiLimit(d.mutasiLimit || null);
     setPenjualan(d.penjualan);
     setPembelian(d.pembelian);
+    if (d.hapusUsulan) setHapusUsulan(d.hapusUsulan);
+    if (d.limitUsulan) setLimitUsulan(d.limitUsulan);
     setLoaded(true);
   };
   const reload = async () => applyData(await api.loadAll());
@@ -558,12 +560,14 @@ function Aplikasi() {
     return () => { batal = true; };
   }, [loaded, online, user?.username, user?.must_change]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* 1) cek koneksi saja — data tidak lagi terbuka untuk anonim */
+  /* 1) cek koneksi saja — data tidak lagi terbuka untuk anonim. Bila sesi
+        tersimpan, /health dilewati: /bootstrap sendiri yang membuktikan server
+        terjangkau, dan galat jaringan di sana menurunkan status ke offline. */
   const cekKoneksi = () => {
     setConn("loading");
     return api.ping().then(() => setConn("online"), () => setConn("offline"));
   };
-  useEffect(() => { cekKoneksi(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (user) setConn("online"); else cekKoneksi(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* 2) muat data setelah ada sesi. Sesi kedaluwarsa (401) → login ulang.
         Galat lain tidak lagi hanya jadi toast: layar tetap di kerangka
@@ -576,6 +580,7 @@ function Aplikasi() {
       .catch((e) => {
         if (!alive()) return;
         if (e.status === 401) { logout(); say(t("Sesi berakhir. Silakan masuk kembali."), true); }
+        else if (!e.status) setConn("offline"); // fetch gagal total: server tidak terjangkau
         else setGalatMuat(e.message || t("Gagal memuat data."));
       });
   };
@@ -844,12 +849,21 @@ function Aplikasi() {
      pembelian dan pelanggan sama-sama memakainya, dan menyetujui satu usulan
      berarti menghapus barisnya — jadi muat ulangnya menyentuh seluruh buku,
      bukan hanya layar yang sedang terbuka. */
+  /* Pemuatan pertama datang bersama /bootstrap (applyData); muatHapus hanya
+     untuk menyegarkan sesudah mengajukan/memutuskan. Usulan limit sama. */
   const [hapusUsulan, setHapusUsulan] = useState(null);
+  const [limitUsulan, setLimitUsulan] = useState(null);
   const muatHapus = async () => {
     if (!online || !user) return setHapusUsulan([]);
     try { setHapusUsulan(await api.listHapusUsulan()); } catch (e) { setHapusUsulan([]); say(e.message, true); }
   };
-  useEffect(() => { muatHapus(); }, [online, user]); // eslint-disable-line react-hooks/exhaustive-deps
+  const muatLimit = async () => {
+    if (!online || !user) return setLimitUsulan([]);
+    try { setLimitUsulan(await api.listUsulan()); } catch (e) { setLimitUsulan([]); say(e.message, true); }
+  };
+  useEffect(() => {
+    if (!online || !user) { setHapusUsulan([]); setLimitUsulan([]); }
+  }, [online, user]);
 
   const ajukanHapus = async (u) => {
     if (!online) return say(t("Usulan hapus hanya tersedia saat online."), true);
@@ -876,7 +890,7 @@ function Aplikasi() {
     piutang, piutangTotal, majuSO, mundurSO, majuPO, mundurPO, say, online,
     doTransfer, doAdjust, doSaldoAwal, doCreatePenjualan, doUpdatePenjualan, doCreatePembelian, doCreatePelanggan,
     doUpdatePelanggan, user, can, minta, doDeletePenjualan, doDeletePembelian, doDeletePelanggan, reload,
-    hapusUsulan, ajukanHapus, putusanHapus, bukaPenjualan, doBayar, doHapusBayar,
+    hapusUsulan, ajukanHapus, putusanHapus, bukaPenjualan, doBayar, doHapusBayar, limitUsulan, muatLimit,
   };
 
   const TABS = [
@@ -4274,7 +4288,7 @@ function FormPembelian({ close, pemasok, produk, say, submit, nomor }) {
 }
 
 /* ============================ PELANGGAN ============================ */
-function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan, user, doBayar, doHapusBayar, totalSO, piutang, gById, pById, cById, say, can, minta, doDeletePelanggan, online, reload, hapusUsulan, ajukanHapus, putusanHapus, majuSO, mundurSO }) {
+function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan, user, doBayar, doHapusBayar, totalSO, piutang, gById, pById, cById, say, can, minta, doDeletePelanggan, online, reload, hapusUsulan, ajukanHapus, putusanHapus, majuSO, mundurSO, limitUsulan: usulan, muatLimit: muatUsulan }) {
   const { t } = useLang();
   const [buka, setBuka] = useState(false);
   const [ubah, setUbah] = useState(null);       // pelanggan yang sedang diubah
@@ -4287,7 +4301,6 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
   const [kpi, setKpi] = useState(null);       // kartu ringkasan yang dibuka
   const [cari, setCari] = useState("");
   // Usulan limit dimuat terpisah dari /bootstrap: hanya layar ini yang memakainya.
-  const [usulan, setUsulan] = useState(null);
   const [usulanSemua, setUsulanSemua] = useState(false);
   const [usul, setUsul] = useState(null);       // pelanggan yang sedang diusulkan
   const [putusan, setPutusan] = useState(null); // usulan yang sedang diputuskan
@@ -4295,11 +4308,6 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
   const [putusanH, setPutusanH] = useState(null);   // usulan hapus yang diputuskan
   const tungguHapus = useMemo(() => menungguHapus(hapusUsulan, "pelanggan"), [hapusUsulan]);
 
-  const muatUsulan = async () => {
-    if (!online) return setUsulan([]);
-    try { setUsulan(await api.listUsulan()); } catch (e) { setUsulan([]); say(e.message, true); }
-  };
-  useEffect(() => { muatUsulan(); }, [online]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ajukan = async (u) => {
     if (!online) return say(t("Usulan limit hanya tersedia saat online."), true);

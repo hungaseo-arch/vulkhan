@@ -852,7 +852,8 @@ const mutasiTerbaru = () => sql`
 // 7 invokasi fungsi (masing-masing bisa cold start + ensureUsers). Sekarang satu
 // invokasi, kueri dijalankan paralel di sisi server.
 app.get("/api/bootstrap", wrap(async (_req, res) => {
-  const [gudang, produk, pelanggan, pemasok, stok, mutasi, soHead, soItem, soBayar, poHead, poItem, penerbit] = await Promise.all([
+  const [gudang, produk, pelanggan, pemasok, stok, mutasi, soHead, soItem, soBayar, poHead, poItem, penerbit,
+         limitUsulan, hapusUsulan] = await Promise.all([
     sql`SELECT * FROM gudang ORDER BY kode`,
     sql`SELECT * FROM produk ORDER BY kode`,
     sql`
@@ -872,9 +873,11 @@ app.get("/api/bootstrap", wrap(async (_req, res) => {
     sql`SELECT * FROM pembelian ORDER BY tgl DESC, no DESC`,
     sql`SELECT * FROM pembelian_item`,
     sql`SELECT * FROM penerbit ORDER BY urut, kode`,
+    daftarLimitUsulan(),
+    daftarHapusUsulan(),
   ]);
   res.json({
-    gudang, produk, pelanggan, pemasok, stok, mutasi, penerbit,
+    gudang, produk, pelanggan, pemasok, stok, mutasi, penerbit, limitUsulan, hapusUsulan,
     mutasiLimit: MUTASI_LIMIT,
     penjualan: gabungItem(gabungItem(soHead, soItem, "penjualan"), soBayar, "penjualan", "bayar"),
     pembelian: gabungItem(poHead, poItem, "pembelian"),
@@ -1025,14 +1028,23 @@ app.put("/api/pelanggan/:id", wrap(async (req, res) => {
 /* Bawaannya: semua yang menunggu + yang diputuskan 30 hari terakhir — kartu
    usulan menampilkan riwayat putusan, tapi tidak perlu membawa seluruh
    sejarahnya di setiap muat. ?all=1 untuk semuanya (maks. 200). */
-app.get("/api/limit-usulan", wrap(async (req, res) => {
-  const semua = req.query.all === "1";
-  res.json(await sql`
+/* Daftar usulan (limit & hapus): yang menunggu + yang diputuskan 30 hari
+   terakhir. Dipakai juga oleh /bootstrap supaya layar tidak perlu dua
+   permintaan tambahan setiap kali dibuka. */
+const daftarLimitUsulan = (semua = false) => sql`
     SELECT u.*, p.kode AS pelanggan_kode, p.nama AS pelanggan_nama
     FROM limit_usulan u JOIN pelanggan p ON p.id = u.pelanggan
     WHERE ${semua} OR u.status = 'menunggu' OR u.diputuskan >= now() - interval '30 days'
     ORDER BY (u.status = 'menunggu') DESC, u.diusulkan DESC
-    LIMIT 200`);
+    LIMIT 200`;
+const daftarHapusUsulan = (semua = false) => sql`
+    SELECT * FROM hapus_usulan
+    WHERE ${semua} OR status = 'menunggu' OR diputuskan >= now() - interval '30 days'
+    ORDER BY (status = 'menunggu') DESC, diusulkan DESC
+    LIMIT 200`;
+
+app.get("/api/limit-usulan", wrap(async (req, res) => {
+  res.json(await daftarLimitUsulan(req.query.all === "1"));
 }));
 
 app.post("/api/limit-usulan", wrap(async (req, res) => {
@@ -1154,12 +1166,7 @@ const SASARAN = {
 
 // Sama dengan /api/limit-usulan: menunggu + 30 hari terakhir, ?all=1 untuk semua.
 app.get("/api/hapus-usulan", wrap(async (req, res) => {
-  const semua = req.query.all === "1";
-  res.json(await sql`
-    SELECT * FROM hapus_usulan
-    WHERE ${semua} OR status = 'menunggu' OR diputuskan >= now() - interval '30 days'
-    ORDER BY (status = 'menunggu') DESC, diusulkan DESC
-    LIMIT 200`);
+  res.json(await daftarHapusUsulan(req.query.all === "1"));
 }));
 
 app.post("/api/hapus-usulan", wrap(async (req, res) => {
