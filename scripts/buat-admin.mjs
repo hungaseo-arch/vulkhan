@@ -25,7 +25,7 @@ import crypto from "crypto";
 import readline from "readline";
 import { neon } from "@neondatabase/serverless";
 
-const PERAN = ["admin", "manager", "staff"];
+const PERAN = ["super", "admin", "manager", "staff", "viewer"];
 
 if (!process.env.DATABASE_URL) {
   console.error(
@@ -65,7 +65,7 @@ const ambilOpsi = (nama, bawaan) => {
 await sql`
   CREATE TABLE IF NOT EXISTS pengguna (
     id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, nama TEXT NOT NULL,
-    peran TEXT NOT NULL CHECK (peran IN ('admin','manager','staff')),
+    peran TEXT NOT NULL CHECK (peran IN ('super','admin','manager','staff','viewer')),
     sandi_hash TEXT NOT NULL, dibuat TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
 

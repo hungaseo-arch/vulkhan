@@ -26,6 +26,9 @@ const PESAN = {
   LOGIN_SALAH: "Username atau kata sandi salah.",
   TGL_DEPAN: "Tanggal dokumen tidak boleh melewati hari ini.",
   TGL_LALU: "Tanggal sebelum bulan ini hanya bisa diisi admin.",
+  BACA_SAJA: "Peran ini hanya bisa melihat data.",
+  KELOLA_SUPER: "Akun admin dan super admin hanya bisa dikelola super admin.",
+  SUPER_TERAKHIR: "Harus tersisa minimal satu super admin.",
 };
 let terjemah = (s, p) => s.replace(/\{(\w+)\}/g, (m, k) => (p && k in p ? String(p[k]) : m));
 

@@ -60,7 +60,14 @@ app.use("/api", (_req, res, next) => { res.set("Cache-Control", "no-store, priva
 // serta cron Vercel yang membawa CRON_SECRET sendiri (diperiksa di rutenya).
 // Ditaruh sebelum penyiapan basis data agar permintaan anonim tidak menyentuh DB.
 const TERBUKA = new Set(["/api/login", "/api/health", "/api/cron/laporan-data"]);
-app.use((req, res, next) => (TERBUKA.has(req.path) ? next() : requireRole("staff")(req, res, next)));
+// Peran viewer ("Korea") hanya membaca: semua permintaan selain GET ditolak di
+// sini, kecuali keluar dan ganti sandi miliknya sendiri.
+const BACA_SAJA_BOLEH = new Set(["/api/logout", "/api/ganti-sandi"]);
+app.use((req, res, next) => (TERBUKA.has(req.path) ? next() : requireRole("viewer")(req, res, () => {
+  if (req.user.peran === "viewer" && req.method !== "GET" && req.method !== "HEAD" && !BACA_SAJA_BOLEH.has(req.path))
+    return res.status(403).json({ error: "Peran ini hanya bisa melihat data.", code: "BACA_SAJA" });
+  next();
+})));
 
 // Cek koneksi, dipakai layar login sebelum ada sesi.
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
@@ -167,10 +174,13 @@ const verifyToken = (token) => {
   } catch { return null; }
 };
 
-const RANK = { staff: 1, manager: 2, admin: 3 };
-// requireRole("staff") berarti "cukup harus login" karena staff peran terendah.
+// viewer = hanya lihat (diblok menulis oleh penjaga global); super = admin yang
+// juga mengelola akun admin/super (lihat tolakKelola).
+const RANK = { viewer: 1, staff: 2, manager: 3, admin: 4, super: 5 };
+const adminAtas = (peran) => (RANK[peran] || 0) >= RANK.admin;
+// requireRole("viewer") berarti "cukup harus login" karena viewer peran terendah.
 // Dipakai sebagai penjaga global di atas; rute yang butuh peran lebih tinggi
-// memasangnya lagi secara eksplisit (manager untuk hapus, admin untuk pengguna).
+// memasangnya lagi secara eksplisit (manager untuk saldo awal, admin untuk pengguna).
 const requireRole = (min) => (req, res, next) => {
   const auth = verifyToken((req.headers.authorization || "").replace(/^Bearer /, ""));
   if (!auth) return res.status(401).json({ error: "Sesi tidak valid. Silakan login ulang.", code: "SESI_INVALID" });
@@ -184,7 +194,7 @@ const requireRole = (min) => (req, res, next) => {
 
 // Seed 3 pengguna bawaan bila tabel masih kosong.
 const DEFAULT_USERS = [
-  { id: "U1", username: "admin",   nama: "Administrator",   peran: "admin",   sandi: "admin123" },
+  { id: "U1", username: "admin",   nama: "Administrator",   peran: "super",   sandi: "admin123" },
   { id: "U2", username: "manager", nama: "Manajer Operasi",  peran: "manager", sandi: "manager123" },
   { id: "U3", username: "staff",   nama: "Staf Penjualan",   peran: "staff",   sandi: "staff123" },
 ];
@@ -211,7 +221,7 @@ async function bootstrapAdmin() {
   await sql`
     INSERT INTO pengguna (id, username, nama, peran, sandi_hash)
     VALUES (${"U" + (Number(maks) + 1)}, ${username}, ${process.env.ADMIN_NAMA || username},
-            'admin', ${hashPw(sandi)})
+            'super', ${hashPw(sandi)})
     ON CONFLICT (username) DO NOTHING`;
   console.log(`Admin dibuat dari env: ${username} — hapus ADMIN_USER/ADMIN_PASS setelah bisa login.`);
 }
@@ -616,7 +626,7 @@ async function ensureUsers() {
   await sql`
     CREATE TABLE IF NOT EXISTS pengguna (
       id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, nama TEXT NOT NULL,
-      peran TEXT NOT NULL CHECK (peran IN ('admin','manager','staff')),
+      peran TEXT NOT NULL CHECK (peran IN ('super','admin','manager','staff','viewer')),
       sandi_hash TEXT NOT NULL, dibuat TIMESTAMPTZ NOT NULL DEFAULT now()
     )`;
   /* Sandi sementara (hasil reset atau akun baru) wajib diganti saat login
@@ -720,8 +730,17 @@ app.get("/api/pengguna", requireRole("admin"), wrap(async (_req, res) => {
   res.json(await sql`SELECT id, username, nama, peran, dibuat FROM pengguna ORDER BY peran, username`);
 }));
 
+/* Akun setingkat admin ke atas hanya dikelola super: admin tidak bisa membuat,
+   mengubah, mereset, atau menghapus akun admin/super, dan tidak bisa memberi
+   peran itu. Tanpa ini admin bisa menaikkan siapa pun — termasuk dirinya lewat
+   akun kedua — dan pembedaan super tidak berarti apa-apa. */
+const tolakKelola = (pelaku, ...peran) => pelaku.peran !== "super" && peran.some(adminAtas);
+const KELOLA_SUPER = { error: "Akun admin dan super admin hanya bisa dikelola super admin.", code: "KELOLA_SUPER" };
+
 app.post("/api/pengguna", requireRole("admin"), wrap(async (req, res) => {
   const u = req.body;
+  if (!RANK[u.peran]) return res.status(400).json({ error: "Peran tidak dikenal." });
+  if (tolakKelola(req.user, u.peran)) return res.status(403).json(KELOLA_SUPER);
   const tolak = tolakSandi(u.sandi, u.username);
   if (tolak) return res.status(400).json({ error: tolak });
   // Sandi akun baru dibuat admin, jadi sifatnya sementara seperti hasil reset.
@@ -759,6 +778,9 @@ app.post("/api/ganti-sandi", wrap(async (req, res) => {
   res.json({ ok: true, token: signToken({ ...u, must_change: false }) });
 }));
 
+const jumlahSuper = async () =>
+  (await sql`SELECT COUNT(*)::int AS n FROM pengguna WHERE peran = 'super'`)[0].n;
+
 // Ubah nama & peran pengguna (admin). Username tidak ikut diubah: dipakai untuk
 // login dan jadi acuan akun di seluruh riwayat. Kata sandi juga tidak disentuh —
 // untuk itu ada /reset-sandi (admin) dan /ganti-sandi (pemilik akun).
@@ -771,15 +793,14 @@ app.put("/api/pengguna/:id", requireRole("admin"), wrap(async (req, res) => {
   const [u] = await sql`SELECT id, peran FROM pengguna WHERE id = ${req.params.id}`;
   if (!u) return res.status(404).json({ error: "Pengguna tidak ditemukan." });
 
+  if (tolakKelola(req.user, u.peran, peran)) return res.status(403).json(KELOLA_SUPER);
   // Dua penjagaan supaya layar ini tidak bisa mengunci dirinya sendiri: admin
-  // yang menurunkan perannya sendiri langsung kehilangan akses, dan admin
-  // terakhir yang diturunkan membuat tak ada lagi yang bisa mengelola akun.
+  // yang menurunkan perannya sendiri langsung kehilangan akses, dan super
+  // terakhir yang diturunkan membuat tak ada lagi yang bisa mengelola akun admin.
   if (u.id === req.user.id && peran !== u.peran)
     return res.status(400).json({ error: "Tidak bisa mengubah peran akun sendiri." });
-  if (u.peran === "admin" && peran !== "admin") {
-    const [{ n }] = await sql`SELECT COUNT(*)::int AS n FROM pengguna WHERE peran = 'admin'`;
-    if (n <= 1) return res.status(400).json({ error: "Harus tersisa minimal satu admin." });
-  }
+  if (u.peran === "super" && peran !== "super" && (await jumlahSuper()) <= 1)
+    return res.status(400).json({ error: "Harus tersisa minimal satu super admin.", code: "SUPER_TERAKHIR" });
 
   const [row] = await sql`
     UPDATE pengguna SET nama = ${nama}, peran = ${peran}
@@ -805,8 +826,9 @@ const sandiSementara = (n = 10) =>
 app.post("/api/pengguna/:id/reset-sandi", requireRole("admin"), wrap(async (req, res) => {
   if (req.params.id === req.user.id)
     return res.status(400).json({ error: "Tidak bisa mereset sandi akun sendiri — pakai menu Ganti Kata Sandi." });
-  const [u] = await sql`SELECT username FROM pengguna WHERE id = ${req.params.id}`;
+  const [u] = await sql`SELECT username, peran FROM pengguna WHERE id = ${req.params.id}`;
   if (!u) return res.status(404).json({ error: "Pengguna tidak ditemukan." });
+  if (tolakKelola(req.user, u.peran)) return res.status(403).json(KELOLA_SUPER);
   const sandi = sandiSementara();
   await sql`UPDATE pengguna SET sandi_hash = ${hashPw(sandi)}, must_change = true WHERE id = ${req.params.id}`;
   // Catatan gagal ikut dibersihkan: pengguna yang terkunci 429 karena lupa
@@ -821,8 +843,11 @@ app.post("/api/pengguna/:id/reset-sandi", requireRole("admin"), wrap(async (req,
 app.delete("/api/pengguna/:id", requireRole("admin"), wrap(async (req, res) => {
   if (req.params.id === req.user.id)
     return res.status(400).json({ error: "Tidak bisa menghapus akun sendiri." });
-  const [u] = await sql`SELECT 1 FROM pengguna WHERE id = ${req.params.id}`;
+  const [u] = await sql`SELECT peran FROM pengguna WHERE id = ${req.params.id}`;
   if (!u) return res.status(404).json({ error: "Pengguna tidak ditemukan." });
+  if (tolakKelola(req.user, u.peran)) return res.status(403).json(KELOLA_SUPER);
+  if (u.peran === "super" && (await jumlahSuper()) <= 1)
+    return res.status(400).json({ error: "Harus tersisa minimal satu super admin.", code: "SUPER_TERAKHIR" });
   await sql`DELETE FROM pengguna WHERE id = ${req.params.id}`;
   res.status(204).end();
 }));
@@ -928,7 +953,7 @@ const urlAplikasi = () => process.env.APP_URL || "https://vulkhan.vercel.app";
 app.get("/api/laporan-data", wrap(async (req, res) => {
   const lap = await bacaLaporan();
   const ringkas = { pelanggan: lap.kurang.length, kembar: lap.kembar.length, produk: lap.produkKurang.length };
-  if (req.user.peran !== "admin") return res.json({ ringkas, laporan: lap });
+  if (!adminAtas(req.user.peran)) return res.json({ ringkas, laporan: lap });
   const penerima = penerimaDariEnv();
   res.json({
     siap: smtpSiap(), penerima: penerima.map((p) => p.nama), ringkas,
@@ -1459,7 +1484,7 @@ app.post("/api/penjualan", wrap(async (req, res) => {
            ${s.tgl}::date < date_trunc('month', wib_today())::date AS lalu`;
   if (tg.depan)
     return res.status(400).json({ error: "Tanggal dokumen tidak boleh melewati hari ini.", code: "TGL_DEPAN" });
-  if (tg.lalu && req.user.peran !== "admin")
+  if (tg.lalu && !adminAtas(req.user.peran))
     return res.status(403).json({ error: "Tanggal sebelum bulan ini hanya bisa diisi admin.", code: "TGL_LALU" });
   const rute = await ruteTagih(s.pelanggan);
   /* Nomor dokumen ditentukan server, bukan klien: dua orang yang membuka form
@@ -1497,7 +1522,7 @@ app.post("/api/penjualan", wrap(async (req, res) => {
    klien masing-masing punya "bulan berjalan" sendiri, tombolnya bisa muncul
    di hari yang servernya sudah menolak. Satu jam saja yang dipercaya. */
 async function tolakUbahSO(user, so) {
-  if (user.peran === "admin") return null;
+  if (adminAtas(user.peran)) return null;
   if (!so.dibuat_oleh)
     return "Dokumen lama tanpa pembuat — hanya admin yang bisa mengubah atau menghapusnya.";
   if (so.dibuat_oleh !== user.id)
@@ -1550,7 +1575,7 @@ app.put("/api/penjualan/:id", wrap(async (req, res) => {
   // Tanggal baru harus tetap di bulan berjalan. Tanpa ini satu penyuntingan
   // bisa memindahkan dokumen ke bulan lalu — keluar dari jangkauan aturan ini
   // sekaligus keluar dari angka bulan yang mungkin sudah dilaporkan.
-  if (req.user.peran !== "admin") {
+  if (!adminAtas(req.user.peran)) {
     const [{ ok }] = await sql`
       SELECT date_trunc('month', ${tgl}::date) = date_trunc('month', wib_today()) AS ok`;
     if (!ok) return res.status(400).json({ error: "Tanggal harus tetap di dalam bulan berjalan." });

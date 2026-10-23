@@ -306,12 +306,20 @@ function kembarPelanggan(f, pelanggan, selfId) {
 const lewatiLimit = (c, piutang) => punyaLimit(c) && piutang > c.limit;
 
 const ROLE_LABEL = {
+  super:   { id: "Super Admin", desc: "Akses penuh + kelola akun admin" },
   admin:   { id: "Admin", desc: "Akses penuh" },
   // Manajer belum punya hak hapus: selisihnya dengan staf hanya saldo awal stok
   // (POST /api/mutasi/saldo-awal). Hapus, pengguna, dan putusan = admin.
   manager: { id: "Manajer", desc: "Input & ubah + saldo awal" },
   staff:   { id: "Staf", desc: "Input & ubah" },
+  // Hanya lihat: server menolak semua penulisan (BACA_SAJA), layar menyembunyikan tombolnya.
+  viewer:  { id: "Korea", desc: "Hanya lihat" },
 };
+// Urutan sama dengan RANK di api-server.js.
+const RANK = { viewer: 1, staff: 2, manager: 3, admin: 4, super: 5 };
+const adminAtas = (u) => (RANK[u?.peran] || 0) >= RANK.admin;
+// Akun admin/super hanya bisa dibuat atau diubah super — cermin tolakKelola di server.
+const bolehKelola = (pelaku, peran) => pelaku?.peran === "super" || !adminAtas({ peran });
 
 /* ============================================================ */
 
@@ -491,8 +499,8 @@ function Aplikasi() {
     /* Menghapus penjualan/pembelian membuang juga mutasi stoknya, jadi satu klik
        yang salah menggeser saldo gudang tanpa jejak. Sejak ada usulan hapus,
        tombol langsungnya hanya untuk admin; peran lain mengajukannya lebih dulu. */
-    if (perm === "delete" || perm === "users" || perm === "putusan") return user.peran === "admin";
-    return true; // input, ubah & usul: semua peran yang login
+    if (perm === "delete" || perm === "users" || perm === "putusan") return adminAtas(user);
+    return user.peran !== "viewer"; // input, ubah & usul: semua peran kecuali viewer
   };
 
   async function doLogin(username, sandi) {
@@ -1326,6 +1334,7 @@ function PenggunaAdmin({ online, say, user, minta, reload }) {
           {STOK_TAMPIL
             ? t("admin: akses penuh (hapus, pengguna, putusan) · manager/staff: input & ubah, ajukan hapus · manager: + saldo awal stok")
             : t("admin: akses penuh (hapus, pengguna, putusan) · manager/staff: input & ubah, ajukan hapus")}<br />
+          {t("super admin: seperti admin + kelola akun admin · korea: hanya lihat semua menu kerja")}<br />
           {t("Klik baris untuk mengubah nama dan peran.")}<br />
           {t("Reset menghasilkan kata sandi sementara yang tampil sekali.")}
         </>}>
@@ -1343,7 +1352,7 @@ function PenggunaAdmin({ online, say, user, minta, reload }) {
               {(users || []).map((u) => (
                 /* Seluruh baris membuka dialog ubah. Tombol di kolom Aksi punya
                    aksinya sendiri, jadi kliknya tidak boleh menembus ke baris. */
-                <tr key={u.id} className="klik" onClick={() => setUbah(u)}>
+                <tr key={u.id} className="klik" onClick={() => (bolehKelola(user, u.peran) ? setUbah(u) : say(t("Akun admin dan super admin hanya bisa dikelola super admin."), true))}>
                   <td className="n strong">
                     <button type="button" className="namelink">{u.username}</button>
                   </td>
@@ -1353,6 +1362,8 @@ function PenggunaAdmin({ online, say, user, minta, reload }) {
                     <div className="aksi">
                       {u.id === user?.id
                         ? <span className="mut2">{t("Akun Anda")}</span>
+                        : !bolehKelola(user, u.peran)
+                        ? <span className="mut2">{t("Dikelola super admin")}</span>
                         : <>
                             <button className="btn sm" onClick={() => reset(u)}>{t("Reset Sandi")}</button>
                             <button className="btn danger sm" onClick={() => hapus(u)}>{t("Hapus")}</button>
@@ -1367,8 +1378,8 @@ function PenggunaAdmin({ online, say, user, minta, reload }) {
           </table>
         </Scroll>
       </Card>
-      {buka && <FormPengguna close={() => setBuka(false)} say={say} submit={tambah} />}
-      {ubah && <FormPengguna close={() => setUbah(null)} say={say} submit={simpanUbah} awal={ubah} sendiri={ubah.id === user?.id} />}
+      {buka && <FormPengguna close={() => setBuka(false)} say={say} submit={tambah} pelaku={user} />}
+      {ubah && <FormPengguna close={() => setUbah(null)} say={say} submit={simpanUbah} awal={ubah} sendiri={ubah.id === user?.id} pelaku={user} />}
       {sandiBaru && <SandiSementara data={sandiBaru} close={() => setSandiBaru(null)} />}
       <AksesLogAdmin online={online} say={say} users={users} />
       <PenerbitAdmin online={online} say={say} reload={reload} />
@@ -1719,7 +1730,7 @@ function FormPenerbit({ awal, close, say, submit }) {
 // `awal` diisi. Saat mengubah, username dikunci (jadi acuan login & riwayat)
 // dan kolom sandi disembunyikan — sandi diganti lewat Reset Sandi / Ganti Kata
 // Sandi. `sendiri` mengunci peran, mencerminkan penjagaan yang sama di server.
-function FormPengguna({ close, say, submit, awal, sendiri }) {
+function FormPengguna({ close, say, submit, awal, sendiri, pelaku }) {
   const { t } = useLang();
   const edit = !!awal;
   const [f, setF] = useState({
@@ -1742,7 +1753,13 @@ function FormPengguna({ close, say, submit, awal, sendiri }) {
       <Inp label={t("Nama Lengkap")} value={f.nama} onChange={set("nama")} />
       <Sel label={t("Peran")} value={f.peran} onChange={set("peran")} disabled={sendiri}
         hint={sendiri ? t("Peran akun sendiri tidak bisa diubah.") : undefined}
-        opts={[["staff", t("Staf — input & ubah")], ["manager", STOK_TAMPIL ? t("Manajer — input & ubah + saldo awal") : t("Manajer — input & ubah")], ["admin", t("Admin — akses penuh")]]} />
+        opts={[
+          ["viewer", t("Korea — hanya lihat")],
+          ["staff", t("Staf — input & ubah")],
+          ["manager", STOK_TAMPIL ? t("Manajer — input & ubah + saldo awal") : t("Manajer — input & ubah")],
+          ["admin", t("Admin — akses penuh")],
+          ["super", t("Super Admin — akses penuh + kelola akun admin")],
+        ].filter(([k]) => k === f.peran || bolehKelola(pelaku, k))} />
       {!edit && <Inp label={t("Kata Sandi")} type="password" value={f.sandi} onChange={set("sandi")}
         hint={t("Minimal 8 karakter, tanpa username. Pengguna wajib menggantinya saat pertama masuk.")} />}
     </Modal>
@@ -2075,7 +2092,7 @@ function Dasbor({ produk, penjualan, pembelian, getStok, stokTotal, cById, pById
 /* ============================ STOK ============================ */
 const MUTASI_PAGE = 50;
 
-function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, doTransfer, doAdjust, doSaldoAwal, online, say }) {
+function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, doTransfer, doAdjust, doSaldoAwal, online, say, can }) {
   const { t } = useLang();
   const [g, setG] = useState("ALL");
   const [kat, setKat] = useState("ALL");
@@ -2131,9 +2148,11 @@ function Stok({ produk, getStok, stokTotal, pById, gById, mutasi, mutasiLimit, d
           </div>
         }>
         <button className="btn" onClick={unduhExcel}>↓ Excel</button>
-        <button className="btn" onClick={() => setModal("transfer")}>{t("Transfer Antar Gudang")}</button>
-        <button className="btn" onClick={() => setModal("adjust")}>{t("Penyesuaian Stok")}</button>
-        <button className="btn" onClick={() => setModal("awal")}>{t("Saldo Awal")}</button>
+        {can("input") && <>
+          <button className="btn" onClick={() => setModal("transfer")}>{t("Transfer Antar Gudang")}</button>
+          <button className="btn" onClick={() => setModal("adjust")}>{t("Penyesuaian Stok")}</button>
+          <button className="btn" onClick={() => setModal("awal")}>{t("Saldo Awal")}</button>
+        </>}
       </SectionTitle>
 
       <div className="kpis">
@@ -2588,6 +2607,7 @@ const TombolHapus = ({ can, tunggu, onHapus, onUsul }) => {
         <button className="btn sm" disabled>{t("Menunggu Putusan")}</button>
       </span>
     );
+  if (!can("input")) return null; // viewer: hanya melihat status
   return can("delete")
     ? <button className="btn sm danger" title={t("Hapus")} onClick={onHapus}>{t("Hapus")}</button>
     : <button className="btn sm" onClick={onUsul}>{t("Usul Hapus")}</button>;
@@ -2714,7 +2734,7 @@ const bacaPeriodeUrl = () => {
    'YYYY-MM' supaya tidak ikut bergeser oleh zona waktu peramban. */
 const bisaUbahSO = (so, user) =>
   !!user && !!so &&
-  (user.peran === "admin" ||
+  (adminAtas(user) ||
     (!!so.dibuat_oleh && so.dibuat_oleh === user.id &&
       String(so.tgl).slice(0, 7) === today().slice(0, 7)));
 
@@ -3152,7 +3172,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
           </div>
         }>
         <button className="btn" onClick={unduhExcel}>↓ Excel</button>
-        <button className="btn pri" onClick={() => setBaru(true)}>{t("+ Penjualan Baru")}</button>
+        {can("input") && <button className="btn pri" onClick={() => setBaru(true)}>{t("+ Penjualan Baru")}</button>}
       </SectionTitle>
 
       <KartuUsulHapus jenis="penjualan" posisi="atas" hapusUsulan={hapusUsulan} can={can} user={user} onPutuskan={setPutusanH} />
@@ -3281,7 +3301,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
         <FormPenjualan
           close={() => setBaru(false)} pelanggan={pelanggan} produk={produk}
           piutang={piutang} say={say} submit={doCreatePenjualan}
-          nomor={(tgl) => nomorBaru("SO", penjualan, tgl)} bebasTgl={user?.peran === "admin"}
+          nomor={(tgl) => nomorBaru("SO", penjualan, tgl)} bebasTgl={adminAtas(user)}
         />
       )}
       {/* Form yang sama dipakai untuk mengubah: yang berbeda hanya nilai awal,
@@ -3298,13 +3318,13 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
       {rinci && (
         <RincianPenjualan so={rinciKini} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
           close={() => setRinci(null)} onCetak={() => { setDok(rinci); setRinci(null); }}
-          onMaju={rinciKini.status !== "lunas" ? () => { majuSO(rinciKini); setRinci(null); } : null}
-          onMundur={SO_FLOW.indexOf(rinciKini.status) > SO_FLOW.indexOf("pesanan") ? () => { mundurSO(rinciKini); setRinci(null); } : null}
+          onMaju={can("input") && rinciKini.status !== "lunas" ? () => { majuSO(rinciKini); setRinci(null); } : null}
+          onMundur={can("input") && SO_FLOW.indexOf(rinciKini.status) > SO_FLOW.indexOf("pesanan") ? () => { mundurSO(rinciKini); setRinci(null); } : null}
           /* Ubah & Hapus langsung dibuka aturan yang sama: admin, atau pembuat
              dokumen selama masih bulan berjalan. Di luar itu tombol hapusnya
              tetap berarti "Usul Hapus" dan tombol ubahnya tidak muncul. */
           onUbah={bisaUbahSO(rinci, user) ? () => { setSunting(rinci); setRinci(null); } : null}
-          hapus={{
+          hapus={can("input") && {
             label: bisaUbahSO(rinci, user) ? t("Hapus") : t("Usul Hapus"),
             tunggu: tungguHapus.has(rinci.id),
             aksi: bisaUbahSO(rinci, user)
@@ -3321,7 +3341,7 @@ function Penjualan({ penjualan, doCreatePenjualan, doUpdatePenjualan, user, doBa
              tiga kali berturut-turut, dan sisanya yang baru harus langsung
              terbaca. Membatalkan pembayaran memakai izin yang sama dengan
              mengubah dokumen — server memeriksanya lagi. */
-          onBayar={(b) => doBayar(rinciKini, b)}
+          onBayar={can("input") ? (b) => doBayar(rinciKini, b) : null}
           onHapusBayar={bisaUbahSO(rinciKini, user) ? (b) => doHapusBayar(rinciKini, b) : null} />
       )}
       {detail && (
@@ -4156,12 +4176,12 @@ function Pembelian({ user, pembelian, doCreatePembelian, pemasok, produk, pById,
           </div>
         }>
         <button className="btn" onClick={unduhExcel}>↓ Excel</button>
-        <button className="btn pri"
+        {can("input") && <button className="btn pri"
           onClick={() => {
             if (!produk.some((p) => ["casing", "bahan"].includes(p.kategori)))
               return say(t("Belum ada barang casing/bahan baku di katalog. Tambahkan dulu ke tabel produk."), true);
             setBuka(true);
-          }}>{t("+ Pembelian Baru")}</button>
+          }}>{t("+ Pembelian Baru")}</button>}
       </SectionTitle>
 
       <KartuUsulHapus jenis="pembelian" posisi="atas" hapusUsulan={hapusUsulan} can={can} user={user} onPutuskan={setPutusanH} />
@@ -4236,12 +4256,12 @@ function Pembelian({ user, pembelian, doCreatePembelian, pemasok, produk, pById,
                   <td className="r">
                     <div className="aksi">
 {/* mundur hanya setelah 'diterima' — membetulkan salah tandai pembayaran */}
-                      {PO_FLOW.indexOf(p.status) > PO_FLOW.indexOf("diterima") && (
+                      {can("input") && PO_FLOW.indexOf(p.status) > PO_FLOW.indexOf("diterima") && (
                         <button className="btn sm" title={t("Kembalikan status satu langkah")} onClick={() => mundurPO(p)}>
                           ← {t(PO_LABEL[PO_FLOW[PO_FLOW.indexOf(p.status) - 1]].id)}
                         </button>
                       )}
-                      {p.status !== "lunas" ? (
+                      {p.status !== "lunas" ? (can("input") &&
                         <button className="btn sm" onClick={() => majuPO(p)}>→ {t(PO_LABEL[PO_FLOW[PO_FLOW.indexOf(p.status) + 1]].id)}</button>
                       ) : <span className="mut">{t("selesai")}</span>}
                       <TombolHapus can={can} tunggu={tungguHapus.has(p.id)}
@@ -4432,7 +4452,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
           </div>
         }>
         <button className="btn" onClick={unduhExcel}>↓ Excel</button>
-        <button className="btn pri" onClick={() => setBuka(true)}>{t("+ Pelanggan Baru")}</button>
+        {can("input") && <button className="btn pri" onClick={() => setBuka(true)}>{t("+ Pelanggan Baru")}</button>}
       </SectionTitle>
 
       <div className="kpis">
@@ -4546,7 +4566,7 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
                     {/* tombol tidak boleh ikut membuka detail baris */}
                     <td className="r" onClick={(e) => e.stopPropagation()}>
                       <div className="aksi">
-                        <button className="btn sm" onClick={() => setUsul(c)}>{t("Usul Limit")}</button>
+                        {can("input") && <button className="btn sm" onClick={() => setUsul(c)}>{t("Usul Limit")}</button>}
                         <TombolHapus can={can} tunggu={tungguHapus.has(c.id)}
                           onHapus={() => minta(t("Hapus pelanggan {nama}?", { nama: c.nama }), () => doDeletePelanggan(c))}
                           onUsul={() => setUsulHapus(c)} />
@@ -4582,8 +4602,8 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
       {detail && (
         <DetailPelanggan c={detail} penjualan={penjualan} totalSO={totalSO} piutang={piutang} cById={cById}
           gById={gById} pById={pById} close={() => setDetail(null)}
-          onUsul={() => { setUsul(detail); setDetail(null); }}
-          onUbah={() => { setUbah(detail); setDetail(null); }}
+          onUsul={can("input") ? () => { setUsul(detail); setDetail(null); } : null}
+          onUbah={can("input") ? () => { setUbah(detail); setDetail(null); } : null}
           onPilihSO={(s) => { setRinci(s); setDetail(null); }} />
       )}
       {/* Tombol status ikut dibawa ke sini: dokumen yang mau dikirim paling
@@ -4592,13 +4612,13 @@ function Pelanggan({ pelanggan, doCreatePelanggan, doUpdatePelanggan, penjualan,
       {rinci && (
         <RincianPenjualan so={rinciKini} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
           close={() => setRinci(null)}
-          onMaju={rinciKini.status !== "lunas" ? () => { majuSO(rinciKini); setRinci(null); } : null}
-          onMundur={SO_FLOW.indexOf(rinciKini.status) > SO_FLOW.indexOf("pesanan") ? () => { mundurSO(rinciKini); setRinci(null); } : null}
+          onMaju={can("input") && rinciKini.status !== "lunas" ? () => { majuSO(rinciKini); setRinci(null); } : null}
+          onMundur={can("input") && SO_FLOW.indexOf(rinciKini.status) > SO_FLOW.indexOf("pesanan") ? () => { mundurSO(rinciKini); setRinci(null); } : null}
           /* Pembayaran dicatat tanpa menutup dialog: uang masuk sering dua
              tiga kali berturut-turut, dan sisanya yang baru harus langsung
              terbaca. Membatalkan pembayaran memakai izin yang sama dengan
              mengubah dokumen — server memeriksanya lagi. */
-          onBayar={(b) => doBayar(rinciKini, b)}
+          onBayar={can("input") ? (b) => doBayar(rinciKini, b) : null}
           onHapusBayar={bisaUbahSO(rinciKini, user) ? (b) => doHapusBayar(rinciKini, b) : null} />
       )}
     </>
@@ -4935,7 +4955,7 @@ function FormPutusan({ u, close, say, submit }) {
 }
 
 /* ============================ PIUTANG ============================ */
-function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mundurSO, user, doBayar, doHapusBayar }) {
+function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mundurSO, user, can, doBayar, doHapusBayar }) {
   const { t } = useLang();
   const [cari, setCari] = useState("");
   const [detail, setDetail] = useState(null); // pelanggan yang dibuka dari nama
@@ -5182,13 +5202,13 @@ function Piutang({ penjualan, cById, totalSO, piutang, gById, pById, majuSO, mun
       {rinci && (
         <RincianPenjualan so={rinciKini} pById={pById} cById={cById} gById={gById} totalSO={totalSO}
           close={() => setRinci(null)}
-          onMaju={rinciKini.status !== "lunas" ? () => { majuSO(rinciKini); setRinci(null); } : null}
-          onMundur={SO_FLOW.indexOf(rinciKini.status) > SO_FLOW.indexOf("pesanan") ? () => { mundurSO(rinciKini); setRinci(null); } : null}
+          onMaju={can("input") && rinciKini.status !== "lunas" ? () => { majuSO(rinciKini); setRinci(null); } : null}
+          onMundur={can("input") && SO_FLOW.indexOf(rinciKini.status) > SO_FLOW.indexOf("pesanan") ? () => { mundurSO(rinciKini); setRinci(null); } : null}
           /* Pembayaran dicatat tanpa menutup dialog: uang masuk sering dua
              tiga kali berturut-turut, dan sisanya yang baru harus langsung
              terbaca. Membatalkan pembayaran memakai izin yang sama dengan
              mengubah dokumen — server memeriksanya lagi. */
-          onBayar={(b) => doBayar(rinciKini, b)}
+          onBayar={can("input") ? (b) => doBayar(rinciKini, b) : null}
           onHapusBayar={bisaUbahSO(rinciKini, user) ? (b) => doHapusBayar(rinciKini, b) : null} />
       )}
     </>
@@ -6237,9 +6257,11 @@ function Style() {
 /* role badge */
 .vk .role{font-size:var(--asm-fs-2xs); padding:1px 7px}
 .vk .role em{font-size:var(--asm-fs-2xs)}
+.vk .r-super{background:var(--asm-danger); color:#fff; border-color:var(--asm-danger)}
 .vk .r-admin{background:var(--asm-danger-soft); color:var(--asm-danger); border-color:var(--asm-danger-border)}
 .vk .r-manager{background:var(--asm-info-soft); color:var(--asm-info); border-color:var(--asm-info-border)}
 .vk .r-staff{background:var(--asm-neutral-soft); color:var(--asm-neutral); border-color:var(--asm-neutral-border)}
+.vk .r-viewer{background:var(--asm-success-soft); color:var(--asm-success); border-color:var(--asm-success-border)}
 .vk .u-menunggu{background:var(--asm-warning-soft); color:var(--asm-warning); border-color:var(--asm-warning-border)}
 .vk .u-disetujui{background:var(--asm-success-soft); color:var(--asm-success); border-color:var(--asm-success-border)}
 .vk .u-ditolak{background:var(--asm-danger-soft); color:var(--asm-danger); border-color:var(--asm-danger-border)}
