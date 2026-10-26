@@ -116,6 +116,8 @@ export const api = {
   listPenerbit: () => j("/penerbit"),
   laporanData: () => j("/laporan-data"),
   kirimLaporanData: () => j("/laporan-data/kirim", { method: "POST" }),
+  // dokumen rencana operasi 2027 (HTML + CSS terkurung .rp27), baca semua yang login
+  rencana2027: () => j("/rencana-2027"),
   updatePenerbit: (kode, p) => j(`/penerbit/${kode}`, { method: "PUT", body: p }),
 
   // tulis
