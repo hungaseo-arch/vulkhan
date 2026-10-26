@@ -924,6 +924,7 @@ function Aplikasi() {
     ["beli", "Pembelian"],
     ["mitra", "Pelanggan"],
     ["piutang", "Piutang"],
+    ["rencana", "Rencana Operasi 2027"],
     ...(can("users") ? [["admin", "Pengguna"]] : []),
   ].filter(([k]) => !MODUL_SEMBUNYI.includes(k));
   /* modul tersembunyi, admin tanpa hak, atau page=asal → Ringkasan */
@@ -986,6 +987,7 @@ function Aplikasi() {
         {loaded && aktif === "beli" && !MODUL_SEMBUNYI.includes("beli") && <Pembelian {...ctx} />}
         {loaded && aktif === "mitra" && <Pelanggan {...ctx} />}
         {loaded && aktif === "piutang" && <Piutang {...ctx} />}
+        {loaded && aktif === "rencana" && <Rencana2027 online={online} />}
         {loaded && aktif === "admin" && can("users") && <PenggunaAdmin {...ctx} />}
       </main>
 
@@ -5275,6 +5277,52 @@ function DaftarUmur({ label, rows, close, onPilih }) {
           <button className="btn pri" onClick={close}>{t("Tutup")}</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ============================ RENCANA OPERASI 2027 ============================ */
+/* Dokumen 재생사업부 2027년 조직도 (HTML BI Ascendo) yang diimpor lewat
+   scripts/impor-rencana.mjs. Isinya datang dari /api/rencana-2027 — wajib login —
+   karena memuat nama dan jalur persetujuan internal. CSS-nya sudah terkurung di
+   `.vk .rp27`; bahasa label kartu SVG mengikuti LangSwitch aplikasi lewat
+   data-ui-lang. Isi tabel dokumen sendiri berbahasa Korea (dokumen internal). */
+function Rencana2027({ online }) {
+  const { t, lang } = useLang();
+  const [dok, setDok] = useState(null);
+  const [galat, setGalat] = useState(null);
+  const akar = useRef(null);
+  const muat = useCallback(() => {
+    if (!online) return;
+    setGalat(null);
+    api.rencana2027().then(setDok).catch((e) => setGalat(e.message));
+  }, [online]);
+  useEffect(() => { muat(); }, [muat]);
+
+  /* Tautan daftar isi (#rp27-…) digulir di tempat. Membiarkan peramban
+     mengubah hash akan menambah riwayat dan memicu popstate pada ?page=. */
+  const klik = (e) => {
+    const a = e.target.closest?.('a[href^="#"]');
+    if (!a || !akar.current?.contains(a)) return;
+    e.preventDefault();
+    akar.current.querySelector(a.getAttribute("href"))?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  if (!online)
+    return <div className="card muat-gagal" role="alert"><p>{t("Dokumen rencana hanya tersedia saat online.")}</p></div>;
+  if (galat)
+    return (
+      <div className="card muat-gagal" role="alert">
+        <b>{t("Gagal memuat dokumen")}</b>
+        <p>{galat}</p>
+        <button type="button" className="btn pri" onClick={muat}>{t("Coba lagi")}</button>
+      </div>
+    );
+  if (!dok) return <div className="muat" role="status"><span className="muat-tx">{t("Memuat dokumen…")}</span></div>;
+  return (
+    <div className="rp27" data-ui-lang={lang === "ko" ? "ko" : "id"} ref={akar} onClick={klik}>
+      <style>{dok.css}</style>
+      <div dangerouslySetInnerHTML={{ __html: dok.html }} />
     </div>
   );
 }

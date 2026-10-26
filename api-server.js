@@ -12,6 +12,7 @@ import crypto from "crypto";
 import { fileURLToPath } from "url";
 import { neon, types } from "@neondatabase/serverless";
 import { susunLaporan, bagiPerPenerima, penerimaDariEnv, smtpSiap, kirimLaporan } from "./laporan-data.js";
+import RENCANA_2027 from "./konten/rencana-2027-organisasi.js";
 
 // Kembalikan kolom DATE (oid 1082) apa adanya sebagai 'YYYY-MM-DD'.
 // Tanpa ini, driver mem-parsing ke JS Date dan menggeser tanggal karena
@@ -972,6 +973,15 @@ const kirimSekarang = async (res) => {
 
 // Admin bisa memicu kiriman di luar jadwal, mis. untuk mencoba pengaturan SMTP.
 app.post("/api/laporan-data/kirim", requireRole("admin"), wrap((_req, res) => kirimSekarang(res)));
+
+// Rencana operasi 2027 (조직도 재생사업부). Isinya nama, jabatan, dan jalur
+// persetujuan internal, jadi dilayani lewat /api yang wajib login — bukan
+// ditanam di bundel JS atau public/, yang bisa diunduh tanpa sesi.
+// Konten statis: dibuat ulang dengan scripts/impor-rencana.mjs.
+app.get("/api/rencana-2027", (_req, res) => {
+  res.set("Cache-Control", "no-store, private");
+  res.json(RENCANA_2027);
+});
 
 /* Dipanggil cron Vercel (vercel.json, Senin 08.00 WIB). Vercel mengirim
    "Authorization: Bearer <CRON_SECRET>"; tanpa CRON_SECRET rute ini tertutup. */
