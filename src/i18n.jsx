@@ -752,6 +752,29 @@ const polos = (s) => {
 const isi = (s, p) =>
   p ? s.replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : s;
 
+/* terjemahkan ke bahasa tertentu tanpa menunggu render ulang — dipakai saat
+   login, ketika bahasa baru diset dan pesan sambutan dibuat di klik yang sama */
+export const terjemah = (lang, s, p) => isi(KAMUS[lang]?.[s] ?? polos(s), p);
+
+/* Bahasa awal sesudah login: empat orang Korea memakai bahasa Korea, sisanya
+   Indonesia. Tombol bahasa di header tetap bisa menggantinya sesudahnya.
+   Nama akun bisa ditulis dalam Hangul atau Latin, urutan marga bebas
+   ("Seo Jonghwan" / "JONGHWAN SEO" / "jonghwan"), jadi yang dicocokkan
+   adalah nama Hangul utuh atau nama depan Latinnya di nama/username. */
+const ORANG_KOREA = [
+  ["서종환", ["jonghwan", "jhseo"]], // username akun Super Admin
+  ["김재헌", ["jaeheon", "jaehun", "jhkim"]],
+  ["진화석", ["hwaseok", "hwasuk", "hsjin"]],
+  ["서정재", ["jeongjae", "jungjae", "jjseo"]],
+];
+const rata = (s) => String(s || "").toLowerCase().replace(/[^a-z가-힣]/g, "");
+export const bahasaPengguna = (u) => {
+  const teks = [rata(u?.nama), rata(u?.username)];
+  const korea = ORANG_KOREA.some(([hangul, latin]) =>
+    teks.some((x) => x.includes(hangul) || latin.some((l) => x.includes(l))));
+  return korea ? "ko" : "id";
+};
+
 const Ctx = createContext(null);
 
 export function LangProvider({ children }) {
@@ -767,7 +790,7 @@ export function LangProvider({ children }) {
     document.documentElement.lang = lang;
   }, [lang]);
 
-  const t = (s, p) => isi(KAMUS[lang]?.[s] ?? polos(s), p);
+  const t = (s, p) => terjemah(lang, s, p);
 
   return <Ctx.Provider value={{ lang, setLang, t }}>{children}</Ctx.Provider>;
 }

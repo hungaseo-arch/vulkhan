@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useId, useCallback } from "react";
 import { api } from "./api";
 import { downloadXlsx, downloadXlsxBook } from "./xlsx";
-import { LangProvider, useLang, LANGS } from "./i18n.jsx";
+import { LangProvider, useLang, LANGS, terjemah, bahasaPengguna } from "./i18n.jsx";
 
 /* ============================================================
    VULKANISIR — Sistem Manajemen Penjualan Ban Vulkanisir
@@ -441,7 +441,7 @@ const bacaHalaman = () => new URLSearchParams(window.location.search).get("page"
 const JUDUL_ASLI = typeof document === "undefined" ? "VULKHAN" : document.title;
 
 function Aplikasi() {
-  const { t, lang } = useLang();
+  const { t, lang, setLang } = useLang();
   bahasaAngka = lang;
   const [tab, setTabState] = useState(bacaHalaman);
   const setTab = (k, extra) => {
@@ -508,10 +508,12 @@ function Aplikasi() {
     return api.login(username, sandi); // lempar error bila salah
   }
   const login = (u) => {
+    const bhs = bahasaPengguna(u);
+    setLang(bhs);
     setUser(u);
     api.setToken(u.token);
     try { localStorage.setItem("vk_user", JSON.stringify(u)); } catch { /* noop */ }
-    say(t("Selamat datang, {nama}.", { nama: u.nama }));
+    say(terjemah(bhs, "Selamat datang, {nama}.", { nama: u.nama }));
   };
   /* Server menerbitkan token baru setelah ganti sandi: token lama membawa
      tanda mc (must_change) dan akan terus ditolak. */
