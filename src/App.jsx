@@ -325,15 +325,15 @@ const bolehKelola = (pelaku, peran) => pelaku?.peran === "super" || !adminAtas({
 
 /* Modul yang untuk sementara disembunyikan dari menu.
 
-   Gudang & pembelian tidak dipakai: buku mutasinya sudah dikosongkan
-   (migrations/2026-09-15-reset-stok-pembelian) dan akan dimulai lagi dari
-   pengisian saldo awal kalau nanti dipakai. Sampai saat itu layarnya hanya
-   menampilkan nol dan tabel kosong, yang lebih membingungkan daripada tidak
-   ada sama sekali.
+   Pembelian tidak dipakai: bukunya sudah dikosongkan
+   (migrations/2026-09-15-reset-stok-pembelian). Sampai dipakai lagi layarnya
+   hanya menampilkan nol dan tabel kosong, yang lebih membingungkan daripada
+   tidak ada sama sekali. Stok gudang sudah dibuka kembali dan dimulai dari
+   pengisian saldo awal.
 
    Ini semata soal tampilan — kodenya utuh, datanya utuh, dan tidak ada
    endpoint yang ditutup. Untuk mengembalikannya: kosongkan daftar ini. */
-const MODUL_SEMBUNYI = ["stok", "beli"];
+const MODUL_SEMBUNYI = ["beli"];
 /* Hak khusus manajer (saldo awal stok) hanya disebut bila modul stok tampil —
    kalau tidak, kartu peran menyebut fitur yang tak bisa ditemukan di layar. */
 const STOK_TAMPIL = !MODUL_SEMBUNYI.includes("stok");
