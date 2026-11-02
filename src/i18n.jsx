@@ -503,7 +503,7 @@ const KO = {
   "Pelanggan belum lengkap: {a} · Dugaan kembar: {b} · Produk belum lengkap: {c}": "고객 정보 미비: {a} · 중복 의심: {b} · 제품 정보 미비: {c}",
   "Isi tanggal pengiriman.": "출고일을 입력하세요",
   "Hanya untuk dokumen yang sudah dikirim.": "출고 상태인 문서에만 적용됩니다",
-  "Tanggal kirim tidak boleh mundur ke bulan sebelum tanggal dokumen ({tgl}).": "출고일은 문서일({tgl})보다 앞선 달로 갈 수 없습니다",
+  "Tanggal kirim lintas bulan paling lama 2 hari sebelum tanggal dokumen ({tgl}).": "출고일이 이전 달이면 문서일({tgl})보다 최대 2일까지만 앞설 수 있습니다",
 
   /* ---------- formulir penjualan ---------- */
   "Penawaran Baru": "새 견적",

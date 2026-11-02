@@ -1438,7 +1438,9 @@ const SO_FLOW = ["penawaran", "pesanan", "kirim", "tagihan", "lunas"];
    jadi tanggal kirim boleh lebih tua dari tanggal dokumen — asal masih di
    bulan yang sama. Mundur lintas bulan ditolak: mutasi stok lahir pada tanggal
    kirim, dan menggesernya ke bulan lalu mengubah angka bulan yang mungkin
-   sudah dilaporkan. Tanggal kirim sesudah tanggal dokumen selalu boleh.
+   sudah dilaporkan. Pengecualiannya kelonggaran dua hari: barang yang keluar
+   Sabtu/Minggu di akhir bulan baru dicatat Senin di bulan berikutnya.
+   Tanggal kirim sesudah tanggal dokumen selalu boleh.
 
    Perbandingannya dikerjakan Postgres, sama seperti aturan bulan berjalan:
    satu jam saja yang dipercaya, jam Jakarta milik server. */
@@ -1446,8 +1448,9 @@ async function tolakTglKirim(tglKirim, tglDok) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(tglKirim)) return "Tanggal kirim tidak valid.";
   const [{ ok }] = await sql`
     SELECT ${tglKirim}::date >= ${tglDok}::date
-        OR date_trunc('month', ${tglKirim}::date) = date_trunc('month', ${tglDok}::date) AS ok`;
-  return ok ? null : `Tanggal kirim tidak boleh mundur ke bulan sebelum tanggal dokumen (${tglDok}).`;
+        OR date_trunc('month', ${tglKirim}::date) = date_trunc('month', ${tglDok}::date)
+        OR ${tglKirim}::date >= ${tglDok}::date - 2 AS ok`;
+  return ok ? null : `Tanggal kirim lintas bulan paling lama 2 hari sebelum tanggal dokumen (${tglDok}).`;
 }
 const PO_FLOW = ["order", "diterima", "lunas"];
 // Mengembalikan pesan error bila perpindahan tidak sah, atau null bila sah.

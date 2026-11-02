@@ -69,11 +69,13 @@ const WIB_OFFSET = 7 * 60 * 60 * 1000;
 const today = () => new Date(Date.now() + WIB_OFFSET).toISOString().slice(0, 10);
 
 /* Tanggal kirim boleh lebih tua dari tanggal dokumen asal masih di bulan yang
-   sama; sesudah tanggal dokumen selalu boleh — sama persis dengan
+   sama, atau paling lama 2 hari (penjualan akhir pekan yang dicatat Senin di
+   bulan baru); sesudah tanggal dokumen selalu boleh — sama persis dengan
    tolakTglKirim() di api-server.js. Server tetap yang memutuskan, ini hanya
    supaya penolakannya terbaca sebelum tombolnya ditekan. */
 const tglKirimSah = (kirim, dok) =>
-  String(kirim) >= String(dok) || String(kirim).slice(0, 7) === String(dok).slice(0, 7);
+  String(kirim) >= String(dok) || String(kirim).slice(0, 7) === String(dok).slice(0, 7)
+  || Date.parse(dok) - Date.parse(kirim) <= 2 * 86400000;
 
 /* Nomor dokumen berurutan: PREFIX-YYMM-### berdasarkan nomor tertinggi yang
    sudah ada pada bulan yang sama — menghindari tabrakan nomor acak. */
@@ -1200,14 +1202,15 @@ function Konfirmasi({ msg, onYes, close, say, tajuk, labelAksi, alasan: pakaiAla
 /* Tanggal pengiriman — ditanyakan sekali, saat dokumen berpindah ke 'kirim'.
    Aturannya barang keluar di hari yang sama dengan dokumennya, jadi bawaannya
    tanggal SO; diubah hanya bila memang terlambat. Tanggal yang lebih tua dari
-   dokumennya diterima selama masih di bulan yang sama. */
+   dokumennya diterima selama masih di bulan yang sama atau mundur paling lama
+   2 hari. */
 function FormTglKirim({ so, submit, say, close }) {
   const { t } = useLang();
   const [tgl, setTgl] = useState(so.tgl || today());
   const kirim = async () => {
     if (!tgl) return say(t("Isi tanggal pengiriman."), true);
     if (!tglKirimSah(tgl, so.tgl))
-      return say(t("Tanggal kirim tidak boleh mundur ke bulan sebelum tanggal dokumen ({tgl}).", { tgl: so.tgl }), true);
+      return say(t("Tanggal kirim lintas bulan paling lama 2 hari sebelum tanggal dokumen ({tgl}).", { tgl: so.tgl }), true);
     try { await submit(tgl); } catch (e) { say(e.message, true); }
   };
   return (
@@ -4018,7 +4021,7 @@ function FormPenjualan({ close, pelanggan, produk, piutang, say, submit, nomor, 
     if (valid.some((i) => !(Number(i.harga) >= 0))) return say(t("Harga harus berupa angka."), true);
     if (lewatLimit) return say(t("Melebihi limit kredit {nama} sebesar {v}.", { nama: tagih.nama, v: rp(-sisaLimit) }), true);
     if (dikirim && f.tglKirim && !tglKirimSah(f.tglKirim, awal.tgl))
-      return say(t("Tanggal kirim tidak boleh mundur ke bulan sebelum tanggal dokumen ({tgl}).", { tgl: awal.tgl }), true);
+      return say(t("Tanggal kirim lintas bulan paling lama 2 hari sebelum tanggal dokumen ({tgl}).", { tgl: awal.tgl }), true);
     // Harga 0 sah (barang bonus/garansi) tapi lebih sering lupa diisi — tanya sekali.
     const nol = valid.filter((i) => Number(i.harga) === 0).length;
     if (nol && !lanjutNol) return setTanyaNol(nol);
