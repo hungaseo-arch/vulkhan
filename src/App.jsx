@@ -478,7 +478,14 @@ function Aplikasi() {
   const online = conn === "online";
 
   /* ---------- sesi login ---------- */
+  /* Tautan "?guest=1": sesi tamu hanya-baca sehari (sementara, s.d. 2026-11-20;
+     batas sebenarnya dijaga server di /api/guest-login). Sesi tamu tidak
+     disimpan ke localStorage, jadi tidak menimpa/mewarisi login asli. */
+  const [modeTamu] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get("guest") === "1"; } catch { return false; }
+  });
   const [user, setUser] = useState(() => {
+    if (modeTamu) return null;
     try { return JSON.parse(localStorage.getItem("vk_user")) || null; } catch { return null; }
   });
   const [konfirmasi, setKonfirmasi] = useState(null); // { msg, onYes }
@@ -528,7 +535,7 @@ function Aplikasi() {
   const logout = () => {
     // Dicatat di log akses; header Authorization sudah terbentuk sebelum
     // setToken(null) di bawah. Gagal (mis. sesi sudah habis) diabaikan.
-    if (online) api.logout().catch(() => {});
+    if (online && !user?.tamu) api.logout().catch(() => {});
     setUser(null);
     api.setToken(null);
     try { localStorage.removeItem("vk_user"); } catch { /* noop */ }
@@ -595,7 +602,19 @@ function Aplikasi() {
     setConn("loading");
     return api.ping().then(() => setConn("online"), () => setConn("offline"));
   };
-  useEffect(() => { if (user) setConn("online"); else cekKoneksi(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (modeTamu) {
+      // Gagal (mis. sudah lewat 2026-11-20 → 403, atau server mati) → layar login biasa.
+      api.guestLogin().then((u) => {
+        setLang(bahasaPengguna(u));
+        api.setToken(u.token);
+        setUser(u);
+        setConn("online");
+      }, () => cekKoneksi());
+      return;
+    }
+    if (user) setConn("online"); else cekKoneksi();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* 2) muat data setelah ada sesi. Sesi kedaluwarsa (401) → login ulang.
         Galat lain tidak lagi hanya jadi toast: layar tetap di kerangka

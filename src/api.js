@@ -79,6 +79,8 @@ export const api = {
 
   // auth & pengguna
   login: (username, sandi) => j("/login", { method: "POST", body: { username, sandi } }),
+  // sesi tamu hanya-baca sementara (?guest=1); server menolak setelah 2026-11-20
+  guestLogin: () => j("/guest-login", { method: "POST" }),
   // hanya mencatat di log akses; token tetap sah sampai kedaluwarsa
   logout: () => j("/logout", { method: "POST" }),
   aksesLog: (q = {}) => j("/akses-log?" + new URLSearchParams(q)),
