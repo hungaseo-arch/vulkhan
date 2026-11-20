@@ -60,34 +60,18 @@ app.use("/api", (_req, res, next) => { res.set("Cache-Control", "no-store, priva
 // Pengecualian: /login (belum punya token) dan /health (cek koneksi sebelum login),
 // serta cron Vercel yang membawa CRON_SECRET sendiri (diperiksa di rutenya).
 // Ditaruh sebelum penyiapan basis data agar permintaan anonim tidak menyentuh DB.
-const TERBUKA = new Set(["/api/login", "/api/health", "/api/guest-login", "/api/cron/laporan-data"]);
+const TERBUKA = new Set(["/api/login", "/api/health", "/api/cron/laporan-data"]);
 // Peran viewer ("Korea") hanya membaca: semua permintaan selain GET ditolak di
 // sini, kecuali keluar dan ganti sandi miliknya sendiri.
 const BACA_SAJA_BOLEH = new Set(["/api/logout", "/api/ganti-sandi"]);
 app.use((req, res, next) => (TERBUKA.has(req.path) ? next() : requireRole("viewer")(req, res, () => {
   if (req.user.peran === "viewer" && req.method !== "GET" && req.method !== "HEAD" && !BACA_SAJA_BOLEH.has(req.path))
     return res.status(403).json({ error: "Peran ini hanya bisa melihat data.", code: "BACA_SAJA" });
-  // Token tamu (lihat /api/guest-login) benar-benar hanya baca: tak ada pengecualian,
-  // termasuk /logout dan /ganti-sandi yang akan menulis ke tabel pengguna/akses.
-  if (req.user.tamu && req.method !== "GET" && req.method !== "HEAD")
-    return res.status(403).json({ error: "Akses tamu hanya untuk melihat data.", code: "BACA_SAJA" });
   next();
 })));
 
 // Cek koneksi, dipakai layar login sebelum ada sesi.
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
-
-// Sesi tamu hanya-baca (sementara, lihat TAMU_BERLAKU_SAMPAI). Tanpa kredensial,
-// peran viewer, exp = min(sekarang + 12 jam, batas akhir). Tidak menyentuh DB — sengaja ditaruh sebelum ensureReady.
-app.post("/api/guest-login", (_req, res) => {
-  const sekarang = Date.now();
-  if (sekarang > TAMU_BERLAKU_SAMPAI)
-    return res.status(403).json({ error: "Akses tamu sudah berakhir.", code: "TAMU_BERAKHIR" });
-  const u = { id: "TAMU", username: "tamu", nama: "Tamu (hanya baca)", peran: "viewer", must_change: false };
-  const exp = Math.min(sekarang + TOKEN_TTL, TAMU_BERLAKU_SAMPAI);
-  res.json({ ...u, tamu: true, token: signToken(u, exp, true) });
-});
-
 
 // Seed pengguna bawaan sekali (memoized) — berjalan di lokal & serverless.
 // Reset ke null bila gagal agar dicoba lagi pada request berikutnya.
@@ -169,21 +153,12 @@ if (!process.env.AUTH_SECRET)
   console.warn("⚠  AUTH_SECRET tak diset — token jadi tak valid tiap restart. Set AUTH_SECRET untuk produksi.");
 const TOKEN_TTL = 12 * 3600 * 1000; // 12 jam
 
-/* AKSES TAMU SEHARI — SEMENTARA, HAPUS SESUDAH 2026-11-20.
-   Untuk presentasi 2026-11-20: tautan "?guest=1" masuk tanpa login, hanya baca,
-   dengan data asli (tanpa masking). Batas akhir di bawah ini SATU-SATUNYA
-   sumber kebenaran: lewat dari ini /api/guest-login menjawab 403 dan token
-   tamu yang sudah terbit pun kedaluwarsa (exp dibatasi ke sini). Untuk menutup
-   lebih awal cukup ubah konstanta ini ke waktu lampau lalu deploy ulang;
-   setelah acara, hapus konstanta, rute /api/guest-login, dan cabang `tamu`. */
-const TAMU_BERLAKU_SAMPAI = Date.parse("2026-11-20T23:59:59+07:00");
-
 // `mc` = must_change: sesi sandi sementara. Selama itu hanya /ganti-sandi
 // yang terbuka — lihat requireRole. Ditaruh di token, bukan dibaca dari DB per
 // permintaan, supaya penjaga global tidak menambah satu kueri di setiap rute.
-const signToken = (u, exp = Date.now() + TOKEN_TTL, tamu = false) => {
+const signToken = (u) => {
   const body = Buffer.from(JSON.stringify({
-    id: u.id, username: u.username, peran: u.peran, mc: !!u.must_change, exp, ...(tamu ? { tamu: true } : {}),
+    id: u.id, username: u.username, peran: u.peran, mc: !!u.must_change, exp: Date.now() + TOKEN_TTL,
   })).toString("base64url");
   const sig = crypto.createHmac("sha256", AUTH_SECRET).update(body).digest("base64url");
   return body + "." + sig;
